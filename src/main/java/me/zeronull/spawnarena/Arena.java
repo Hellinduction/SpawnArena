@@ -235,6 +235,19 @@ public abstract class Arena extends ArenaOptions {
                     || SpawnArena.arenas.hasFighter(p);
         }
 
+        /** Sends non-fighters out of this one arena only. */
+        public static void kickOutLingeringPlayers(final Arena arena) {
+            if (!WORLD_EDIT_SUPPORT)
+                return;
+
+            for (final Player p : Bukkit.getOnlinePlayers()) {
+                if (isExemptFromKickOut(p))
+                    continue;
+                if (arena.equals(SpawnArena.arenas.of(p.getLocation())))
+                    arena.kickOut(p);
+            }
+        }
+
         public static void kickOutLingeringPlayer(final Player p) {
             if (!WORLD_EDIT_SUPPORT)
                 return;

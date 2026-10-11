@@ -167,7 +167,7 @@ public class Fight {
 
     public void startFight() {
         this.fightState = FightState.PRE_FIGHT_START;
-        Arena.ArenaUtils.kickOutLingeringPlayers();
+        Arena.ArenaUtils.kickOutLingeringPlayers(this.arena);
 
         this.color = this.getRandomColor();
 
