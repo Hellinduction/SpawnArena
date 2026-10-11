@@ -35,7 +35,7 @@ public final class ArenaConfig {
     public boolean giveKnockBackStick;
 
     @Comment("Money (via Vault) paid to the winner of a fight. 0 disables it.")
-    public double winReward = 5000;
+    public double winReward = 50000;
 
     @Comment("Minutes before the same player can earn this arena's win reward again")
     public int winRewardCooldownMinutes = 120;
