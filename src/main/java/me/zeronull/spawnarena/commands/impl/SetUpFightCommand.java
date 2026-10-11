@@ -25,6 +25,11 @@ public final class SetUpFightCommand extends ArenaTabComplete implements Command
             return true;
         }
 
+        if (!SpawnArena.settings.arenasOpen) {
+            sender.sendMessage(ChatColor.RED + "The arenas are closed. Open them with /arenalock off first.");
+            return true;
+        }
+
         final String arenaName = args[0];
         final Arena arena = SpawnArena.arenas.of(arenaName);
 

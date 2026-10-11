@@ -38,6 +38,9 @@ public class ArenaPlayerLeaveAreaEvent implements Listener {
             return;
         }
 
+        if (fight.isSpawnTeleport(player, event.getTo()))
+            return;
+
         final Material type = event.getTo().clone().add(0, 0.5, 0).getBlock().getType();
         if (event.getCause() == TeleportCause.ENDER_PEARL && type.isSolid()) {
             event.setCancelled(true);
@@ -52,7 +55,14 @@ public class ArenaPlayerLeaveAreaEvent implements Listener {
         if (event.getCause() == TeleportCause.COMMAND || event.getCause() == TeleportCause.PLUGIN || event.getCause() == TeleportCause.UNKNOWN) {
             fight.announceWinner(player);
             fight.endFight();
+            return;
         }
+
+        // Anything else (pearls thrown before the fight that land after it starts, chorus fruit,
+        // portals, ...) must not carry a fighter out of the arena
+        event.setCancelled(true);
+        if (event.getCause() == TeleportCause.ENDER_PEARL)
+            player.getInventory().addItem(new ItemStack(Material.ENDER_PEARL, 1));
     }
 
     @EventHandler

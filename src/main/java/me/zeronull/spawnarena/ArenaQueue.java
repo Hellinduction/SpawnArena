@@ -4,6 +4,7 @@ import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 public class ArenaQueue {
@@ -37,7 +38,17 @@ public class ArenaQueue {
         return playerQueue.contains(player);
     }
 
+    /** Empties the queue and returns who was in it. */
+    public List<Player> clear() {
+        final List<Player> removed = new ArrayList<>(playerQueue);
+        removed.forEach(this::removePlayer);
+        return removed;
+    }
+
     public void tryStartFight() {
+        if (SpawnArena.settings != null && !SpawnArena.settings.arenasOpen)
+            return;
+
         boolean noCurrentFight = arena.getFights().isEmpty();
 //        boolean noCurrentFight = arena.arenaState == ArenaState.EMPTY;
 

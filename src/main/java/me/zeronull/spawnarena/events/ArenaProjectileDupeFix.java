@@ -4,87 +4,91 @@ import me.zeronull.spawnarena.Arena;
 import me.zeronull.spawnarena.Fight;
 import me.zeronull.spawnarena.FightState;
 import me.zeronull.spawnarena.SpawnArena;
-import org.bukkit.entity.*;
+import org.bukkit.entity.AbstractArrow;
+import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.player.PlayerPickupArrowEvent;
 import org.bukkit.projectiles.ProjectileSource;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.UUID;
+import java.util.*;
 
+/**
+ * Fighters' inventories are snapshotted before a fight and restored after it, so any trident/arrow
+ * thrown during the fight that survives the fight is a duplicate (loyalty tridents fly back to the
+ * owner, stuck ones can be picked up). Every projectile a fighter launches is tracked and deleted
+ * when their fight ends.
+ */
 public final class ArenaProjectileDupeFix implements Listener {
-    private final List<Projectile> thrownProjectiles = new ArrayList<>();
+    private static final Map<UUID, Set<Projectile>> TRACKED = new HashMap<>();
 
-    @EventHandler
-    public void onProjectileLaunch(final ProjectileLaunchEvent e) {
-        final Entity entity = e.getEntity();
-
-        if (entity.getType() != EntityType.TRIDENT && !entity.getType().name().contains("ARROW"))
+    public static void discardProjectiles(final Player fighter) {
+        if (fighter == null)
             return;
 
-        final Projectile projectile = (Projectile) entity;
-        final ProjectileSource shooterEntity = projectile.getShooter();
-
-        if (shooterEntity == null)
+        final Set<Projectile> projectiles = TRACKED.remove(fighter.getUniqueId());
+        if (projectiles == null)
             return;
 
-        if (!(shooterEntity instanceof Player))
-            return;
-
-        final Player shooter = (Player) shooterEntity;
-        final Arena arena = SpawnArena.arenas.of(shooter);
-
-        if (arena != null && arena.getFight(shooter) != null && arena.getFight(shooter).getState() != FightState.IN_FIGHT) {
-            e.setCancelled(true);
-            return;
+        for (final Projectile projectile : projectiles) {
+            if (projectile.isValid())
+                projectile.remove();
         }
-
-        if (!SpawnArena.arenas.hasActiveFight())
-            return;
-
-        if (!SpawnArena.arenas.hasFighter(shooter))
-            return;
-
-        if (!this.thrownProjectiles.contains(projectile))
-            this.thrownProjectiles.add(projectile);
     }
 
-    @EventHandler
+    private static boolean isTracked(final Projectile projectile) {
+        for (final Set<Projectile> set : TRACKED.values()) {
+            if (set.contains(projectile))
+                return true;
+        }
+        return false;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onProjectileLaunch(final ProjectileLaunchEvent e) {
+        if (!(e.getEntity() instanceof AbstractArrow projectile)) // arrows, spectral arrows and tridents
+            return;
+
+        final ProjectileSource source = projectile.getShooter();
+        if (!(source instanceof Player shooter))
+            return;
+
+        if (!SpawnArena.arenas.hasActiveFight() || !SpawnArena.arenas.hasFighter(shooter))
+            return;
+
+        TRACKED.computeIfAbsent(shooter.getUniqueId(), k -> new HashSet<>()).add(projectile);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onProjectileLaunchBeforeFight(final ProjectileLaunchEvent e) {
+        if (!(e.getEntity() instanceof AbstractArrow) && !(e.getEntity() instanceof org.bukkit.entity.EnderPearl))
+            return;
+        if (!(e.getEntity().getShooter() instanceof Player shooter))
+            return;
+
+        final Arena arena = SpawnArena.arenas.of(shooter);
+        if (arena != null && arena.getFight(shooter) != null && arena.getFight(shooter).getState() != FightState.IN_FIGHT)
+            e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerPickupArrow(final PlayerPickupArrowEvent e) {
         final AbstractArrow arrow = e.getArrow();
 
-        if (!this.thrownProjectiles.contains(arrow))
+        if (!isTracked(arrow))
             return;
 
-        final Player p = e.getPlayer();
-        final UUID uuid = p.getUniqueId();
-
-        final ProjectileSource source = arrow.getShooter();
-
-        if (source instanceof Player) {
-            final Player shooter = (Player) source;
+        // Only the two fighters of a running fight may pick up projectiles from that fight
+        if (arrow.getShooter() instanceof Player shooter) {
             final Arena arena = SpawnArena.arenas.of(shooter);
+            final Fight fight = arena == null ? null : arena.getFight(shooter);
 
-            if (arena != null && arena.getFight(shooter) != null) {
-                final Fight fight = arena.getFight(shooter);
-
-                if (fight.getState() == FightState.IN_FIGHT && !fight.isFighter(p))
-                    e.setCancelled(true);
-            }
+            if (fight != null && fight.getState() == FightState.IN_FIGHT && fight.isFighter(e.getPlayer()))
+                return;
         }
-
-        final long now = Instant.now().getEpochSecond();
-        final long then = ArenaPlayerConsumeEvent.PLAYER_FINISH_GAME_MAP.getOrDefault(uuid, 0L);
-        final long diff = now - then;
-
-        final boolean before5SecondsAgo = diff < 5;
-
-        if (!before5SecondsAgo)
-            return;
 
         e.setCancelled(true);
         arrow.remove();

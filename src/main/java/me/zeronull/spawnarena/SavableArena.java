@@ -133,6 +133,22 @@ public final class SavableArena extends Arena {
         return this;
     }
 
+    /** Re-reads this arena's file and applies it without writing anything back. */
+    public void reloadFromDisk() {
+        final ArenaConfig config = getArenaConfig(this.getConfigFile());
+
+        super.setSpawnPoint1(config.spawnPoint1);
+        super.setSpawnPoint2(config.spawnPoint2);
+        super.setShouldClearItems(config.shouldClearItems);
+        super.setAllowDamage(config.allowDamage);
+        super.setAllowPvp(config.allowPvp);
+        super.setDeathOnTouchLiquid(config.deathOnTouchLiquid);
+        super.setWinOnStepStonePressurePlate(config.winOnStepStonePressurePlate);
+        super.setGiveKnockBackStick(config.giveKnockBackStick);
+        super.setArenaMode(config.arenaMode);
+        this.setWinReward(config.winReward, config.winRewardCooldownMinutes);
+    }
+
     public File getConfigFile() {
         final File configFile = new File(ARENAS_DIR, this.configName);
         return configFile;

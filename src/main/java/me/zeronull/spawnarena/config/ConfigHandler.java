@@ -4,7 +4,9 @@ import de.exlll.configlib.YamlConfigurationProperties;
 import de.exlll.configlib.YamlConfigurations;
 import me.zeronull.spawnarena.*;
 import me.zeronull.spawnarena.config.impl.ArenaConfig;
+import me.zeronull.spawnarena.config.impl.DatabaseConfig;
 import me.zeronull.spawnarena.config.impl.PreFightConfig;
+import me.zeronull.spawnarena.config.impl.SettingsConfig;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -92,11 +94,32 @@ public class ConfigHandler {
             arena.setWinOnStepStonePressurePlate(config.winOnStepStonePressurePlate);
             arena.setGiveKnockBackStick(config.giveKnockBackStick);
             arena.setArenaMode(config.arenaMode);
+            arena.setWinReward(config.winReward, config.winRewardCooldownMinutes);
 
             arenas.add(arena);
         }
 
         return arenas;
+    }
+
+    public SettingsConfig getSettingsConfig() {
+        final SpawnArena plugin = SpawnArena.getPlugin(SpawnArena.class);
+        final java.nio.file.Path file = new File(plugin.getDataFolder(), "settings.yml").toPath();
+        YamlConfigurations.update(file, SettingsConfig.class, SettingsConfig.PROPERTIES);
+        return YamlConfigurations.load(file, SettingsConfig.class, SettingsConfig.PROPERTIES);
+    }
+
+    public void saveSettingsConfig(final SettingsConfig settings) {
+        final SpawnArena plugin = SpawnArena.getPlugin(SpawnArena.class);
+        final java.nio.file.Path file = new File(plugin.getDataFolder(), "settings.yml").toPath();
+        YamlConfigurations.save(file, SettingsConfig.class, settings, SettingsConfig.PROPERTIES);
+    }
+
+    public DatabaseConfig getDatabaseConfig() {
+        final SpawnArena plugin = SpawnArena.getPlugin(SpawnArena.class);
+        final java.nio.file.Path file = new File(plugin.getDataFolder(), "database.yml").toPath();
+        YamlConfigurations.update(file, DatabaseConfig.class, DatabaseConfig.PROPERTIES);
+        return YamlConfigurations.load(file, DatabaseConfig.class, DatabaseConfig.PROPERTIES);
     }
 
     public void register(final UUID uuid, final PlayerPreFightData data) {

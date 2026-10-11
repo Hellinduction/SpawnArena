@@ -9,7 +9,7 @@ import org.bukkit.event.player.PlayerTeleportEvent;
 
 public class TeleportKickOut implements Listener {
 
-    @EventHandler
+    @EventHandler(ignoreCancelled = true)
     public void onTeleport(PlayerTeleportEvent event) {
         Player player = event.getPlayer();
 

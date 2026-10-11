@@ -31,8 +31,14 @@ public final class ArenaConfig {
     @Comment("Should a fighter win against their opponent if they stand on a stone pressure plate?")
     public boolean winOnStepStonePressurePlate;
 
-    @Comment("Should it give the fighters knockback stick when they are first teleported into the arena")
+    @Comment("Should it give the fighters a knockback fish (tropical fish) when they are first teleported into the arena")
     public boolean giveKnockBackStick;
+
+    @Comment("Money (via Vault) paid to the winner of a fight. 0 disables it.")
+    public double winReward = 5000;
+
+    @Comment("Minutes before the same player can earn this arena's win reward again")
+    public int winRewardCooldownMinutes = 120;
 
     @Comment("Mode of the arena: SINGLE, MULTI")
     public String arenaMode = ArenaMode.SINGLE.toString();

@@ -13,7 +13,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public abstract class Arena extends ArenaOptions {
-    public static final String SPAWN_WORLD = "SpawnWorld";
+    /** Loaded from settings.yml on enable. */
+    public static String SPAWN_WORLD = "Spawn";
     public ArenaQueue queue;
     protected String arenaName;
     protected Location spawnPoint1;
@@ -92,6 +93,35 @@ public abstract class Arena extends ArenaOptions {
 
     public void setQueue(ArenaQueue queue) {
         this.queue = queue;
+    }
+
+    /**
+     * Horizontal distance from {@code loc} to this arena's WorldGuard region (0 inside its bounds).
+     * Falls back to the nearest spawn point without a region, and is infinite from another world.
+     */
+    public double distanceFrom(final Location loc) {
+        if (this.spawnPoint1 == null || loc.getWorld() == null || !loc.getWorld().equals(this.spawnPoint1.getWorld()))
+            return Double.POSITIVE_INFINITY;
+
+        if (ArenaUtils.WORLD_EDIT_SUPPORT) {
+            final com.sk89q.worldguard.protection.managers.RegionManager manager =
+                    ArenaUtils.REGION_CONTAINER.get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(loc.getWorld()));
+            final com.sk89q.worldguard.protection.regions.ProtectedRegion region =
+                    manager == null ? null : manager.getRegion(this.arenaName);
+
+            if (region != null) {
+                final com.sk89q.worldedit.math.BlockVector3 min = region.getMinimumPoint();
+                final com.sk89q.worldedit.math.BlockVector3 max = region.getMaximumPoint();
+                final double dx = Math.max(0, Math.max(min.x() - loc.getX(), loc.getX() - (max.x() + 1)));
+                final double dz = Math.max(0, Math.max(min.z() - loc.getZ(), loc.getZ() - (max.z() + 1)));
+                return Math.hypot(dx, dz);
+            }
+        }
+
+        double distance = loc.distance(this.spawnPoint1);
+        if (this.spawnPoint2 != null && this.spawnPoint2.getWorld().equals(loc.getWorld()))
+            distance = Math.min(distance, loc.distance(this.spawnPoint2));
+        return distance;
     }
 
     public String getArenaName() {

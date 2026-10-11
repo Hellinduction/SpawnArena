@@ -8,6 +8,21 @@ public abstract class ArenaOptions {
     private boolean winOnStepStonePressurePlate;
     private boolean giveKnockBackStick;
     private ArenaMode arenaMode;
+    private double winReward;
+    private int winRewardCooldownMinutes;
+
+    public double getWinReward() {
+        return this.winReward;
+    }
+
+    public int getWinRewardCooldownMinutes() {
+        return this.winRewardCooldownMinutes;
+    }
+
+    public void setWinReward(final double amount, final int cooldownMinutes) {
+        this.winReward = amount;
+        this.winRewardCooldownMinutes = cooldownMinutes;
+    }
 
     public boolean isShouldClearItems() {
         return this.shouldClearItems;

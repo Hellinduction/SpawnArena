@@ -1,17 +1,12 @@
 package me.zeronull.spawnarena;
 
-import club.hellin.vivillyapi.CoreAPI;
-import club.hellin.vivillyapi.models.impl.PlayerStateBase;
-import club.hellin.vivillyapi.models.impl.objects.ArenaStatsBase;
 import me.nahu.scheduler.wrapper.runnable.WrappedRunnable;
 import me.nahu.scheduler.wrapper.task.WrappedTask;
+import me.zeronull.spawnarena.events.ArenaProjectileDupeFix;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
-import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.GameMode;
-import org.bukkit.Material;
+import org.bukkit.*;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
@@ -63,6 +58,9 @@ public class Fight {
      */
     public void cancelFight() {
         this.fightState = FightState.ENDING;
+
+        ArenaProjectileDupeFix.discardProjectiles(fighter1);
+        ArenaProjectileDupeFix.discardProjectiles(fighter2);
 
         fighter1 = null;
         fighter2 = null;
@@ -194,10 +192,13 @@ public class Fight {
         }
 
         if (this.arena.isGiveKnockBackStick()) {
-            final ItemStack stick = new ItemStack(Material.STICK);
-            stick.addUnsafeEnchantment(Enchantment.KNOCKBACK, 1);
+            // A fish rather than a stick: Litematica uses the stick as its tool item
+            final ItemStack fish = new ItemStack(Material.TROPICAL_FISH);
+            final Enchantment knockback = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("knockback"));
+            if (knockback != null)
+                fish.addUnsafeEnchantment(knockback, 1);
 
-            this.performOnFighters(fighter -> fighter.getInventory().addItem(stick));
+            this.performOnFighters(fighter -> fighter.getInventory().addItem(fish));
         }
 
         this.arena.teleportFighters(fighter1, fighter2);
@@ -217,6 +218,9 @@ public class Fight {
     }
 
     private void leaveParkour(final Player player) {
+        if (!Bukkit.getPluginManager().isPluginEnabled("Parkour"))
+            return;
+
         try {
             final Class<?> clazz = Class.forName("io.github.a5h73y.parkour.Parkour");
             final Method instanceMethod = clazz.getDeclaredMethod("getInstance");
@@ -237,8 +241,8 @@ public class Fight {
                 final Method leaveCourseMethod = playerManagerClass.getDeclaredMethod("leaveCourse", Player.class);
                 leaveCourseMethod.invoke(playerManager, player);
             }
-        } catch (Exception ignored) {
-            System.out.println("Parkour not loaded, skipping...");
+        } catch (Exception e) {
+            SpawnArena.INSTANCE.getLogger().warning("Couldn't remove " + player.getName() + " from their Parkour course: " + e);
         }
     }
 
@@ -272,6 +276,14 @@ public class Fight {
         }
     }
 
+    /** True when {@code to} is this fighter's own spawn point, i.e. the plugin's start-of-fight teleport. */
+    public boolean isSpawnTeleport(final Player fighter, final Location to) {
+        final Location spawn = fighter.equals(this.fighter1) ? this.arena.spawnPoint1
+                : fighter.equals(this.fighter2) ? this.arena.spawnPoint2 : null;
+
+        return spawn != null && to != null && spawn.getWorld().equals(to.getWorld()) && spawn.distanceSquared(to) < 1.0;
+    }
+
     public void teleportToSpawn(final Player fighter) {
         final UUID uuid = fighter.getUniqueId();
 
@@ -286,6 +298,9 @@ public class Fight {
      */
     public void endFight() {
         this.fightState = FightState.ENDING;
+
+        ArenaProjectileDupeFix.discardProjectiles(fighter1);
+        ArenaProjectileDupeFix.discardProjectiles(fighter2);
 
         this.preFightData1.restore();
         this.preFightData2.restore();
@@ -330,80 +345,35 @@ public class Fight {
         this.handleDeath(loser);
         final int ws = this.handleVictory(winner);
 
-        Bukkit.broadcast(MiniMessage.miniMessage().deserialize("<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
+        final Component result = MiniMessage.miniMessage().deserialize("<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
                 Placeholder.component("winner", winnerName),
                 Placeholder.component("loser", loserName),
                 Placeholder.parsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " "),
                 Placeholder.parsed("ws_str", ws > 2 ? String.format(" with a winstreak of <white>%s<dark_red>", ws) : "")
-        ));
+        );
+
+        if (SpawnArena.settings == null || SpawnArena.settings.broadcastWins) {
+            Bukkit.broadcast(result);
+        } else {
+            if (winner.isOnline()) winner.sendMessage(result);
+            if (loser.isOnline()) loser.sendMessage(result);
+        }
+
+        if (winner.isOnline() && Bukkit.getPluginManager().isPluginEnabled("Vault"))
+            WinRewards.reward(winner, this.arena);
     }
 
     private void handleDeath(final Player loser) {
-        ArenaStatsBase.Values winStreakValue = this.getValue(this.arena.arenaName, ValueType.STREAK);
-        PlayerStateBase state = CoreAPI.get().getWs().getPlayerStateMap().get(loser.getUniqueId());
-
-        if (state != null && winStreakValue != null) {
-            final ArenaStatsBase stats = state.getArenaStats();
-
-            stats.setInt(winStreakValue, 0);
-            CoreAPI.get().getWs().updatePlayerState(state);
-        }
+        SpawnArena.statsManager.recordLoss(loser, this.arena.arenaName);
     }
 
     public Arena getArena() {
         return this.arena;
     }
 
-    /**
-     * @param winner
-     * @return Win streak
-     */
+    /** Returns the new win streak. */
     private int handleVictory(final Player winner) {
-        ArenaStatsBase.Values winStreakValue = this.getValue(this.arena.arenaName, ValueType.STREAK);
-        ArenaStatsBase.Values winsValue = this.getValue(this.arena.arenaName, ValueType.WINS);
-        ArenaStatsBase.Values bestWinStreakValue = this.getValue(this.arena.arenaName, ValueType.BEST_STREAK);
-
-        PlayerStateBase state = CoreAPI.get().getWs().getPlayerStateMap().get(winner.getUniqueId());
-
-        if (state != null && winStreakValue != null && winsValue != null && bestWinStreakValue != null) {
-            final ArenaStatsBase stats = state.getArenaStats();
-
-            final int newWinStreak = stats.getInt(winStreakValue) + 1;
-
-            stats.setInt(winStreakValue, newWinStreak);
-            stats.setInt(winsValue, stats.getInt(winsValue) + 1);
-
-            if (newWinStreak > stats.getInt(bestWinStreakValue))
-                stats.setInt(bestWinStreakValue, newWinStreak);
-
-            CoreAPI.get().getWs().updatePlayerState(state);
-
-            return newWinStreak;
-        }
-
-        return -1;
-    }
-
-    private ArenaStatsBase.Values getValue(final String arenaName, final ValueType type) {
-        return switch (type) {
-            case WINS -> switch (arenaName.toLowerCase()) {
-                case "arena" -> ArenaStatsBase.Values.ARENA_WINS;
-                case "sumo" -> ArenaStatsBase.Values.SUMO_WINS;
-                default -> null;
-            };
-            case STREAK -> switch (arenaName.toLowerCase()) {
-                case "arena" -> ArenaStatsBase.Values.ARENA_WIN_STREAK;
-                case "sumo" -> ArenaStatsBase.Values.SUMO_WIN_STREAK;
-                default -> null;
-            };
-            case BEST_STREAK -> switch (arenaName.toLowerCase()) {
-                case "arena" -> ArenaStatsBase.Values.BEST_ARENA_WIN_STREAK;
-                case "sumo" -> ArenaStatsBase.Values.BEST_SUMO_WIN_STREAK;
-                default -> null;
-            };
-            default -> null;
-        };
-
+        return SpawnArena.statsManager.recordWin(winner, this.arena.arenaName);
     }
 
     @Override
@@ -414,9 +384,4 @@ public class Fight {
         return fight.uuid.equals(this.uuid);
     }
 
-    public enum ValueType {
-        WINS,
-        STREAK,
-        BEST_STREAK;
-    }
 }

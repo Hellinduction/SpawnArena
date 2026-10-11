@@ -1,10 +1,15 @@
 main: me.zeronull.spawnarena.SpawnArena
 name: SpawnArena
 version: 1.0.0
-api-version: '1.20'
+api-version: '1.21'
 softdepend:
+  - Vault
+  - WorldEdit
+  - FastAsyncWorldEdit
   - WorldGuard
-  - BetterTeams
+  - PlaceholderAPI
+  - FancyHolograms
+  - Parkour
 folia-supported: true
 
 commands:
@@ -40,6 +45,33 @@ commands:
     description: Restore a players data from before the fight
     permission: spawnarena.restore
     permission-message: "§cYou don't have permission!"
+  arenastats:
+    description: View or edit arena stats for a player
+    permission: spawnarena.arenastats
+    permission-message: "§cYou don't have permission!"
+  arenaleaderboard:
+    description: View the arena leaderboard, or spawn/remove/list leaderboard holograms
+    usage: "/arenaleaderboard [arena] [stat] [limit] | spawn <arena> <stat> [limit] | remove <name> | list | reload"
+    permission: spawnarena.arenaleaderboard
+    permission-message: "§cYou don't have permission!"
+
+  arenaannounce:
+    description: Toggle whether fight results are broadcast to everyone or only the two fighters
+    usage: "/arenaannounce [on|off]"
+    permission: spawnarena.arenaannounce
+    permission-message: "§cYou don't have permission!"
+
+  arenalock:
+    description: Close or open the arenas (no new queues or fights while closed)
+    usage: "/arenalock [on|off]"
+    permission: spawnarena.arenalock
+    permission-message: "§cYou don't have permission!"
+
+  arenareload:
+    description: Reload settings.yml and arena configs
+    usage: "/arenareload"
+    permission: spawnarena.arenareload
+    permission-message: "§cYou don't have permission!"
 
 permissions:
   spawnarena.setarenaspawn:
@@ -59,4 +91,16 @@ permissions:
   spawnarena.setpastelocation:
     default: op
   spawnarena.restore:
+    default: op
+  spawnarena.arenastats:
+    default: op
+  spawnarena.arenaleaderboard:
+    default: true
+  spawnarena.arenaleaderboard.spawn:
+    default: op
+  spawnarena.arenaannounce:
+    default: op
+  spawnarena.arenalock:
+    default: op
+  spawnarena.arenareload:
     default: op
