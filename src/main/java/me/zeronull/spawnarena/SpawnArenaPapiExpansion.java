@@ -19,6 +19,10 @@ import java.util.UUID;
  *   %spawnarena_top_value_<arena>_wins_<rank>%
  *   %spawnarena_top_value_<arena>_streak_<rank>%
  *   %spawnarena_top_value_<arena>_best_streak_<rank>%
+ *   %spawnarena_reward_cooldown_<arena>%   "Ready!" or "1h 05m 09s" (per player)
+ *   %spawnarena_reward_ready_<arena>%      true / false (per player)
+ *   %spawnarena_reward_amount_<arena>%     e.g. "$5,000"
+ *   %spawnarena_reward_every_<arena>%      e.g. "2h"
  */
 public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
@@ -41,6 +45,9 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
     @Override
     public @Nullable String onPlaceholderRequest(Player player, @NotNull String params) {
+        if (params.startsWith("reward_"))
+            return reward(player, params.substring("reward_".length()));
+
         final String[] parts = params.split("_");
 
         if (parts.length >= 2) {
@@ -95,6 +102,43 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         }
 
         return null;
+    }
+
+    /** reward_cooldown_<arena>, reward_ready_<arena>, reward_amount_<arena>, reward_every_<arena> */
+    private static String reward(final Player player, final String rest) {
+        final int split = rest.indexOf('_');
+        if (split <= 0)
+            return null;
+
+        final String type = rest.substring(0, split);
+        final Arena arena = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(rest.substring(split + 1));
+        if (arena == null)
+            return null;
+
+        final boolean enabled = arena.getWinReward() > 0;
+
+        return switch (type) {
+            case "amount" -> enabled ? formatAmount(arena.getWinReward()) : "-";
+            case "every" -> StatsManager.formatMinutes(arena.getWinRewardCooldownMinutes());
+            case "cooldown" -> {
+                if (player == null) yield "";
+                if (!enabled) yield "-";
+                final long remaining = SpawnArena.statsManager.rewardCooldownRemaining(player.getUniqueId(), arena);
+                yield remaining <= 0 ? "Ready!" : StatsManager.formatCountdown(remaining);
+            }
+            case "ready" -> player == null || !enabled ? "false"
+                    : String.valueOf(SpawnArena.statsManager.rewardCooldownRemaining(player.getUniqueId(), arena) <= 0);
+            default -> null;
+        };
+    }
+
+    private static String formatAmount(final double amount) {
+        if (org.bukkit.Bukkit.getPluginManager().isPluginEnabled("Vault")) {
+            final String formatted = WinRewards.formatAmount(amount);
+            if (formatted != null)
+                return formatted;
+        }
+        return "$" + java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(Math.round(amount));
     }
 
     private static String statToField(String stat) {

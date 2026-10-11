@@ -19,6 +19,7 @@ import java.util.List;
 /**
  * /arenaleaderboard [arena] [wins|streak|best_streak] [limit]       — show in chat
  * /arenaleaderboard spawn <arena> <wins|streak|best_streak> [limit] — spawn a hologram where you stand
+ * /arenaleaderboard spawn <arena> reward — per-player live countdown to their next win reward
  * /arenaleaderboard remove <hologram>
  * /arenaleaderboard list
  * /arenaleaderboard reload
@@ -81,8 +82,19 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
 
         final String arena = args[1];
         final String stat = args[2].toLowerCase();
+
+        if (stat.equals("reward")) {
+            final LeaderboardHolograms.Placement placement =
+                    LeaderboardHolograms.correctPlacement(p.getLocation(), LeaderboardHolograms.REWARD_LINES);
+            final String name = LeaderboardHolograms.spawnReward(arena, placement.location());
+            sender.sendMessage(String.format("§aCreated reward countdown hologram for §e%s§a named §e%s§a.", arena, name));
+            if (SpawnArena.arenas.of(arena) == null)
+                sender.sendMessage("§eNote: there's no arena named §6" + arena + "§e (names are case-sensitive), so it will show blanks.");
+            return true;
+        }
+
         if (statToField(stat) == null) {
-            sender.sendMessage("§cUnknown stat. Use: wins, streak, best_streak");
+            sender.sendMessage("§cUnknown type. Use: wins, streak, best_streak, reward");
             return true;
         }
         final int limit = args.length >= 4 ? parseLimit(args[3], 10) : 10;
@@ -160,7 +172,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             options.addAll(arenaNames());
         } else if (args[0].equalsIgnoreCase("spawn") && manage) {
             if (args.length == 2) options.addAll(arenaNames());
-            else if (args.length == 3) options.addAll(STATS);
+            else if (args.length == 3) { options.addAll(STATS); options.add("reward"); }
         } else if (args[0].equalsIgnoreCase("remove") && manage) {
             if (args.length == 2 && Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
                 options.addAll(LeaderboardHolograms.list());

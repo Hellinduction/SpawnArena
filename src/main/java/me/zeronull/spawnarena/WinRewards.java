@@ -18,27 +18,18 @@ public final class WinRewards {
         if (amount <= 0)
             return;
 
-        // Looked up per payout: the economy provider (Cuy) may register after SpawnArena enables
-        final RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
-        if (rsp == null) {
+        final Economy economy = economy();
+        if (economy == null) {
             if (!warnedNoEconomy) {
                 warnedNoEconomy = true;
                 SpawnArena.INSTANCE.getLogger().warning("Vault has no economy provider registered; win rewards are not being paid.");
             }
             return;
         }
-        final Economy economy = rsp.getProvider();
 
-        final String arenaName = arena.getArenaName();
-        final long now = System.currentTimeMillis();
-        final long cooldownMillis = arena.getWinRewardCooldownMinutes() * 60_000L;
-        final long last = SpawnArena.statsManager.getLastReward(winner.getUniqueId(), arenaName);
-        final long remaining = last + cooldownMillis - now;
-
-        if (remaining > 0) {
-            winner.sendMessage(ChatColor.GRAY + "No win reward this time — you can earn it again in " + formatDuration(remaining) + ".");
+        // Still on cooldown: say nothing — the reward hologram/placeholder shows the countdown
+        if (SpawnArena.statsManager.rewardCooldownRemaining(winner.getUniqueId(), arena) > 0)
             return;
-        }
 
         final EconomyResponse response = economy.depositPlayer(winner, amount);
         if (!response.transactionSuccess()) {
@@ -46,17 +37,19 @@ public final class WinRewards {
             return;
         }
 
-        SpawnArena.statsManager.setLastReward(winner.getUniqueId(), arenaName, now);
-        winner.sendMessage(ChatColor.GREEN + "+" + economy.format(amount) + ChatColor.GRAY + " for winning! Next reward available in "
-                + formatDuration(cooldownMillis) + ".");
+        SpawnArena.statsManager.setLastReward(winner.getUniqueId(), arena.getArenaName(), System.currentTimeMillis());
+        winner.sendMessage(ChatColor.GREEN + "+" + economy.format(amount) + ChatColor.GRAY + " for winning!");
     }
 
-    private static String formatDuration(final long millis) {
-        final long totalMinutes = Math.max(1, (millis + 59_999) / 60_000);
-        final long hours = totalMinutes / 60;
-        final long minutes = totalMinutes % 60;
-        if (hours == 0) return minutes + "m";
-        if (minutes == 0) return hours + "h";
-        return hours + "h " + minutes + "m";
+    /** The economy's own money format (e.g. "$5,000.00"), or null without an economy provider. */
+    public static String formatAmount(final double amount) {
+        final Economy economy = economy();
+        return economy == null ? null : economy.format(amount);
+    }
+
+    // Looked up each time: the economy provider (Cuy) may register after SpawnArena enables
+    private static Economy economy() {
+        final RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
+        return rsp == null ? null : rsp.getProvider();
     }
 }

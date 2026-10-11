@@ -104,6 +104,38 @@ public final class LeaderboardHolograms {
         return out.isEmpty() ? arena : out.toString();
     }
 
+    private static final String REWARD_TAG = "_reward_";
+    private static final int REWARD_UPDATE_INTERVAL_MS = 1_000;
+    public static final int REWARD_LINES = 6;
+
+    /** A per-viewer live countdown to that viewer's next win reward in this arena. */
+    public static String spawnReward(final String arena, final Location loc) {
+        final HologramManager manager = FancyHologramsPlugin.get().getHologramManager();
+
+        String name;
+        do {
+            name = NAME_PREFIX + arena.toLowerCase() + REWARD_TAG + String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
+        } while (manager.getHologram(name).isPresent());
+
+        final List<String> lines = List.of(
+                "<gradient:#FFD700:#FF8C00><bold>✦ " + displayName(arena) + " Rewards ✦</bold></gradient>",
+                "<gray>Win a fight to earn <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55>",
+                "<dark_gray><strikethrough>                              </strikethrough>",
+                "<gray>Your next reward",
+                "<#FFE066><bold>%spawnarena_reward_cooldown_" + arena + "%</bold></#FFE066>",
+                "<dark_gray>Claimable once every %spawnarena_reward_every_" + arena + "%"
+        );
+
+        final TextHologramData data = new TextHologramData(name, loc);
+        data.setText(new ArrayList<>(lines));
+        data.setTextUpdateInterval(REWARD_UPDATE_INTERVAL_MS);
+        data.setPersistent(true);
+
+        final Hologram hologram = manager.create(data);
+        manager.addHologram(hologram);
+        return name;
+    }
+
     public static boolean remove(final String name) {
         final HologramManager manager = FancyHologramsPlugin.get().getHologramManager();
         return manager.getHologram(name).map(h -> {
@@ -118,8 +150,9 @@ public final class LeaderboardHolograms {
         for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
             if (!h.getData().getName().startsWith(NAME_PREFIX))
                 continue;
-            if (h.getData() instanceof TextHologramData text && text.getTextUpdateInterval() != UPDATE_INTERVAL_MS)
-                text.setTextUpdateInterval(UPDATE_INTERVAL_MS);
+            final int interval = h.getData().getName().contains(REWARD_TAG) ? REWARD_UPDATE_INTERVAL_MS : UPDATE_INTERVAL_MS;
+            if (h.getData() instanceof TextHologramData text && text.getTextUpdateInterval() != interval)
+                text.setTextUpdateInterval(interval);
             h.refreshForViewers();
             count++;
         }

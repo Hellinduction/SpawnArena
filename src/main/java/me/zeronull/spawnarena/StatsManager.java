@@ -69,20 +69,57 @@ public class StatsManager {
 
     // ── Win reward cooldowns ────────────────────────────────────────────────
 
+    // Countdown holograms read this every second per viewer, so it's served from memory.
+    // The TTL only matters when another server shares the same MySQL database.
+    private static final long REWARD_CACHE_MILLIS = 60_000;
+    private record CachedReward(long fetchedAt, long lastReward) {}
+    private final java.util.Map<String, CachedReward> rewardCache = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** Epoch millis of the player's last win reward in this arena, or 0 if never. */
     public long getLastReward(UUID uuid, String arena) {
+        final String key = uuid + ":" + arena.toLowerCase();
+        final long now = System.currentTimeMillis();
+        final CachedReward cached = rewardCache.get(key);
+        if (cached != null && now - cached.fetchedAt() < REWARD_CACHE_MILLIS)
+            return cached.lastReward();
+
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement("SELECT last_reward FROM arena_rewards WHERE uuid=? AND arena=?")) {
             ps.setString(1, uuid.toString());
             ps.setString(2, arena.toLowerCase());
             try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? rs.getLong(1) : 0L;
+                final long last = rs.next() ? rs.getLong(1) : 0L;
+                rewardCache.put(key, new CachedReward(now, last));
+                return last;
             }
         } catch (SQLException e) {
             Bukkit.getLogger().warning("[SpawnArena] getLastReward: " + e.getMessage());
-            // Fail closed: treat as just rewarded so a DB hiccup can't be farmed
-            return System.currentTimeMillis();
+            // Fail closed: treat as just rewarded so a DB hiccup can't be farmed (not cached)
+            return now;
         }
+    }
+
+    /** Milliseconds until this player can earn the arena's win reward again (0 = ready now). */
+    public long rewardCooldownRemaining(UUID uuid, Arena arena) {
+        final long cooldown = arena.getWinRewardCooldownMinutes() * 60_000L;
+        final long remaining = getLastReward(uuid, arena.getArenaName()) + cooldown - System.currentTimeMillis();
+        return Math.max(0, remaining);
+    }
+
+    /** "1h 05m 09s", "4m 09s", "9s". */
+    public static String formatCountdown(final long millis) {
+        final long totalSeconds = (millis + 999) / 1000;
+        final long h = totalSeconds / 3600, m = (totalSeconds % 3600) / 60, s = totalSeconds % 60;
+        if (h > 0) return String.format("%dh %02dm %02ds", h, m, s);
+        if (m > 0) return String.format("%dm %02ds", m, s);
+        return s + "s";
+    }
+
+    /** "2h", "1h 30m", "45m". */
+    public static String formatMinutes(final int minutes) {
+        final int h = minutes / 60, m = minutes % 60;
+        if (h == 0) return m + "m";
+        return m == 0 ? h + "h" : h + "h " + m + "m";
     }
 
     public void setLastReward(UUID uuid, String arena, long epochMillis) {
@@ -94,6 +131,7 @@ public class StatsManager {
             ps.setString(2, arena.toLowerCase());
             ps.setLong(3, epochMillis);
             ps.executeUpdate();
+            rewardCache.put(uuid + ":" + arena.toLowerCase(), new CachedReward(System.currentTimeMillis(), epochMillis));
         } catch (SQLException e) {
             Bukkit.getLogger().warning("[SpawnArena] setLastReward: " + e.getMessage());
         }
@@ -293,6 +331,7 @@ public class StatsManager {
                 ps.executeBatch();
                 copyRewardCooldowns(h2, target);
                 target.commit();
+                rewardCache.clear();
             } catch (SQLException e) {
                 target.rollback();
                 throw e;
@@ -327,7 +366,20 @@ public class StatsManager {
     }
 
     public void close() {
-        if (dataSource != null && !dataSource.isClosed())
-            dataSource.close();
+        if (dataSource == null || dataSource.isClosed())
+            return;
+
+        // Hikari closes connections on its own thread, after onDisable has returned and the plugin's
+        // jar is closed; H2 would then fail to load the classes it needs to close the file cleanly.
+        // Shut H2 down here, on the disabling thread, while the jar is still open.
+        if (!mysql) {
+            try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+                s.execute("SHUTDOWN");
+            } catch (SQLException e) {
+                Bukkit.getLogger().warning("[SpawnArena] H2 shutdown: " + e.getMessage());
+            }
+        }
+
+        dataSource.close();
     }
 }

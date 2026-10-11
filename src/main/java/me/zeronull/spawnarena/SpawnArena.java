@@ -75,6 +75,7 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new TeleportKickOut(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaTeamPvPEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPotionSplashEvent(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new ArenaFireFix(), this);
 
     }
 
