@@ -28,6 +28,7 @@ public final class SavableArena extends Arena {
 
         arena.setSpawnPoint1(config.spawnPoint1);
         arena.setSpawnPoint2(config.spawnPoint2);
+        arena.exitLocation = config.exitLocation;
 
         arena.setShouldClearItems(config.shouldClearItems);
         arena.setAllowDamage(config.allowDamage);
@@ -123,6 +124,11 @@ public final class SavableArena extends Arena {
         return super.setGiveKnockBackStick(value);
     }
 
+    public void setExitLocation(final Location location) {
+        this.save(config -> config.exitLocation = location);
+        this.exitLocation = location;
+    }
+
     public ArenaOptions setPasteLocation(final Location location) {
         this.save(config -> config.pasteLocation = location);
         return this;
@@ -139,6 +145,7 @@ public final class SavableArena extends Arena {
 
         super.setSpawnPoint1(config.spawnPoint1);
         super.setSpawnPoint2(config.spawnPoint2);
+        this.exitLocation = config.exitLocation;
         super.setShouldClearItems(config.shouldClearItems);
         super.setAllowDamage(config.allowDamage);
         super.setAllowPvp(config.allowPvp);

@@ -83,9 +83,10 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         // Joining can immediately match two players, which takes them back out of the queue
         if (arena.queue.playerInQueue(player)) {
             final int waiting = arena.queue.size();
-            player.sendMessage(ChatColor.translateAlternateColorCodes('&', String.format(
-                    "&aYou've been added to the &e%s&a queue! &7(%d %s waiting)",
-                    arena.getArenaName(), waiting, waiting == 1 ? "player" : "players")));
+            player.sendMessage(ChatColor.translateAlternateColorCodes('&', waiting <= 1
+                    ? String.format("&aYou've been added to the &e%s&a queue! &7Waiting for an opponent...", arena.getArenaName())
+                    : String.format("&aYou've been added to the &e%s&a queue! &7(%d players waiting, including you)",
+                            arena.getArenaName(), waiting)));
         } else {
             player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&aYou've been added to the queue! &7Opponent found, get ready!"));
         }

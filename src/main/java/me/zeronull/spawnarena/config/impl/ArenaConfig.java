@@ -8,7 +8,7 @@ import org.bukkit.Location;
 @Configuration
 public final class ArenaConfig {
     @Comment("Name of the arena")
-    public String arenaName; // To keep everything simple, this should be the warp name and the region name in world guard
+    public String arenaName; // To keep everything simple, this should be the region name in world guard
 
     @Comment("Spawnpoint for 1st fighter")
     public Location spawnPoint1;
@@ -48,6 +48,10 @@ public final class ArenaConfig {
 
     @Comment("Mode of the arena: SINGLE, MULTI")
     public String arenaMode = ArenaMode.SINGLE.toString();
+
+    @Comment({"Where non-fighters are sent if they're in the arena during a fight (set with /setarenaexit).",
+            "If unset, they're sent to the world spawn."})
+    public Location exitLocation = null;
 
     @Comment("Paste location of the arena (pastes the schematic)")
     public Location pasteLocation = null;

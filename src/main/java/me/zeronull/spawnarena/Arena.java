@@ -19,7 +19,37 @@ public abstract class Arena extends ArenaOptions {
     protected String arenaName;
     protected Location spawnPoint1;
     protected Location spawnPoint2;
+    protected Location exitLocation;
     private List<Fight> fights = new ArrayList<>();
+
+    /** True while a fight is actually inside the arena (not just counting down at spawn). */
+    public boolean hasRunningFight() {
+        for (final Fight fight : this.fights)
+            if (fight.getState() == FightState.PRE_FIGHT_START || fight.getState() == FightState.IN_FIGHT)
+                return true;
+        return false;
+    }
+
+    private boolean warnedNoExit;
+
+    /**
+     * Sends a non-fighter out of the arena by teleporting them directly (running /warp as the player
+     * fails on permissions/warm-ups): to the exit location if set, otherwise to the world's spawn.
+     */
+    public void kickOut(final Player player) {
+        Location target = this.exitLocation;
+        if (target == null || target.getWorld() == null) {
+            target = player.getWorld().getSpawnLocation();
+            if (!this.warnedNoExit) {
+                this.warnedNoExit = true;
+                SpawnArena.INSTANCE.getLogger().warning("Arena " + this.arenaName
+                        + " has no exit location; sending spectators to the world spawn. Set one with /setarenaexit " + this.arenaName);
+            }
+        }
+
+        FoliaUtils.teleport(player, target);
+        player.sendMessage(org.bukkit.ChatColor.RED + "You can't be in the arena while a fight is going on.");
+    }
     public Arena(String arenaName) {
         this.arenaName = arenaName;
     }
@@ -197,29 +227,24 @@ public abstract class Arena extends ArenaOptions {
                 kickOutLingeringPlayer(p);
         }
 
+        /** Fighters, vanished players, spectator mode and spawnarena.bypasskickout may stay in arenas. */
+        public static boolean isExemptFromKickOut(final Player p) {
+            return isVanished(p)
+                    || p.getGameMode() == GameMode.SPECTATOR
+                    || p.hasPermission("spawnarena.bypasskickout")
+                    || SpawnArena.arenas.hasFighter(p);
+        }
+
         public static void kickOutLingeringPlayer(final Player p) {
             if (!WORLD_EDIT_SUPPORT)
                 return;
 
-//            System.out.println(String.format("Vanished: %s", isVanished(p)));
-            if (isVanished(p))
+            if (isExemptFromKickOut(p))
                 return;
 
-//            System.out.println(String.format("Spectator: %s", p.getGameMode() == GameMode.SPECTATOR));
-            if (p.getGameMode() == GameMode.SPECTATOR)
-                return;
-
-//            System.out.println(String.format("is Fighter: %s", SpawnArena.arenas.hasFighter(p)));
-            if (SpawnArena.arenas.hasFighter(p))
-                return;
-
-            final Location loc = p.getLocation();
-            final Arena arena = SpawnArena.arenas.of(loc);
-
-//            System.out.println(String.format("Arena is null: %s", arena == null));
-
+            final Arena arena = SpawnArena.arenas.of(p.getLocation());
             if (arena != null)
-                p.performCommand(String.format("warp %s", arena.getArenaName()));
+                arena.kickOut(p);
         }
 
         /**

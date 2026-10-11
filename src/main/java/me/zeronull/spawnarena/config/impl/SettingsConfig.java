@@ -26,5 +26,4 @@ public final class SettingsConfig {
 
     @Comment({"Currency symbol for short reward amounts like \"$5k\". Leave empty to copy it from the",
             "economy plugin's own formatting (falls back to \"$\" if there's no economy)."})
-    public String currencySymbol = "";
-}
+    public String currencySymbol = "";}

@@ -73,6 +73,12 @@ commands:
     permission: spawnarena.arenareload
     permission-message: "§cYou don't have permission!"
 
+  setarenaexit:
+    description: Set where non-fighters are sent when they're in the arena during a fight
+    usage: "/setarenaexit <arena>"
+    permission: spawnarena.setarenaexit
+    permission-message: "§cYou don't have permission!"
+
 permissions:
   spawnarena.setarenaspawn:
     default: op
@@ -104,3 +110,8 @@ permissions:
     default: op
   spawnarena.arenareload:
     default: op
+  spawnarena.setarenaexit:
+    default: op
+  spawnarena.bypasskickout:
+    description: Can stay inside arenas during other players' fights
+    default: false
