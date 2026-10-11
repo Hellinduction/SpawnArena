@@ -19,6 +19,22 @@ public abstract class ArenaOptions {
         return this.winRewardCooldownMinutes;
     }
 
+    private double leaderRewardMultiplier;
+    private int leaderRewardCooldownMinutes;
+
+    public double getLeaderRewardMultiplier() {
+        return this.leaderRewardMultiplier;
+    }
+
+    public int getLeaderRewardCooldownMinutes() {
+        return this.leaderRewardCooldownMinutes;
+    }
+
+    public void setLeaderReward(final double multiplier, final int cooldownMinutes) {
+        this.leaderRewardMultiplier = multiplier;
+        this.leaderRewardCooldownMinutes = cooldownMinutes;
+    }
+
     public void setWinReward(final double amount, final int cooldownMinutes) {
         this.winReward = amount;
         this.winRewardCooldownMinutes = cooldownMinutes;

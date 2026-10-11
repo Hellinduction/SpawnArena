@@ -130,7 +130,8 @@ public final class Arenas implements Iterable<Arena> {
 
             for (final ProtectedRegion region : regionSet) {
 //                System.out.println(region.getId() + " : " + arena.getArenaName());
-                if (!region.getId().equals(arena.getArenaName()))
+                // WorldGuard stores region IDs in lower case
+                if (!region.getId().equalsIgnoreCase(arena.getArenaName()))
                     continue;
 
                 return arena;

@@ -45,7 +45,7 @@ public final class SetArenaSchematicCommand extends ArenaTabComplete implements 
             return true;
         }
 
-        arena.setSchematic(schematicName);
+        arena.setSchematic(schematic.getPath());
         sender.sendMessage(ChatColor.translateAlternateColorCodes('&', String.format("&aAssigned shematic '&6%s&a' to the arena '&6%s&a'.", schematic.getPath(), arena.getArenaName())));
 
         return true;

@@ -44,6 +44,13 @@ public final class ArenaPlayerInteractEvent implements Listener {
             return;
         }
 
+        // Only actually stepping on a stone pressure plate wins, not any click
+        if (e.getAction() != Action.PHYSICAL || e.getClickedBlock() == null
+                || e.getClickedBlock().getType() != Material.STONE_PRESSURE_PLATE
+                || fight.getState() != FightState.IN_FIGHT) {
+            return;
+        }
+
         fight.announceWinner(fight.getOtherFighter(player));
         fight.endFight();
     }

@@ -40,6 +40,12 @@ public final class ArenaConfig {
     @Comment("Minutes before the same player can earn this arena's win reward again")
     public int winRewardCooldownMinutes = 120;
 
+    @Comment("Win reward multiplier for the #1 current win streak holder in this arena (one player; on a tie, whoever got there first)")
+    public double leaderRewardMultiplier = 3;
+
+    @Comment("Minutes between win rewards for the #1 current win streak holder")
+    public int leaderRewardCooldownMinutes = 5;
+
     @Comment("Mode of the arena: SINGLE, MULTI")
     public String arenaMode = ArenaMode.SINGLE.toString();
 

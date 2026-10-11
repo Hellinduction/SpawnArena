@@ -95,6 +95,7 @@ public class ConfigHandler {
             arena.setGiveKnockBackStick(config.giveKnockBackStick);
             arena.setArenaMode(config.arenaMode);
             arena.setWinReward(config.winReward, config.winRewardCooldownMinutes);
+            arena.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
 
             arenas.add(arena);
         }

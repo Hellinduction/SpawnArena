@@ -37,7 +37,8 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             return true;
         }
 
-        final SavableArena arena = SpawnArena.arenas.of(arenaName).to(SavableArena.class);
+        final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(arenaName);
+        final SavableArena arena = found == null ? null : found.to(SavableArena.class);
 
         if (arena == null) {
             sender.sendMessage(ChatColor.RED + "That arena was not found.");

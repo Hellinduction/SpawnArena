@@ -147,6 +147,7 @@ public final class SavableArena extends Arena {
         super.setGiveKnockBackStick(config.giveKnockBackStick);
         super.setArenaMode(config.arenaMode);
         this.setWinReward(config.winReward, config.winRewardCooldownMinutes);
+        this.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
     }
 
     public File getConfigFile() {
@@ -169,10 +170,17 @@ public final class SavableArena extends Arena {
         if (loc == null)
             return;
 
-        final File schematic = new File(config.schematic);
+        if (config.schematic == null || config.schematic.isEmpty())
+            return;
+
+        // Older configs store just the schematic's name; newer ones its path
+        File schematic = new File(config.schematic);
+        if (!schematic.exists())
+            schematic = WorldEditUtils.getSchematic(config.schematic);
 
         if (!schematic.exists())
-            throw new RuntimeException("Schematic does not exist");
+            throw new IllegalStateException("Schematic '" + config.schematic + "' for arena " + this.getArenaName()
+                    + " was not found in the WorldEdit/FastAsyncWorldEdit schematics folders");
 
         WorldEditUtils.paste(loc, schematic);
     }

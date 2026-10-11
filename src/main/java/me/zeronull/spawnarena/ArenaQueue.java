@@ -34,6 +34,10 @@ public class ArenaQueue {
         return (playerQueue.size() >= 2);
     }
 
+    public int size() {
+        return playerQueue.size();
+    }
+
     public boolean playerInQueue(Player player) {
         return playerQueue.contains(player);
     }

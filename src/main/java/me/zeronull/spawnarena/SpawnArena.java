@@ -57,7 +57,6 @@ public class SpawnArena extends JavaPlugin {
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaWorldguardPvPEvent(), this);
 
-        Bukkit.getServer().getPluginManager().registerEvents(new ArenaDeathEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaCommandEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaDropItemEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPreventCraftingSlot(), this);
@@ -76,7 +75,8 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaTeamPvPEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPotionSplashEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaFireFix(), this);
-
+        // Must stay registered after ArenaTeamPvPEvent/ArenaFireFix: same priority runs in registration order
+        Bukkit.getServer().getPluginManager().registerEvents(new ArenaDeathEvent(), this);
     }
 
     private void registerCommands() {

@@ -36,6 +36,12 @@ public final class CreateArenaCommand implements CommandExecutor {
                 return true;
             }
 
+            // Becomes a file name and must match a WorldGuard region ID
+            if (!arenaName.matches("[A-Za-z0-9_-]{2,32}")) {
+                sender.sendMessage(ChatColor.RED + "Arena names can only use letters, numbers, _ and - (max 32 characters).");
+                return true;
+            }
+
             final Arena a = SpawnArena.arenas.of(arenaName);
 
             if (a != null) {

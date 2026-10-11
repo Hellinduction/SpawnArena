@@ -30,7 +30,13 @@ public class SetArenaSpawnCommand extends ArenaTabComplete implements CommandExe
 
         Player player = (Player) sender;
 
-        int spawnNumber = Integer.parseInt(args[0]);
+        final int spawnNumber;
+        try {
+            spawnNumber = Integer.parseInt(args[0]);
+        } catch (final NumberFormatException e) {
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /setarenaspawn (1/2) <arena>"));
+            return true;
+        }
         String arenaName = args[1];
 
         if (!SpawnArena.arenas.exists(arenaName)) {

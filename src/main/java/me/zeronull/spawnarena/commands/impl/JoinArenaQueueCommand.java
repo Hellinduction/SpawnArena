@@ -61,6 +61,12 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return true;
         }
 
+        if (!arena.queue.playerInQueue(player) && arena.getArenaMode() == me.zeronull.spawnarena.ArenaMode.SINGLE
+                && !arena.getFights().isEmpty()) {
+            sender.sendMessage(ChatColor.RED + "There's already a fight in that arena. Wait for it to finish, then join!");
+            return true;
+        }
+
         if (arena.queue.playerInQueue(player)) {
             arena.queue.removePlayer(player);
             sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&eYou've been removed from the queue!"));
@@ -73,7 +79,16 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
 
     public static void addToQueue(final Arena arena, final Player player) {
         arena.queue.addPlayerToQueue(player);
-        player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&aYou've been added to the queue!"));
+
+        // Joining can immediately match two players, which takes them back out of the queue
+        if (arena.queue.playerInQueue(player)) {
+            final int waiting = arena.queue.size();
+            player.sendMessage(ChatColor.translateAlternateColorCodes('&', String.format(
+                    "&aYou've been added to the &e%s&a queue! &7(%d %s waiting)",
+                    arena.getArenaName(), waiting, waiting == 1 ? "player" : "players")));
+        } else {
+            player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&aYou've been added to the queue! &7Opponent found, get ready!"));
+        }
         player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&eWarning! If you have issues (e.g. losing inventory, want you inventory restored due to other issue), &c&l&ndo NOT&e rejoin the arena, tell warn staff and players, and avoid dying excessive amount of times. Otherwise, your inventory logs will be lost!"));
     }
 }

@@ -302,8 +302,18 @@ public class Fight {
         ArenaProjectileDupeFix.discardProjectiles(fighter1);
         ArenaProjectileDupeFix.discardProjectiles(fighter2);
 
-        this.preFightData1.restore();
-        this.preFightData2.restore();
+        // One failed restore must not leave the fight stuck in the arena forever;
+        // the snapshot stays in prefights.yml for /restore
+        for (final PlayerPreFightData data : new PlayerPreFightData[]{this.preFightData1, this.preFightData2}) {
+            if (data == null)
+                continue;
+            try {
+                data.restore();
+            } catch (final Exception e) {
+                SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE,
+                        "Couldn't restore " + data.username + " after their fight; use /restore " + data.username, e);
+            }
+        }
 
         this.fightState = FightState.OVER;
         this.arena.removeFight(this);
@@ -317,7 +327,12 @@ public class Fight {
 
         if (this.getArena() instanceof SavableArena && this.getArena().getArenaMode() == ArenaMode.SINGLE) {
             final SavableArena savableArena = (SavableArena) this.getArena();
-            savableArena.resetArena();
+            try {
+                savableArena.resetArena();
+            } catch (final Exception e) {
+                SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE,
+                        "Couldn't reset arena " + savableArena.getArenaName(), e);
+            }
         }
     }
 

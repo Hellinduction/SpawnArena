@@ -106,7 +106,7 @@ public final class LeaderboardHolograms {
 
     private static final String REWARD_TAG = "_reward_";
     private static final int REWARD_UPDATE_INTERVAL_MS = 1_000;
-    public static final int REWARD_LINES = 6;
+    public static final int REWARD_LINES = 7;
 
     /** A per-viewer live countdown to that viewer's next win reward in this arena. */
     public static String spawnReward(final String arena, final Location loc) {
@@ -123,7 +123,9 @@ public final class LeaderboardHolograms {
                 "<dark_gray><strikethrough>                              </strikethrough>",
                 "<gray>Your next reward",
                 "<#FFE066><bold>%spawnarena_reward_cooldown_" + arena + "%</bold></#FFE066>",
-                "<white>Claimable once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>"
+                "<white>Claimable once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
+                "<gold>★ <yellow>#1 win streak earns <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
+                        + "%</bold></#55FF55> <yellow>every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★"
         );
 
         final TextHologramData data = new TextHologramData(name, loc);

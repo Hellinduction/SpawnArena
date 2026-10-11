@@ -21,8 +21,10 @@ import java.util.UUID;
  *   %spawnarena_top_value_<arena>_best_streak_<rank>%
  *   %spawnarena_reward_cooldown_<arena>%   "Ready!" or "1h 05m 09s" (per player)
  *   %spawnarena_reward_ready_<arena>%      true / false (per player)
- *   %spawnarena_reward_amount_<arena>%     e.g. "$5,000"
- *   %spawnarena_reward_every_<arena>%      e.g. "2h"
+ *   %spawnarena_reward_amount_<arena>%     e.g. "$50k" (boosted for the #1 win streak holder)
+ *   %spawnarena_reward_every_<arena>%      e.g. "2h" ("5m" for the #1 win streak holder)
+ *   %spawnarena_reward_leaderamount_<arena>% / %spawnarena_reward_leaderevery_<arena>%  the #1 streak bonus
+ *   %spawnarena_reward_leader_<arena>%     true / false (per player)
  */
 public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
@@ -118,8 +120,15 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         final boolean enabled = arena.getWinReward() > 0;
 
         return switch (type) {
-            case "amount" -> enabled ? formatAmount(arena.getWinReward()) : "-";
-            case "every" -> StatsManager.formatMinutes(arena.getWinRewardCooldownMinutes());
+            // amount/every are personal: the #1 win streak holder sees their boosted values
+            case "amount" -> !enabled ? "-" : formatAmount(player == null ? arena.getWinReward()
+                    : SpawnArena.statsManager.rewardAmountFor(player.getUniqueId(), arena));
+            case "every" -> StatsManager.formatMinutes(player == null ? arena.getWinRewardCooldownMinutes()
+                    : SpawnArena.statsManager.rewardCooldownMinutesFor(player.getUniqueId(), arena));
+            case "leaderamount" -> enabled ? formatAmount(arena.getWinReward() * arena.getLeaderRewardMultiplier()) : "-";
+            case "leaderevery" -> StatsManager.formatMinutes(arena.getLeaderRewardCooldownMinutes());
+            case "leader" -> String.valueOf(player != null
+                    && SpawnArena.statsManager.isStreakLeader(player.getUniqueId(), arena.getArenaName()));
             case "cooldown" -> {
                 if (player == null) yield "";
                 if (!enabled) yield "-";

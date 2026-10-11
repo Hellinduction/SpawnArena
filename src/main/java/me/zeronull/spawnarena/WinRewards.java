@@ -14,9 +14,12 @@ public final class WinRewards {
     private WinRewards() {}
 
     public static void reward(final Player winner, final Arena arena) {
-        final double amount = arena.getWinReward();
-        if (amount <= 0)
+        if (arena.getWinReward() <= 0)
             return;
+
+        // Checked after this win was recorded, so a win that takes the #1 streak already counts
+        final boolean leader = SpawnArena.statsManager.isStreakLeader(winner.getUniqueId(), arena.getArenaName());
+        final double amount = SpawnArena.statsManager.rewardAmountFor(winner.getUniqueId(), arena);
 
         final Economy economy = economy();
         if (economy == null) {
@@ -38,7 +41,15 @@ public final class WinRewards {
         }
 
         SpawnArena.statsManager.setLastReward(winner.getUniqueId(), arena.getArenaName(), System.currentTimeMillis());
-        winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning!");
+        if (leader && arena.getLeaderRewardMultiplier() != 1)
+            winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning! "
+                    + ChatColor.GOLD + "(" + formatMultiplier(arena.getLeaderRewardMultiplier()) + " top win streak bonus)");
+        else
+            winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning!");
+    }
+
+    static String formatMultiplier(final double multiplier) {
+        return (multiplier == Math.rint(multiplier) ? String.valueOf((long) multiplier) : String.valueOf(multiplier)) + "x";
     }
 
     /**

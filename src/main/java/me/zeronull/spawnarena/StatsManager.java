@@ -56,7 +56,14 @@ public class StatsManager {
                     "wins INT NOT NULL DEFAULT 0, " +
                     "win_streak INT NOT NULL DEFAULT 0, " +
                     "best_win_streak INT NOT NULL DEFAULT 0, " +
+                    "streak_at BIGINT NOT NULL DEFAULT 0, " +
+                    "wins_at BIGINT NOT NULL DEFAULT 0, " +
+                    "best_at BIGINT NOT NULL DEFAULT 0, " +
                     "PRIMARY KEY (uuid, arena))");
+            // Tables created before the "reached at" columns existed
+            for (final String column : new String[]{"streak_at", "wins_at", "best_at"})
+                if (!hasColumn(c, "arena_stats", column))
+                    s.execute("ALTER TABLE arena_stats ADD COLUMN " + column + " BIGINT NOT NULL DEFAULT 0");
             s.execute("CREATE TABLE IF NOT EXISTS arena_rewards (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "arena VARCHAR(64) NOT NULL, " +
@@ -65,6 +72,28 @@ public class StatsManager {
         } catch (SQLException e) {
             Bukkit.getLogger().severe("[SpawnArena] Failed to create tables: " + e.getMessage());
         }
+    }
+
+    /** The column holding when a stat last reached its current value. */
+    private static String reachedAtColumn(final String field) {
+        return switch (field) {
+            case "wins" -> "wins_at";
+            case "win_streak" -> "streak_at";
+            case "best_win_streak" -> "best_at";
+            default -> null;
+        };
+    }
+
+    private static boolean hasColumn(final Connection c, final String table, final String column) throws SQLException {
+        // H2 stores unquoted identifiers upper-case, MySQL as written
+        for (final String t : new String[]{table, table.toUpperCase()}) {
+            try (ResultSet rs = c.getMetaData().getColumns(null, null, t, null)) {
+                while (rs.next())
+                    if (rs.getString("COLUMN_NAME").equalsIgnoreCase(column))
+                        return true;
+            }
+        }
+        return false;
     }
 
     // ── Win reward cooldowns ────────────────────────────────────────────────
@@ -99,9 +128,52 @@ public class StatsManager {
         }
     }
 
+    /** Clears a player's win reward cooldown for one arena, or every arena when {@code arena} is null. */
+    public int clearRewardCooldown(UUID uuid, String arena) {
+        final String sql = arena == null
+                ? "DELETE FROM arena_rewards WHERE uuid=?"
+                : "DELETE FROM arena_rewards WHERE uuid=? AND arena=?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            if (arena != null)
+                ps.setString(2, arena.toLowerCase());
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] clearRewardCooldown: " + e.getMessage());
+            return -1;
+        } finally {
+            final String prefix = uuid + ":";
+            rewardCache.keySet().removeIf(key -> key.startsWith(prefix)
+                    && (arena == null || key.equals(prefix + arena.toLowerCase())));
+        }
+    }
+
+    /**
+     * Whether this player is THE #1 current win streak holder in the arena. Exactly one player at a time:
+     * on a tie the one who reached that streak first keeps it. A streak of 0 never counts.
+     * Uses the cached leaderboard, so it's cheap enough for per-second hologram placeholders.
+     */
+    public boolean isStreakLeader(UUID uuid, String arena) {
+        final List<LeaderboardEntry> top = getTopPlayersCached(arena, "win_streak",
+                me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT);
+        return !top.isEmpty() && top.get(0).value() > 0 && top.get(0).uuid().equals(uuid);
+    }
+
+    public double rewardAmountFor(UUID uuid, Arena arena) {
+        final double base = arena.getWinReward();
+        return isStreakLeader(uuid, arena.getArenaName()) ? base * arena.getLeaderRewardMultiplier() : base;
+    }
+
+    public int rewardCooldownMinutesFor(UUID uuid, Arena arena) {
+        return isStreakLeader(uuid, arena.getArenaName())
+                ? arena.getLeaderRewardCooldownMinutes()
+                : arena.getWinRewardCooldownMinutes();
+    }
+
     /** Milliseconds until this player can earn the arena's win reward again (0 = ready now). */
     public long rewardCooldownRemaining(UUID uuid, Arena arena) {
-        final long cooldown = arena.getWinRewardCooldownMinutes() * 60_000L;
+        final long cooldown = rewardCooldownMinutesFor(uuid, arena) * 60_000L;
         final long remaining = getLastReward(uuid, arena.getArenaName()) + cooldown - System.currentTimeMillis();
         return Math.max(0, remaining);
     }
@@ -210,15 +282,24 @@ public class StatsManager {
     /** Records a win. Returns the new win streak. */
     public int recordWin(Player player, String arena) {
         ensure(player.getUniqueId(), arena);
-        final String sql = "UPDATE arena_stats " +
-                "SET wins = wins + 1, " +
-                "    win_streak = win_streak + 1, " +
-                "    best_win_streak = GREATEST(best_win_streak, win_streak + 1) " +
+        // MySQL applies SET assignments left to right (later ones see earlier results), H2 doesn't,
+        // so everything that reads the old win_streak / best_win_streak comes before they're changed.
+        final String sql = "UPDATE arena_stats SET " +
+                "best_at = CASE WHEN win_streak + 1 > best_win_streak THEN ? ELSE best_at END, " +
+                "best_win_streak = GREATEST(best_win_streak, win_streak + 1), " +
+                "wins = wins + 1, " +
+                "wins_at = ?, " +
+                "streak_at = ?, " +
+                "win_streak = win_streak + 1 " +
                 "WHERE uuid=? AND arena=?";
+        final long now = System.currentTimeMillis();
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, player.getUniqueId().toString());
-            ps.setString(2, arena.toLowerCase());
+            ps.setLong(1, now);
+            ps.setLong(2, now);
+            ps.setLong(3, now);
+            ps.setString(4, player.getUniqueId().toString());
+            ps.setString(5, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
             Bukkit.getLogger().warning("[SpawnArena] recordWin: " + e.getMessage());
@@ -235,12 +316,18 @@ public class StatsManager {
     /** Upserts a single stat field. */
     public void setField(UUID uuid, String arena, String field, int value) {
         ensure(uuid, arena);
-        final String sql = "UPDATE arena_stats SET " + field + "=? WHERE uuid=? AND arena=?";
+        // A changed value counts as reached now, for leaderboard tie-breaks
+        final String reachedAt = reachedAtColumn(field);
+        final String sql = "UPDATE arena_stats SET " + field + "=?" + (reachedAt != null ? ", " + reachedAt + "=?" : "")
+                + " WHERE uuid=? AND arena=?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setInt(1, value);
-            ps.setString(2, uuid.toString());
-            ps.setString(3, arena.toLowerCase());
+            int i = 1;
+            ps.setInt(i++, value);
+            if (reachedAt != null)
+                ps.setLong(i++, System.currentTimeMillis());
+            ps.setString(i++, uuid.toString());
+            ps.setString(i, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
             Bukkit.getLogger().warning("[SpawnArena] setField(" + field + "): " + e.getMessage());
@@ -298,8 +385,11 @@ public class StatsManager {
      */
     public List<LeaderboardEntry> getTopPlayers(String arena, String field, int limit) {
         final List<LeaderboardEntry> entries = new ArrayList<>();
+        // Ties: whoever reached that value first ranks higher, so there's always exactly one #1
+        final String reachedAt = reachedAtColumn(field);
+        final String tieBreak = reachedAt != null ? ", " + reachedAt + " ASC" : "";
         final String sql = "SELECT uuid, " + field + " FROM arena_stats " +
-                "WHERE arena=? ORDER BY " + field + " DESC LIMIT ?";
+                "WHERE arena=? ORDER BY " + field + " DESC" + tieBreak + ", uuid ASC LIMIT ?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, arena.toLowerCase());
@@ -345,14 +435,17 @@ public class StatsManager {
         props.setProperty("user", "sa");
         props.setProperty("password", "");
 
-        final String upsert = "INSERT INTO arena_stats (uuid, arena, wins, win_streak, best_win_streak) " +
-                "VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
-                "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak)";
+        final String upsert = "INSERT INTO arena_stats (uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+                "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak), " +
+                "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at)";
 
         int copied = 0;
         try (Connection h2 = new org.h2.Driver().connect(h2Url() + ";IFEXISTS=TRUE", props);
              Statement read = h2.createStatement();
-             ResultSet rs = read.executeQuery("SELECT uuid, arena, wins, win_streak, best_win_streak FROM arena_stats");
+             ResultSet rs = read.executeQuery("SELECT uuid, arena, wins, win_streak, best_win_streak"
+                     + reachedAtSelect(h2, "streak_at") + reachedAtSelect(h2, "wins_at") + reachedAtSelect(h2, "best_at")
+                     + " FROM arena_stats");
              Connection target = dataSource.getConnection()) {
 
             target.setAutoCommit(false);
@@ -363,6 +456,9 @@ public class StatsManager {
                     ps.setInt(3, rs.getInt("wins"));
                     ps.setInt(4, rs.getInt("win_streak"));
                     ps.setInt(5, rs.getInt("best_win_streak"));
+                    ps.setLong(6, rs.getLong("streak_at"));
+                    ps.setLong(7, rs.getLong("wins_at"));
+                    ps.setLong(8, rs.getLong("best_at"));
                     ps.addBatch();
                     if (++copied % 500 == 0)
                         ps.executeBatch();
@@ -380,6 +476,11 @@ public class StatsManager {
         }
         invalidateLeaderboards();
         return copied;
+    }
+
+    /** H2 files from older versions may lack a "reached at" column; read those as 0. */
+    private static String reachedAtSelect(final Connection h2, final String column) throws SQLException {
+        return hasColumn(h2, "arena_stats", column) ? ", " + column : ", 0 AS " + column;
     }
 
     private static void copyRewardCooldowns(final Connection h2, final Connection target) throws SQLException {

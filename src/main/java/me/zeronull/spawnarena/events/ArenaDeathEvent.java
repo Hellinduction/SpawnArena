@@ -6,13 +6,16 @@ import me.zeronull.spawnarena.SpawnArena;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageEvent;
 
 public class ArenaDeathEvent implements Listener {
     public static final Material BYPASS_ITEM = Material.TOTEM_OF_UNDYING;
 
-    @EventHandler
+    // Runs last (HIGHEST, and registered after the listeners that re-allow arena damage) and only for
+    // damage that will really happen, so e.g. fall damage WorldGuard cancels can't count as a death
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onPlayerDeath(EntityDamageEvent event) {
         if (!(event.getEntity() instanceof Player)) {
             return;

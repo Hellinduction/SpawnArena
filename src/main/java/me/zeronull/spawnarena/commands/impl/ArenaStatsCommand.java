@@ -18,11 +18,12 @@ import java.util.UUID;
  * /arenastats get <player> <arena>
  * /arenastats set <player> <arena> wins|streak|best_streak <value>
  * /arenastats reset <player> <arena>
+ * /arenastats resetcooldown <player> <arena|all>
  */
 public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> STATS = List.of("wins", "streak", "best_streak");
-    private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "migrate");
+    private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "resetcooldown", "migrate");
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd,
@@ -31,7 +32,8 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             return migrate(sender, args);
 
         if (args.length < 3) {
-            sender.sendMessage("§cUsage: /arenastats <get|set|reset> <player> <arena> [stat] [value]  §7or  §c/arenastats migrate");
+            sender.sendMessage("§cUsage: /arenastats <get|set|reset> <player> <arena> [stat] [value]");
+            sender.sendMessage("§c       /arenastats resetcooldown <player> <arena|all>  §7or  §c/arenastats migrate");
             return true;
         }
 
@@ -42,6 +44,15 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
         final String arena = args[2];
 
         switch (sub) {
+            case "resetcooldown" -> {
+                final boolean all = arena.equalsIgnoreCase("all");
+                final int cleared = SpawnArena.statsManager.clearRewardCooldown(uuid, all ? null : arena);
+                if (cleared < 0)
+                    sender.sendMessage("§cCouldn't reset the cooldown — check the console.");
+                else
+                    sender.sendMessage(String.format("§aReset §e%s§a's win reward cooldown for §e%s§a. They can earn it on their next win.",
+                            target.getName(), all ? "all arenas" : arena));
+            }
             case "get" -> {
                 final int wins = SpawnArena.statsManager.getWins(uuid, arena);
                 final int streak = SpawnArena.statsManager.getWinStreak(uuid, arena);
@@ -119,6 +130,15 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
         if (args.length == 1) return filter(SUBCOMMANDS, args[0]);
         if (args.length == 2 && args[0].equalsIgnoreCase("migrate")) return filter(List.of("confirm"), args[1]);
         if (args.length == 4 && args[0].equalsIgnoreCase("set")) return filter(STATS, args[3]);
+        if (args.length == 3 && !args[0].equalsIgnoreCase("migrate")) {
+            final List<String> arenas = new java.util.ArrayList<>();
+            if (SpawnArena.arenas != null)
+                SpawnArena.arenas.forEach(a -> arenas.add(a.getArenaName()));
+            if (args[0].equalsIgnoreCase("resetcooldown"))
+                arenas.add("all");
+            return arenas.stream().filter(s -> s.toLowerCase().startsWith(args[2].toLowerCase())).toList();
+        }
+        if (args.length == 2) return null; // online player names
         return Collections.emptyList();
     }
 
