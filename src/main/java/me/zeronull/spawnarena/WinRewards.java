@@ -38,13 +38,30 @@ public final class WinRewards {
         }
 
         SpawnArena.statsManager.setLastReward(winner.getUniqueId(), arena.getArenaName(), System.currentTimeMillis());
-        winner.sendMessage(ChatColor.GREEN + "+" + economy.format(amount) + ChatColor.GRAY + " for winning!");
+        winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning!");
     }
 
-    /** The economy's own money format (e.g. "$5,000.00"), or null without an economy provider. */
-    public static String formatAmount(final double amount) {
+    /**
+     * What the economy puts before and after the number, e.g. {"$", ""} for "$2.00" or {"", " coins"} for "2 coins".
+     * Null when there's no economy provider or its format has no digits.
+     */
+    public static String[] currencyAffixes() {
         final Economy economy = economy();
-        return economy == null ? null : economy.format(amount);
+        if (economy == null)
+            return null;
+
+        final String sample = economy.format(2);
+        int first = -1, last = -1;
+        for (int i = 0; i < sample.length(); i++) {
+            if (Character.isDigit(sample.charAt(i))) {
+                if (first < 0) first = i;
+                last = i;
+            }
+        }
+        if (first < 0)
+            return null;
+
+        return new String[]{sample.substring(0, first), sample.substring(last + 1)};
     }
 
     // Looked up each time: the economy provider (Cuy) may register after SpawnArena enables

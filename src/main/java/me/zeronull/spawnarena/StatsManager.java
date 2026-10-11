@@ -115,6 +115,45 @@ public class StatsManager {
         return s + "s";
     }
 
+    private static volatile String[] detectedCurrency;
+
+    /** "$500", "$5k", "$1.5k", "$2M" — using the configured or economy-detected currency symbol. */
+    public static String formatMoney(final double amount) {
+        final double abs = Math.abs(amount);
+        final String number;
+        if (abs >= 1_000_000_000) number = oneDecimal(amount / 1_000_000_000) + "B";
+        else if (abs >= 1_000_000) number = oneDecimal(amount / 1_000_000) + "M";
+        else if (abs >= 1_000) number = oneDecimal(amount / 1_000) + "k";
+        else number = oneDecimal(amount);
+
+        final String[] affixes = currencyAffixes();
+        return affixes[0] + number + affixes[1];
+    }
+
+    private static String[] currencyAffixes() {
+        final String configured = SpawnArena.settings == null ? null : SpawnArena.settings.currencySymbol;
+        if (configured != null && !configured.isEmpty())
+            return new String[]{configured, ""};
+
+        if (detectedCurrency != null)
+            return detectedCurrency;
+
+        // WinRewards links against Vault, so only touch it when Vault is there
+        if (Bukkit.getPluginManager().isPluginEnabled("Vault")) {
+            final String[] detected = WinRewards.currencyAffixes();
+            if (detected != null) {
+                detectedCurrency = detected;
+                return detected;
+            }
+        }
+        return new String[]{"$", ""};
+    }
+
+    private static String oneDecimal(final double value) {
+        final double rounded = Math.round(value * 10) / 10.0;
+        return rounded == Math.rint(rounded) ? String.valueOf((long) rounded) : String.valueOf(rounded);
+    }
+
     /** "2h", "1h 30m", "45m". */
     public static String formatMinutes(final int minutes) {
         final int h = minutes / 60, m = minutes % 60;

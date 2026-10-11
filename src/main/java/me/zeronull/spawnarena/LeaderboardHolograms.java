@@ -123,7 +123,7 @@ public final class LeaderboardHolograms {
                 "<dark_gray><strikethrough>                              </strikethrough>",
                 "<gray>Your next reward",
                 "<#FFE066><bold>%spawnarena_reward_cooldown_" + arena + "%</bold></#FFE066>",
-                "<white>Claimable once every %spawnarena_reward_every_" + arena + "%"
+                "<white>Claimable once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>"
         );
 
         final TextHologramData data = new TextHologramData(name, loc);

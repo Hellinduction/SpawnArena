@@ -23,4 +23,8 @@ public final class SettingsConfig {
     @Comment({"Whether players can join arenas and new fights can start. Fights already running always finish.",
             "Toggle in game with /arenalock (e.g. close before reloading the plugin)"})
     public boolean arenasOpen = true;
+
+    @Comment({"Currency symbol for short reward amounts like \"$5k\". Leave empty to copy it from the",
+            "economy plugin's own formatting (falls back to \"$\" if there's no economy)."})
+    public String currencySymbol = "";
 }

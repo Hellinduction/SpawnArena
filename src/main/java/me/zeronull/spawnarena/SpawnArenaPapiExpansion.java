@@ -133,12 +133,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
     }
 
     private static String formatAmount(final double amount) {
-        if (org.bukkit.Bukkit.getPluginManager().isPluginEnabled("Vault")) {
-            final String formatted = WinRewards.formatAmount(amount);
-            if (formatted != null)
-                return formatted;
-        }
-        return "$" + java.text.NumberFormat.getIntegerInstance(java.util.Locale.US).format(Math.round(amount));
+        return StatsManager.formatMoney(amount);
     }
 
     private static String statToField(String stat) {
