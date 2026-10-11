@@ -248,7 +248,7 @@ public class Fight {
 
     private void performHideLogic() {
         for (final Player fighter : this.getFighters()) {
-            for (final Player other : this.arena.getOtherPlayers(this)) {
+            for (final Player other : this.arena.getOtherPlayersInArena(this)) {
                 if (fighter == null || other == null)
                     continue;
 

@@ -71,6 +71,22 @@ public abstract class Arena extends ArenaOptions {
         return players;
     }
 
+    /** Fighters of other fights that are actually inside the arena (not still counting down at spawn). */
+    public List<Player> getOtherPlayersInArena(final Fight fight) {
+        final List<Player> players = new ArrayList<>();
+
+        for (final Fight f : this.fights) {
+            if (f.equals(fight))
+                continue;
+            if (f.getState() != FightState.PRE_FIGHT_START && f.getState() != FightState.IN_FIGHT)
+                continue;
+
+            players.addAll(f.getFighters());
+        }
+
+        return players;
+    }
+
     public void clearFights() {
         this.fights.clear();
     }
