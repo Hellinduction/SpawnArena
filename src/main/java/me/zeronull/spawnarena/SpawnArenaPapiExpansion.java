@@ -116,10 +116,10 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         switch (rest) {
             case "today" -> { return player == null ? "" : formatAmount(stats.getEarnedToday(player.getUniqueId())); }
             case "dailycap" -> { return stats.dailyCap() > 0 ? formatAmount(stats.dailyCap()) : "No limit"; }
-            // The first win that doesn't pay, e.g. limit 3 -> "4"
+            // Payouts in a row allowed against the same opponent
             case "samelimit" -> {
                 final int limit = SpawnArena.settings == null ? 0 : SpawnArena.settings.sameOpponentLimit;
-                return limit > 0 ? String.valueOf(limit + 1) : "∞";
+                return limit > 0 ? String.valueOf(limit) : "∞";
             }
             case "dailyleft" -> {
                 if (player == null) return "";

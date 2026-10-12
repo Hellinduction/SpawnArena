@@ -23,6 +23,7 @@ import java.util.List;
  * /arenaleaderboard remove <hologram>
  * /arenaleaderboard list
  * /arenaleaderboard reload
+ * /arenaleaderboard update — rebuild existing holograms with the current layout, in place
  */
 public final class ArenaLeaderboardCommand implements CommandExecutor, TabCompleter {
 
@@ -39,6 +40,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
                 case "remove" -> { return remove(sender, args); }
                 case "list" -> { return list(sender); }
                 case "reload" -> { return reload(sender); }
+                case "update" -> { return update(sender); }
             }
         }
         return show(sender, args);
@@ -100,7 +102,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         final int limit = args.length >= 4 ? parseLimit(args[3], 10) : 10;
 
         final LeaderboardHolograms.Placement placement = LeaderboardHolograms.correctPlacement(p.getLocation(), limit + 1);
-        final String name = LeaderboardHolograms.spawn(arena, stat, statLabel(stat), limit, placement.location());
+        final String name = LeaderboardHolograms.spawn(arena, stat, limit, placement.location());
         sender.sendMessage(String.format("§aCreated %s leaderboard hologram for §e%s§a named §e%s§a.", statLabel(stat), arena, name));
 
         final double shift = placement.location().getY() - p.getLocation().getY();
@@ -149,6 +151,16 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         return true;
     }
 
+    private boolean update(CommandSender sender) {
+        if (!canManageHolograms(sender)) return true;
+
+        final LeaderboardHolograms.UpdateResult result = LeaderboardHolograms.updateAll();
+        sender.sendMessage("§aUpdated §e" + result.updated() + "§a hologram(s) to the current layout, in place.");
+        if (!result.skipped().isEmpty())
+            sender.sendMessage("§eSkipped (arena no longer exists): §6" + String.join("§e, §6", result.skipped()));
+        return true;
+    }
+
     private boolean canManageHolograms(CommandSender sender) {
         if (!sender.hasPermission(SPAWN_PERMISSION)) {
             sender.sendMessage("§cYou don't have permission!");
@@ -168,7 +180,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         final List<String> options = new ArrayList<>();
 
         if (args.length == 1) {
-            if (manage) options.addAll(List.of("spawn", "remove", "list", "reload"));
+            if (manage) options.addAll(List.of("spawn", "remove", "list", "reload", "update"));
             options.addAll(arenaNames());
         } else if (args[0].equalsIgnoreCase("spawn") && manage) {
             if (args.length == 2) options.addAll(arenaNames());

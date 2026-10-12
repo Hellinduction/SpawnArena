@@ -362,8 +362,17 @@ public class Fight {
             loserName = fighter2.displayName();
         }
 
-        this.handleDeath(loser);
-        final int ws = this.handleVictory(winner);
+        // Fights between accounts that have shared an IP (alts) can't be used to pump stats or rewards
+        final boolean checkIps = SpawnArena.settings != null
+                && (SpawnArena.settings.blockSameIpStats || SpawnArena.settings.blockSameIpRewards);
+        final boolean alts = checkIps && SpawnArena.statsManager.areAlts(winner, loser);
+        final boolean countStats = !(alts && SpawnArena.settings.blockSameIpStats);
+
+        int ws = 0;
+        if (countStats) {
+            this.handleDeath(loser);
+            ws = this.handleVictory(winner);
+        }
 
         final Component result = MiniMessage.miniMessage().deserialize("<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
                 Placeholder.component("winner", winnerName),
@@ -380,7 +389,12 @@ public class Fight {
         }
 
         if (winner.isOnline() && Bukkit.getPluginManager().isPluginEnabled("Vault"))
-            WinRewards.reward(winner, loser, this.arena);
+            WinRewards.reward(winner, loser, this.arena, alts);
+
+        // Shown on the reward hologram's "Last win" line rather than in chat
+        if (!countStats)
+            SpawnArena.statsManager.setLastResult(winner.getUniqueId(), this.arena.getArenaName(),
+                    "Not counted: same IP as your opponent");
     }
 
     private void handleDeath(final Player loser) {

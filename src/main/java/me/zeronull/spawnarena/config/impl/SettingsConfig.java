@@ -30,12 +30,16 @@ public final class SettingsConfig {
 
     @Comment({"Most money one player can earn from arena win rewards per day (server time), across all arenas.",
             "0 = no limit."})
-    public double dailyRewardCap = 5_000_000;
+    public double dailyRewardCap = 2_000_000;
 
-    @Comment({"Wins in a row against the same opponent that still pay. After that, wins against them don't pay",
-            "until the player beats someone else. 0 = no limit."})
+    @Comment({"Payouts in a row against the same opponent. After that many, beating them again doesn't pay",
+            "until the player beats someone else (paid or not). 0 = no limit."})
     public int sameOpponentLimit = 3;
 
     @Comment({"Don't pay win rewards when the winner and loser have ever connected from the same IP address.",
             "IPs are stored hashed. Local/LAN addresses are ignored."})
-    public boolean blockSameIpRewards = true;}
+    public boolean blockSameIpRewards = true;
+
+    @Comment({"Don't count fights between players who have ever connected from the same IP address (alts)",
+            "towards wins, win streaks or the leaderboards."})
+    public boolean blockSameIpStats = true;}

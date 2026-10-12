@@ -65,7 +65,7 @@ public final class LeaderboardHolograms {
         return new Placement(loc, false);
     }
 
-    public static String spawn(final String arena, final String stat, final String statLabel, final int limit, final Location loc) {
+    public static String spawn(final String arena, final String stat, final int limit, final Location loc) {
         final HologramManager manager = FancyHologramsPlugin.get().getHologramManager();
 
         String name;
@@ -73,21 +73,32 @@ public final class LeaderboardHolograms {
             name = NAME_PREFIX + arena.toLowerCase() + "_" + stat + "_" + String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
         } while (manager.getHologram(name).isPresent());
 
-        final List<String> lines = new ArrayList<>();
-        lines.add("<yellow>* <red><bold>" + displayName(arena) + " " + statLabel + "</bold></red> *</yellow>");
-        for (int rank = 1; rank <= limit; rank++) {
-            lines.add(String.format("<light_purple>%d. <yellow>%%spawnarena_top_player_%s_%s_%d%%<gray>: %%spawnarena_top_value_%s_%s_%d%%",
-                    rank, arena, stat, rank, arena, stat, rank));
-        }
-
         final TextHologramData data = new TextHologramData(name, loc);
-        data.setText(lines);
+        data.setText(leaderboardLines(arena, stat, limit));
         data.setTextUpdateInterval(UPDATE_INTERVAL_MS);
         data.setPersistent(true);
 
         final Hologram hologram = manager.create(data);
         manager.addHologram(hologram);
         return name;
+    }
+
+    private static List<String> leaderboardLines(final String arena, final String stat, final int limit) {
+        final List<String> lines = new ArrayList<>();
+        lines.add("<yellow>* <red><bold>" + displayName(arena) + " " + statLabel(stat) + "</bold></red> *</yellow>");
+        for (int rank = 1; rank <= limit; rank++) {
+            lines.add(String.format("<light_purple>%d. <yellow>%%spawnarena_top_player_%s_%s_%d%%<gray>: %%spawnarena_top_value_%s_%s_%d%%",
+                    rank, arena, stat, rank, arena, stat, rank));
+        }
+        return lines;
+    }
+
+    private static String statLabel(final String stat) {
+        return switch (stat) {
+            case "streak" -> "Win Streak";
+            case "best_streak" -> "Best Win Streak";
+            default -> "Wins";
+        };
     }
 
     /** All-lowercase names are title cased ("sumo_pit" → "Sumo Pit"); any other casing is kept as typed. */
@@ -117,7 +128,18 @@ public final class LeaderboardHolograms {
             name = NAME_PREFIX + arena.toLowerCase() + REWARD_TAG + String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
         } while (manager.getHologram(name).isPresent());
 
-        final List<String> lines = List.of(
+        final TextHologramData data = new TextHologramData(name, loc);
+        data.setText(rewardLines(arena));
+        data.setTextUpdateInterval(REWARD_UPDATE_INTERVAL_MS);
+        data.setPersistent(true);
+
+        final Hologram hologram = manager.create(data);
+        manager.addHologram(hologram);
+        return name;
+    }
+
+    private static List<String> rewardLines(final String arena) {
+        return new ArrayList<>(List.of(
                 "<gradient:#FFD700:#FF8C00><bold>✦ " + displayName(arena) + " Rewards ✦</bold></gradient>",
                 "<gray>Win a fight to earn <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55>",
                 "<dark_gray><strikethrough>                              </strikethrough>",
@@ -128,17 +150,68 @@ public final class LeaderboardHolograms {
                 "<white>Claimable once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
                 "<gold>★ <yellow>#1 win streak earns <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
                         + "%</bold></#55FF55> <yellow>every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
-                "<dark_gray>No pay for alts or beating the same player %spawnarena_reward_samelimit%+ times in a row"
-        );
+                "<dark_gray>Alts don't count · max %spawnarena_reward_samelimit% payouts in a row vs the same player"
+        ));
+    }
 
-        final TextHologramData data = new TextHologramData(name, loc);
-        data.setText(new ArrayList<>(lines));
-        data.setTextUpdateInterval(REWARD_UPDATE_INTERVAL_MS);
-        data.setPersistent(true);
+    public record UpdateResult(int updated, List<String> skipped) {}
 
-        final Hologram hologram = manager.create(data);
-        manager.addHologram(hologram);
-        return name;
+    /**
+     * Rebuilds every SpawnArena hologram's text with the current layout, keeping its name and position.
+     * The arena, stat and row count are read back from the hologram's name and existing text.
+     */
+    public static UpdateResult updateAll() {
+        final HologramManager manager = FancyHologramsPlugin.get().getHologramManager();
+        int updated = 0;
+        final List<String> skipped = new ArrayList<>();
+
+        for (final Hologram h : manager.getHolograms()) {
+            final String name = h.getData().getName();
+            if (!name.startsWith(NAME_PREFIX) || !(h.getData() instanceof TextHologramData text))
+                continue;
+
+            // spawnarena_lb_<arena>_<stat|reward>_<4 digits>
+            final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
+            final List<String> lines;
+            final int interval;
+
+            if (rest.endsWith("_reward")) {
+                final String arena = resolveArena(rest.substring(0, rest.length() - "_reward".length()));
+                if (arena == null) { skipped.add(name); continue; }
+                lines = rewardLines(arena);
+                interval = REWARD_UPDATE_INTERVAL_MS;
+            } else {
+                String stat = null;
+                for (final String s : new String[]{"best_streak", "streak", "wins"}) {
+                    if (rest.endsWith("_" + s)) { stat = s; break; }
+                }
+                final String arena = stat == null ? null : resolveArena(rest.substring(0, rest.length() - stat.length() - 1));
+                if (arena == null) { skipped.add(name); continue; }
+                final int rows = Math.max(1, Math.min(text.getText().size() - 1,
+                        me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT));
+                lines = leaderboardLines(arena, stat, rows);
+                interval = UPDATE_INTERVAL_MS;
+            }
+
+            text.setText(lines);
+            text.setTextUpdateInterval(interval);
+            h.forceUpdate();
+            h.refreshForViewers();
+            updated++;
+        }
+
+        manager.saveHolograms();
+        return new UpdateResult(updated, skipped);
+    }
+
+    /** Hologram names store the arena in lower case; map it back to the arena's real name. */
+    private static String resolveArena(final String lowerName) {
+        if (me.zeronull.spawnarena.SpawnArena.arenas == null)
+            return null;
+        for (final me.zeronull.spawnarena.Arena a : me.zeronull.spawnarena.SpawnArena.arenas)
+            if (a.getArenaName().equalsIgnoreCase(lowerName))
+                return a.getArenaName();
+        return null;
     }
 
     public static boolean remove(final String name) {

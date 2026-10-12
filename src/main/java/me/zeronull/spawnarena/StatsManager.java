@@ -72,6 +72,11 @@ public class StatsManager {
                     "arena VARCHAR(64) NOT NULL, " +
                     "last_reward BIGINT NOT NULL, " +
                     "PRIMARY KEY (uuid, arena))");
+            // Reward tables created before same-opponent payout tracking existed
+            if (!hasColumn(c, "arena_rewards", "last_opponent"))
+                s.execute("ALTER TABLE arena_rewards ADD COLUMN last_opponent VARCHAR(36) NULL");
+            if (!hasColumn(c, "arena_rewards", "opponent_payouts"))
+                s.execute("ALTER TABLE arena_rewards ADD COLUMN opponent_payouts INT NOT NULL DEFAULT 0");
             s.execute("CREATE TABLE IF NOT EXISTS arena_reward_daily (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "reward_day VARCHAR(10) NOT NULL, " +
@@ -129,10 +134,10 @@ public class StatsManager {
         return cap > 0 && getEarnedToday(uuid) >= cap;
     }
 
-    /** Whether the next win against the same opponent wouldn't pay (they need to beat someone new). */
+    /** Whether their last opponent won't pay out again (any win against someone new clears it). */
     public boolean isSameOpponentBlocked(UUID uuid, String arena) {
         final int limit = SpawnArena.settings == null ? 0 : SpawnArena.settings.sameOpponentLimit;
-        return limit > 0 && winsInARowAgainstSameOpponent(uuid, arena) >= limit;
+        return limit > 0 && getRewardState(uuid, arena).opponentPayouts() >= limit;
     }
 
     public void addEarnedToday(UUID uuid, double amount) {
@@ -224,24 +229,15 @@ public class StatsManager {
         }
     }
 
-    // ── Same-opponent streaks ───────────────────────────────────────────────
+    // ── Alt detection ───────────────────────────────────────────────────────
 
-    private record VersusStreak(UUID opponent, int wins) {}
-    private final java.util.Map<String, VersusStreak> versusStreaks = new java.util.concurrent.ConcurrentHashMap<>();
-
-    /** Records a win and returns how many times in a row this winner has now beaten this loser here. */
-    public int recordWinAgainst(UUID winner, UUID loser, String arena) {
-        final String key = winner + ":" + arena.toLowerCase();
-        final VersusStreak previous = versusStreaks.get(key);
-        final int wins = previous != null && previous.opponent().equals(loser) ? previous.wins() + 1 : 1;
-        versusStreaks.put(key, new VersusStreak(loser, wins));
-        return wins;
-    }
-
-    /** Wins in a row against the same opponent (0 if none yet). */
-    public int winsInARowAgainstSameOpponent(UUID winner, String arena) {
-        final VersusStreak streak = versusStreaks.get(winner + ":" + arena.toLowerCase());
-        return streak == null ? 0 : streak.wins();
+    /** Records both players' current IPs, then checks whether they've ever shared one. */
+    public boolean areAlts(final Player a, final Player b) {
+        if (a == null || b == null)
+            return false;
+        recordIp(a.getUniqueId(), a.getAddress() == null ? null : a.getAddress().getAddress());
+        recordIp(b.getUniqueId(), b.getAddress() == null ? null : b.getAddress().getAddress());
+        return sharesIp(a.getUniqueId(), b.getUniqueId());
     }
 
     // ── Last win result (shown on the reward hologram instead of chat) ──────
@@ -283,30 +279,101 @@ public class StatsManager {
     // Countdown holograms read this every second per viewer, so it's served from memory.
     // The TTL only matters when another server shares the same MySQL database.
     private static final long REWARD_CACHE_MILLIS = 60_000;
-    private record CachedReward(long fetchedAt, long lastReward) {}
+    /**
+     * A player's reward state in one arena: when they were last paid, who that payout was against,
+     * and how many payouts in a row they've had against that same opponent.
+     */
+    public record RewardState(long lastReward, UUID lastOpponent, int opponentPayouts) {}
+    private record CachedReward(long fetchedAt, RewardState state) {}
     private final java.util.Map<String, CachedReward> rewardCache = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** Epoch millis of the player's last win reward in this arena, or 0 if never. */
-    public long getLastReward(UUID uuid, String arena) {
+    public RewardState getRewardState(UUID uuid, String arena) {
         final String key = uuid + ":" + arena.toLowerCase();
         final long now = System.currentTimeMillis();
         final CachedReward cached = rewardCache.get(key);
         if (cached != null && now - cached.fetchedAt() < REWARD_CACHE_MILLIS)
-            return cached.lastReward();
+            return cached.state();
 
         try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement("SELECT last_reward FROM arena_rewards WHERE uuid=? AND arena=?")) {
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT last_reward, last_opponent, opponent_payouts FROM arena_rewards WHERE uuid=? AND arena=?")) {
             ps.setString(1, uuid.toString());
             ps.setString(2, arena.toLowerCase());
             try (ResultSet rs = ps.executeQuery()) {
-                final long last = rs.next() ? rs.getLong(1) : 0L;
-                rewardCache.put(key, new CachedReward(now, last));
-                return last;
+                RewardState state = new RewardState(0L, null, 0);
+                if (rs.next()) {
+                    final String opponent = rs.getString(2);
+                    state = new RewardState(rs.getLong(1), opponent == null ? null : UUID.fromString(opponent), rs.getInt(3));
+                }
+                rewardCache.put(key, new CachedReward(now, state));
+                return state;
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getLastReward: " + e.getMessage());
+            Bukkit.getLogger().warning("[SpawnArena] getRewardState: " + e.getMessage());
             // Fail closed: treat as just rewarded so a DB hiccup can't be farmed (not cached)
-            return now;
+            return new RewardState(now, null, 0);
+        }
+    }
+
+    /** Epoch millis of the player's last win reward in this arena, or 0 if never. */
+    public long getLastReward(UUID uuid, String arena) {
+        return getRewardState(uuid, arena).lastReward();
+    }
+
+    /** Whether beating this opponent again wouldn't pay: they've already paid out sameOpponentLimit times in a row. */
+    public boolean isBlockedAgainst(UUID uuid, String arena, UUID opponent) {
+        final int limit = SpawnArena.settings == null ? 0 : SpawnArena.settings.sameOpponentLimit;
+        if (limit <= 0 || opponent == null)
+            return false;
+        final RewardState state = getRewardState(uuid, arena);
+        return opponent.equals(state.lastOpponent()) && state.opponentPayouts() >= limit;
+    }
+
+    /**
+     * Any (non-alt) win against someone other than the last paid opponent clears the same-opponent
+     * count, paid or not — the limit only stops farming one specific player.
+     */
+    public void noteWinAgainst(UUID winner, String arena, UUID loser) {
+        if (loser == null)
+            return;
+        final RewardState state = getRewardState(winner, arena);
+        if (state.opponentPayouts() == 0 || loser.equals(state.lastOpponent()))
+            return;
+
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE arena_rewards SET last_opponent=?, opponent_payouts=0 WHERE uuid=? AND arena=?")) {
+            ps.setString(1, loser.toString());
+            ps.setString(2, winner.toString());
+            ps.setString(3, arena.toLowerCase());
+            ps.executeUpdate();
+            rewardCache.put(winner + ":" + arena.toLowerCase(),
+                    new CachedReward(System.currentTimeMillis(), new RewardState(state.lastReward(), loser, 0)));
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] noteWinAgainst: " + e.getMessage());
+        }
+    }
+
+    /** Records a payout; payouts against the same opponent in a row are counted for the same-opponent limit. */
+    public void recordPayout(UUID uuid, String arena, long epochMillis, UUID opponent) {
+        final RewardState previous = getRewardState(uuid, arena);
+        final int payouts = opponent != null && opponent.equals(previous.lastOpponent()) ? previous.opponentPayouts() + 1 : 1;
+
+        final String sql = "INSERT INTO arena_rewards (uuid, arena, last_reward, last_opponent, opponent_payouts) " +
+                "VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE last_reward = VALUES(last_reward), " +
+                "last_opponent = VALUES(last_opponent), opponent_payouts = VALUES(opponent_payouts)";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.setLong(3, epochMillis);
+            ps.setString(4, opponent == null ? null : opponent.toString());
+            ps.setInt(5, payouts);
+            ps.executeUpdate();
+            rewardCache.put(uuid + ":" + arena.toLowerCase(),
+                    new CachedReward(System.currentTimeMillis(), new RewardState(epochMillis, opponent, payouts)));
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] recordPayout: " + e.getMessage());
         }
     }
 
@@ -413,21 +480,6 @@ public class StatsManager {
         final int h = minutes / 60, m = minutes % 60;
         if (h == 0) return m + "m";
         return m == 0 ? h + "h" : h + "h " + m + "m";
-    }
-
-    public void setLastReward(UUID uuid, String arena, long epochMillis) {
-        final String sql = "INSERT INTO arena_rewards (uuid, arena, last_reward) VALUES (?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE last_reward = VALUES(last_reward)";
-        try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, uuid.toString());
-            ps.setString(2, arena.toLowerCase());
-            ps.setLong(3, epochMillis);
-            ps.executeUpdate();
-            rewardCache.put(uuid + ":" + arena.toLowerCase(), new CachedReward(System.currentTimeMillis(), epochMillis));
-        } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] setLastReward: " + e.getMessage());
-        }
     }
 
     // ── Read ────────────────────────────────────────────────────────────────
@@ -672,15 +724,25 @@ public class StatsManager {
                 return;
         }
 
-        final String upsert = "INSERT INTO arena_rewards (uuid, arena, last_reward) VALUES (?, ?, ?) " +
-                "ON DUPLICATE KEY UPDATE last_reward = GREATEST(last_reward, VALUES(last_reward))";
+        // Target is MySQL, which applies SET assignments left to right: compare against the old
+        // last_reward before it's overwritten, so the newer row's opponent data wins
+        final String upsert = "INSERT INTO arena_rewards (uuid, arena, last_reward, last_opponent, opponent_payouts) " +
+                "VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+                "last_opponent = IF(VALUES(last_reward) >= last_reward, VALUES(last_opponent), last_opponent), " +
+                "opponent_payouts = IF(VALUES(last_reward) >= last_reward, VALUES(opponent_payouts), opponent_payouts), " +
+                "last_reward = GREATEST(last_reward, VALUES(last_reward))";
+        final boolean hasOpponents = hasColumn(h2, "arena_rewards", "last_opponent");
         try (Statement read = h2.createStatement();
-             ResultSet rs = read.executeQuery("SELECT uuid, arena, last_reward FROM arena_rewards");
+             ResultSet rs = read.executeQuery("SELECT uuid, arena, last_reward"
+                     + (hasOpponents ? ", last_opponent, opponent_payouts" : ", NULL AS last_opponent, 0 AS opponent_payouts")
+                     + " FROM arena_rewards");
              PreparedStatement ps = target.prepareStatement(upsert)) {
             while (rs.next()) {
                 ps.setString(1, rs.getString("uuid"));
                 ps.setString(2, rs.getString("arena"));
                 ps.setLong(3, rs.getLong("last_reward"));
+                ps.setString(4, rs.getString("last_opponent"));
+                ps.setInt(5, rs.getInt("opponent_payouts"));
                 ps.addBatch();
             }
             ps.executeBatch();

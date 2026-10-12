@@ -51,7 +51,7 @@ commands:
     permission-message: "§cYou don't have permission!"
   arenaleaderboard:
     description: View the arena leaderboard, or spawn/remove/list leaderboard holograms
-    usage: "/arenaleaderboard [arena] [stat] [limit] | spawn <arena> <stat|reward> [limit] | remove <name> | list | reload"
+    usage: "/arenaleaderboard [arena] [stat] [limit] | spawn <arena> <stat|reward> [limit] | remove <name> | list | reload | update"
     permission: spawnarena.arenaleaderboard
     permission-message: "§cYou don't have permission!"
 
