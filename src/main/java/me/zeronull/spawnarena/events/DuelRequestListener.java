@@ -2,12 +2,14 @@ package me.zeronull.spawnarena.events;
 
 import me.zeronull.spawnarena.Arena;
 import me.zeronull.spawnarena.DuelManager;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
 /** Shift-right-clicking a player near an arena sends them a duel request for that arena. */
@@ -35,5 +37,12 @@ public final class DuelRequestListener implements Listener {
     @EventHandler
     public void onQuit(final PlayerQuitEvent e) {
         DuelManager.clear(e.getPlayer());
+    }
+
+    // Same rule as the queue: teleporting away cancels pending duel requests
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(final PlayerTeleportEvent e) {
+        if (DuelManager.clear(e.getPlayer()))
+            e.getPlayer().sendMessage(ChatColor.RED + "Your duel requests were cancelled because you teleported.");
     }
 }

@@ -159,9 +159,12 @@ public final class DuelManager {
                 Placeholder.unparsed("target", target.getName())));
     }
 
-    public static void clear(final Player player) {
-        REQUESTS.remove(player.getUniqueId());
-        REQUESTS.values().forEach(requests -> requests.remove(player.getUniqueId()));
+    /** Removes every request this player sent or received; returns whether there were any. */
+    public static boolean clear(final Player player) {
+        boolean had = REQUESTS.remove(player.getUniqueId()) != null;
+        for (final Map<UUID, Request> requests : REQUESTS.values())
+            had |= requests.remove(player.getUniqueId()) != null;
+        return had;
     }
 
     private static Request take(final Player target, final Player requester) {
@@ -182,6 +185,10 @@ public final class DuelManager {
             return "You must be at spawn to duel.";
         if (SpawnArena.arenas.hasFighter(player))
             return "You're already in a fight.";
+        // Same rule as the queue: stay near the arena
+        final double maxDistance = SpawnArena.settings == null ? 0 : SpawnArena.settings.queueMaxDistance;
+        if (maxDistance > 0 && arena.distanceFrom(player.getLocation()) > maxDistance)
+            return "You're too far from the arena.";
         if (arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty())
             return "There's already a fight in that arena.";
         return null;
