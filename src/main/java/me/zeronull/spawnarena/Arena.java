@@ -154,11 +154,11 @@ public abstract class Arena extends ArenaOptions {
         this.fights.clear();
     }
 
-    public void teleportFighters(Player fighter1, Player fighter2) {
-        this.dismount(fighter1);
-        FoliaUtils.teleport(fighter1, this.spawnPoint1);
-        this.dismount(fighter2);
-        FoliaUtils.teleport(fighter2, this.spawnPoint2);
+    public void teleportFighter(final Player fighter, final Location spawn) {
+        if (spawn == null)
+            return;
+        this.dismount(fighter);
+        FoliaUtils.teleport(fighter, spawn);
     }
 
     private void dismount(final Player player) {

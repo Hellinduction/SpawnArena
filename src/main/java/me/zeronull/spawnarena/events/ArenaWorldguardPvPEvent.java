@@ -43,6 +43,10 @@ public class ArenaWorldguardPvPEvent implements Listener {
         if (damagerFight != null && defenderFight != null && !damagerFight.equals(defenderFight))
             return;
 
+        // 2v2 teammates stay protected
+        if (damagerFight != null && !damagerFight.areOpponents(damager, defender))
+            return;
+
 //        if(SpawnArena.arena.getFight().getState() == FightState.INITALIZING) {
 //            return;
 //        }

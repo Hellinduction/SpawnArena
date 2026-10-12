@@ -28,6 +28,8 @@ import java.util.UUID;
  *   %spawnarena_reward_status_<arena>%     "Ready!", countdown, "Beat someone new to earn again" or "Daily limit reached"
  *   %spawnarena_reward_last_<arena>%       last win's result, e.g. "+$50k" or "Not paid: on cooldown"
  *   %spawnarena_reward_today% / %spawnarena_reward_dailycap% / %spawnarena_reward_dailyleft%
+ *   %spawnarena_queue_<1v1|2v2|total>_<arena>%    players waiting
+ *   %spawnarena_matches_<1v1|2v2|total>_<arena>%  matches in progress
  */
 public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
@@ -52,6 +54,8 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
     public @Nullable String onPlaceholderRequest(Player player, @NotNull String params) {
         if (params.startsWith("reward_"))
             return reward(player, params.substring("reward_".length()));
+        if (params.startsWith("queue_") || params.startsWith("matches_"))
+            return queue(params);
 
         final String[] parts = params.split("_");
 
@@ -107,6 +111,24 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         }
 
         return null;
+    }
+
+    /** queue_<1v1|2v2|total>_<arena> (players waiting), matches_<1v1|2v2|total>_<arena> (matches in progress) */
+    private static String queue(final String params) {
+        final String[] parts = params.split("_", 3);
+        if (parts.length < 3 || SpawnArena.arenas == null)
+            return null;
+        final Arena arena = SpawnArena.arenas.of(parts[2]);
+        if (arena == null)
+            return null;
+
+        final FightMode mode = FightMode.fromLabel(parts[1]);
+        if (mode == null && !parts[1].equals("total"))
+            return null;
+
+        if (parts[0].equals("queue"))
+            return String.valueOf(mode == null ? arena.queue.size() : arena.queue.size(mode));
+        return String.valueOf(arena.getFights().stream().filter(f -> mode == null || f.getMode() == mode).count());
     }
 
     /** reward_cooldown_<arena>, reward_ready_<arena>, reward_amount_<arena>, reward_every_<arena> */

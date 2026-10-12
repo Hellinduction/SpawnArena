@@ -53,8 +53,7 @@ public class ArenaPlayerLeaveAreaEvent implements Listener {
             return;
 
         if (event.getCause() == TeleportCause.COMMAND || event.getCause() == TeleportCause.PLUGIN || event.getCause() == TeleportCause.UNKNOWN) {
-            fight.announceWinner(player);
-            fight.endFight();
+            fight.eliminate(player);
             return;
         }
 

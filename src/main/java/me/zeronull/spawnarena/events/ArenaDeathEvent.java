@@ -54,7 +54,6 @@ public class ArenaDeathEvent implements Listener {
         if (fight == null)
             return;
 
-        fight.announceWinner(defender);
-        fight.endFight();
+        fight.eliminate(defender);
     }
 }

@@ -33,8 +33,7 @@ public class ArenaPlayerLeave implements Listener {
             return;
         }
 
-        fight.announceWinner(player);
-        fight.endFight();
+        fight.eliminate(player);
     }
 
 }

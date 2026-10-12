@@ -2,6 +2,7 @@ package me.zeronull.spawnarena;
 
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
+import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
@@ -62,14 +63,14 @@ public final class DuelManager {
     }
 
     public static void sendRequest(final Player requester, final Player target, final Arena arena) {
-        final String problem = cantDuel(requester, arena);
+        final String problem = cantDuel(requester, arena, true);
         if (problem != null) {
-            requester.sendMessage(MiniMessage.miniMessage().deserialize("<red>" + problem));
+            requester.sendMessage(ChatColor.RED + problem);
             return;
         }
-        if (cantDuel(target, arena) != null) {
-            requester.sendMessage(MiniMessage.miniMessage().deserialize("<red><target> can't duel right now.",
-                    Placeholder.unparsed("target", target.getName())));
+        final String targetProblem = cantDuel(target, arena, false);
+        if (targetProblem != null) {
+            requester.sendMessage(ChatColor.RED + targetProblem);
             return;
         }
         if (!acceptsRequests(target)) {
@@ -86,6 +87,7 @@ public final class DuelManager {
                     Placeholder.unparsed("target", target.getName())));
             return;
         }
+        LAST_SENT.values().removeIf(sent -> now - sent >= RESEND_COOLDOWN_MILLIS); // keep the map from growing forever
         LAST_SENT.put(pair, now);
 
         final int seconds = SpawnArena.settings == null ? 30 : SpawnArena.settings.duelRequestSeconds;
@@ -122,10 +124,9 @@ public final class DuelManager {
             return;
         }
         for (final Player p : new Player[]{target, requester}) {
-            final String problem = cantDuel(p, arena);
+            final String problem = cantDuel(p, arena, p == target);
             if (problem != null) {
-                target.sendMessage(MiniMessage.miniMessage().deserialize(p == target ? "<red>" + problem : "<red><who> can't duel right now.",
-                        Placeholder.unparsed("who", p.getName())));
+                target.sendMessage(ChatColor.RED + problem);
                 return;
             }
         }
@@ -153,8 +154,8 @@ public final class DuelManager {
                     Placeholder.unparsed("requester", requester.getName())));
             return;
         }
-        target.sendMessage(MiniMessage.miniMessage().deserialize("<gray>Denied <requester>'s duel request.",
-                Placeholder.unparsed("requester", requester.getName())));
+        target.sendMessage(MiniMessage.miniMessage().deserialize("<gray>Denied <requester> duel request.",
+                Placeholder.unparsed("requester", Grammar.possessive(requester.getName()))));
         requester.sendMessage(MiniMessage.miniMessage().deserialize("<red><target> denied your duel request.",
                 Placeholder.unparsed("target", target.getName())));
     }
@@ -177,18 +178,31 @@ public final class DuelManager {
         return request;
     }
 
-    /** Why this player can't start a duel in this arena right now, or null if they can. */
-    private static String cantDuel(final Player player, final Arena arena) {
+    /**
+     * Why this player can't duel in this arena right now, or null if they can. Phrased for them
+     * ({@code self}) or about them, for the other player.
+     */
+    private static String cantDuel(final Player player, final Arena arena, final boolean self) {
+        final String name = player.getName();
         if (SpawnArena.settings != null && !SpawnArena.settings.arenasOpen)
             return "The arenas are closed right now.";
         if (!player.getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
-            return "You must be at spawn to duel.";
-        if (SpawnArena.arenas.hasFighter(player))
-            return "You're already in a fight.";
+            return self ? "You must be at spawn to duel." : name + " isn't at spawn.";
+        if (SpawnArena.arenas.hasFighter(player)) {
+            final Arena current = SpawnArena.arenas.of(player);
+            final Fight fight = current == null ? null : current.getFight(player);
+            if (fight != null && fight.getState() == FightState.COUNTDOWN)
+                return self ? "You're about to start a match." : name + " is about to start a match.";
+            return self ? "You're already in a fight." : name + " is in a fight right now.";
+        }
+        final ArenaQueue queue = ArenaQueue.PLAYER_QUEUE_MAP.get(player);
+        if (queue != null && queue.playerInQueue(player))
+            return self ? "You're waiting in a queue. Leave it first with /joinarenaqueue " + queue.getArena().getArenaName() + "."
+                    : name + " is waiting in a queue.";
         // Same rule as the queue: stay near the arena
         final double maxDistance = SpawnArena.settings == null ? 0 : SpawnArena.settings.queueMaxDistance;
         if (maxDistance > 0 && arena.distanceFrom(player.getLocation()) > maxDistance)
-            return "You're too far from the arena.";
+            return self ? "You're too far from the arena." : name + " is too far from the arena.";
         if (arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty())
             return "There's already a fight in that arena.";
         return null;

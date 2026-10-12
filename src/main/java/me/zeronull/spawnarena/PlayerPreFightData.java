@@ -32,6 +32,8 @@ public final class PlayerPreFightData {
     protected double health;
     protected int foodLevel;
     protected List<PotionEffect> effects;
+    /** Items that belong to the player but didn't fit in their inventory when the fight started (e.g. a recalled trident). */
+    protected List<ItemStack> extraItems = new ArrayList<>();
 
     public PlayerPreFightData(Player player) {
         this.player = player;
@@ -76,6 +78,23 @@ public final class PlayerPreFightData {
         this.previousGameMode = GameMode.valueOf(obj.getString("previous_gamemode"));
         this.health = obj.getDouble("health");
         this.foodLevel = obj.getInt("food_level");
+        if (obj.has("extra_items")) {
+            for (final ItemStack item : ItemSerializer.deserialize(obj.getString("extra_items")))
+                if (item != null)
+                    this.extraItems.add(item);
+        }
+    }
+
+    /** Holds items to hand back at restore (and saves them, so /restore has them too). */
+    public void addExtraItems(final List<ItemStack> items) {
+        if (items.isEmpty())
+            return;
+        for (final ItemStack item : items) {
+            this.extraItems.add(item.clone());
+            this.player.sendMessage(org.bukkit.ChatColor.RED + "Your thrown " + describe(item)
+                    + " didn't fit in your inventory. You'll get it back after the fight.");
+        }
+        ConfigHandler.getInstance().register(this.player.getUniqueId(), this);
     }
 
     public void restore() {
@@ -98,7 +117,13 @@ public final class PlayerPreFightData {
         // These 2 just assume they were at this before
         this.player.setFireTicks(0);
 
-        this.player.setHealth(this.health);
+        // Effects first, so a health boost they had raises max health before health is set
+        this.restorePotionEffects();
+
+        // setHealth throws above max health (e.g. a health boost that has since worn off)
+        final org.bukkit.attribute.AttributeInstance maxHealth = this.player.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH);
+        final double max = maxHealth == null ? 20 : maxHealth.getValue();
+        this.player.setHealth(Math.max(0.5, Math.min(this.health, max)));
         this.player.setFoodLevel(this.foodLevel);
         this.player.setLevel(this.level);
         this.player.setExp(this.exp);
@@ -106,13 +131,41 @@ public final class PlayerPreFightData {
         this.player.getInventory().setArmorContents(this.armorContents);
         this.player.setGameMode(this.previousGameMode);
 
-        this.restorePotionEffects();
+        // Items that didn't fit when the fight started: inventory first, then ender chest, then the ground
+        if (!this.extraItems.isEmpty()) {
+            for (final ItemStack item : this.extraItems)
+                this.returnExtraItem(item, destination);
+            this.extraItems.clear();
+        }
 
         final ConfigHandler handler = ConfigHandler.getInstance();
         final PreFightConfig config = handler.getPreFightConfig();
 
         config.map.remove(player.getUniqueId());
         handler.savePreFightConfig(config);
+    }
+
+    private void returnExtraItem(final ItemStack item, final Location dropAt) {
+        final String name = describe(item);
+
+        if (this.player.getInventory().addItem(item.clone()).isEmpty()) {
+            this.player.sendMessage(org.bukkit.ChatColor.RED + "Your " + name + " was returned to your inventory.");
+            return;
+        }
+        if (this.player.getEnderChest().addItem(item.clone()).isEmpty()) {
+            this.player.sendMessage(org.bukkit.ChatColor.RED + "Your inventory was full, so your " + name + " was put in your ender chest.");
+            return;
+        }
+        this.player.getWorld().dropItemNaturally(dropAt != null ? dropAt : this.player.getLocation(), item);
+        this.player.sendMessage(org.bukkit.ChatColor.RED + "Your inventory and ender chest were full, so your " + name + " was dropped at your feet.");
+    }
+
+    /** "trident", "2x trident", or the item's custom name. */
+    static String describe(final ItemStack item) {
+        final String base = item.hasItemMeta() && item.getItemMeta().hasDisplayName()
+                ? net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText().serialize(item.getItemMeta().displayName())
+                : item.getType().name().toLowerCase().replace('_', ' ');
+        return item.getAmount() > 1 ? item.getAmount() + "x " + base : base;
     }
 
     private void restorePotionEffects() {
@@ -151,6 +204,8 @@ public final class PlayerPreFightData {
         obj.put("previous_gamemode", this.previousGameMode.name());
         obj.put("health", this.health);
         obj.put("food_level", this.foodLevel);
+        if (!this.extraItems.isEmpty())
+            obj.put("extra_items", ItemSerializer.serialize(this.extraItems.toArray(new ItemStack[0])));
 
         return obj;
     }

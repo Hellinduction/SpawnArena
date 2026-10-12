@@ -38,12 +38,8 @@ public final class QueueDistanceListener implements Listener {
         if (fight == null || fight.getState() != FightState.COUNTDOWN || !tooFar(arena, to))
             return;
 
-        final Player other = fight.getOtherFighter(player);
         player.sendMessage(ChatColor.RED + "You were removed from the fight for going too far from the arena.");
-        if (other != null)
-            other.sendMessage(ChatColor.RED + "Your opponent went too far from the arena, so the fight was cancelled.");
-        fight.cancelFight();
-        arena.queue.tryStartFight();
+        fight.cancelBecause(player, player.getName() + " went too far from the arena, so the fight was cancelled.");
     }
 
     private boolean tooFar(final Arena arena, final Location loc) {

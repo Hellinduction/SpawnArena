@@ -1,6 +1,8 @@
 package me.zeronull.spawnarena.commands.impl;
 
 import me.zeronull.spawnarena.Arena;
+import me.zeronull.spawnarena.ArenaMode;
+import me.zeronull.spawnarena.Fight;
 import me.zeronull.spawnarena.SpawnArena;
 import me.zeronull.spawnarena.commands.ArenaTabComplete;
 import org.bukkit.Bukkit;
@@ -10,18 +12,24 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
-import java.util.function.Consumer;
-import java.util.function.Predicate;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 
+/**
+ * /setupfight <arena> <p1> <p2>          — 1v1 between p1 and p2
+ * /setupfight <arena> <p1> <p2> <p3> <p4> — 2v2: p1 + p2 against p3 + p4
+ */
 public final class SetUpFightCommand extends ArenaTabComplete implements CommandExecutor {
     public SetUpFightCommand() {
-        super(0, true, 3);
+        super(0, true, 5);
     }
 
     @Override
     public boolean onCommand(final CommandSender sender, final Command command, final String label, final String[] args) {
-        if (args.length < 3) {
-            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /setupfight <arena> <fighter1> <fighter2>"));
+        if (args.length != 3 && args.length != 5) {
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&',
+                    "&cUsage: /setupfight <arena> <p1> <p2>  &7or (2v2)  &c/setupfight <arena> <p1> <p2> <p3> <p4>"));
             return true;
         }
 
@@ -30,49 +38,56 @@ public final class SetUpFightCommand extends ArenaTabComplete implements Command
             return true;
         }
 
-        final String arenaName = args[0];
-        final Arena arena = SpawnArena.arenas.of(arenaName);
-
+        final Arena arena = SpawnArena.arenas.of(args[0]);
         if (arena == null) {
             sender.sendMessage(ChatColor.RED + "That arena was not found.");
             return true;
         }
-
         if (!arena.isSetUp()) {
             sender.sendMessage(ChatColor.RED + "That arena has not been fully setup!");
             return true;
         }
 
-        final String fighter1Username = args[1];
-        final String fighter2Username = args[2];
+        final List<Player> players = new ArrayList<>();
+        for (int i = 1; i < args.length; i++) {
+            final Player p = Bukkit.getPlayerExact(args[i]);
+            if (p == null) {
+                sender.sendMessage(ChatColor.RED + args[i] + " isn't online.");
+                return true;
+            }
+            players.add(p);
+        }
+        if (new HashSet<>(players).size() != players.size()) {
+            sender.sendMessage(ChatColor.RED + "The same player can't be in the fight twice.");
+            return true;
+        }
+        for (final Player p : players) {
+            if (SpawnArena.arenas.hasFighter(p)) {
+                sender.sendMessage(ChatColor.RED + p.getName() + " is already in a fight.");
+                return true;
+            }
+        }
 
-        final Player fighter1 = Bukkit.getPlayer(fighter1Username);
-        final Player fighter2 = Bukkit.getPlayer(fighter2Username);
+        for (final Player p : players) {
+            if (SpawnArena.arenas.isInQueue(p))
+                SpawnArena.arenas.fromQueued(p).queue.removePlayer(p);
+        }
 
-        if (fighter1 == null || !fighter1.isOnline() || fighter2 == null || !fighter2.isOnline()) {
-            sender.sendMessage(ChatColor.RED + "One or more of the specified fighters are not online.");
+        if (players.size() == 2) {
+            // Queued last, so the 1v1 queue pairs exactly these two (waiting in SINGLE arenas until free)
+            JoinArenaQueueCommand.addToQueue(arena, players.get(0));
+            JoinArenaQueueCommand.addToQueue(arena, players.get(1));
+            sender.sendMessage(ChatColor.GREEN + String.format("Set up a 1v1: %s vs %s.", players.get(0).getName(), players.get(1).getName()));
             return true;
         }
 
-        final Predicate<Player> isInFight = player -> arena.getFight(player) != null;
-
-        if (isInFight.test(fighter1) || isInFight.test(fighter2)) {
-            sender.sendMessage(ChatColor.RED + "One of the specified players is already in a fight.");
+        if (arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty()) {
+            sender.sendMessage(ChatColor.RED + "That arena already has a fight going on.");
             return true;
         }
-
-        final Consumer<Player> call = fighter -> {
-          if (SpawnArena.arenas.isInQueue(fighter, arena.queue))
-              arena.queue.removePlayer(fighter);
-        };
-
-        call.accept(fighter1);
-        call.accept(fighter2);
-
-        JoinArenaQueueCommand.addToQueue(arena, fighter1);
-        JoinArenaQueueCommand.addToQueue(arena, fighter2);
-
-        sender.sendMessage(ChatColor.GREEN + String.format("The fight between %s and %s will begin in 5 seconds.", fighter1.getName(), fighter2.getName()));
+        new Fight().initiateTeamFight(players.subList(0, 2), players.subList(2, 4), arena);
+        sender.sendMessage(ChatColor.GREEN + String.format("Set up a 2v2: %s & %s vs %s & %s. Starting in 5 seconds.",
+                players.get(0).getName(), players.get(1).getName(), players.get(2).getName(), players.get(3).getName()));
         return true;
     }
 }

@@ -42,9 +42,10 @@ public final class ArenaReloadCommand implements CommandExecutor {
 
         SpawnArena.statsManager.invalidateLeaderboards();
 
-        sender.sendMessage(String.format("§aReloaded settings.yml and %d arena(s).", reloaded));
+        sender.sendMessage("§aReloaded settings.yml and " + me.zeronull.spawnarena.Grammar.count(reloaded, "arena") + ".");
         if (failed > 0)
-            sender.sendMessage(String.format("§c%d arena file(s) had errors and kept their old values. Check the console.", failed));
+            sender.sendMessage("§c" + me.zeronull.spawnarena.Grammar.count(failed, "arena file")
+                    + " had errors and kept the old values. Check the console.");
         sender.sendMessage("§7database.yml changes and newly added/removed arena files still need a restart.");
         return true;
     }

@@ -51,7 +51,6 @@ public final class ArenaPlayerInteractEvent implements Listener {
             return;
         }
 
-        fight.announceWinner(fight.getOtherFighter(player));
-        fight.endFight();
+        fight.winForTeamOf(player);
     }
 }

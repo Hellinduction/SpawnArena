@@ -85,6 +85,6 @@ public final class ArenaFireFix implements Listener {
         if (!isInRunningFight(attacker) || !isInRunningFight(defender))
             return false;
         final Fight fight = SpawnArena.arenas.of(attacker).getFight(attacker);
-        return defender.equals(fight.getOtherFighter(attacker));
+        return fight.areOpponents(attacker, defender);
     }
 }

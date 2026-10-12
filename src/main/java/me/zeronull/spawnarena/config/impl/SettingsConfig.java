@@ -44,6 +44,9 @@ public final class SettingsConfig {
             "towards wins, win streaks or the leaderboards."})
     public boolean blockSameIpStats = true;
 
+    @Comment("Losing a win streak at least this long gets a dramatic announcement. 0 disables it.")
+    public int streakEndAnnounceThreshold = 10;
+
     @Comment("How close (in blocks) to an arena's region you must be to shift-right-click someone for a duel there")
     public double duelRadius = 10;
 

@@ -20,14 +20,11 @@ public class TeleportKickOut implements Listener {
                 player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cYou were kicked out of the queue as you teleported!"));
             }
 
-            for(Fight fight : arena.getFights()) {
-                if(fight.getFighters().contains(player)) {
-                    if(fight.getState() == FightState.COUNTDOWN) {
-                        Player otherFighter = fight.getOtherFighter(player);
-                        player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cYou were kicked out of the queue as you teleported!"));
-                        otherFighter.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cYour opponent was kicked out of the queue!"));
-                        fight.cancelFight();
-                    }
+            // Copy: cancelling a fight removes it from the arena's list
+            for (Fight fight : new java.util.ArrayList<>(arena.getFights())) {
+                if (fight.isFighter(player) && fight.getState() == FightState.COUNTDOWN) {
+                    player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cYou were kicked out of the queue as you teleported!"));
+                    fight.cancelBecause(player, player.getName() + " teleported away, so the fight was cancelled.");
                 }
             }
         }

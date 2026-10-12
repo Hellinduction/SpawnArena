@@ -144,7 +144,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
 
         if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms")) {
             final int count = LeaderboardHolograms.refreshAll();
-            sender.sendMessage("§aReloaded leaderboards and redrew §e" + count + "§a hologram(s).");
+            sender.sendMessage("§aReloaded leaderboards and redrew §e" + me.zeronull.spawnarena.Grammar.count(count, "hologram") + "§a.");
         } else {
             sender.sendMessage("§aReloaded leaderboards.");
         }
@@ -155,7 +155,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         if (!canManageHolograms(sender)) return true;
 
         final LeaderboardHolograms.UpdateResult result = LeaderboardHolograms.updateAll();
-        sender.sendMessage("§aUpdated §e" + result.updated() + "§a hologram(s) to the current layout, in place.");
+        sender.sendMessage("§aUpdated §e" + me.zeronull.spawnarena.Grammar.count(result.updated(), "hologram") + "§a to the current layout, in place.");
         if (!result.skipped().isEmpty())
             sender.sendMessage("§eSkipped (arena no longer exists): §6" + String.join("§e, §6", result.skipped()));
         return true;

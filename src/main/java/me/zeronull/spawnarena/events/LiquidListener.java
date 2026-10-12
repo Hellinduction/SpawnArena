@@ -63,7 +63,6 @@ public final class LiquidListener implements Listener, Runnable {
         if (ArenaTeleportGrace.rescue(player))
             return;
 
-        fight.announceWinner(player);
-        fight.endFight();
+        fight.eliminate(player);
     }
 }

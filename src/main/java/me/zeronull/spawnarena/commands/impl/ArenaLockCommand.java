@@ -69,10 +69,12 @@ public final class ArenaLockCommand implements CommandExecutor, TabCompleter {
             }
         }
 
-        sender.sendMessage(String.format("§eArenas closed. Removed §6%d§e from queues, cancelled §6%d§e countdown(s).", dequeued, cancelled));
+        sender.sendMessage("§eArenas closed. Removed §6" + me.zeronull.spawnarena.Grammar.count(dequeued, "player")
+                + "§e from queues, cancelled §6" + me.zeronull.spawnarena.Grammar.count(cancelled, "countdown") + "§e.");
         sender.sendMessage(running == 0
                 ? "§aNo fights are running — safe to reload."
-                : String.format("§6%d§e fight(s) still running; they'll finish normally.", running));
+                : "§6" + me.zeronull.spawnarena.Grammar.count(running, "fight") + "§e still running; "
+                        + (running == 1 ? "it'll" : "they'll") + " finish normally.");
         return true;
     }
 

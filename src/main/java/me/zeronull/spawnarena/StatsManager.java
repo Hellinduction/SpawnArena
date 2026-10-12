@@ -79,14 +79,23 @@ public class StatsManager {
                 s.execute("ALTER TABLE arena_rewards ADD COLUMN opponent_payouts INT NOT NULL DEFAULT 0");
             if (!hasColumn(c, "arena_rewards", "last_result"))
                 s.execute("ALTER TABLE arena_rewards ADD COLUMN last_result VARCHAR(128) NULL");
+            s.execute("CREATE TABLE IF NOT EXISTS recent_teammates (" +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "mate VARCHAR(36) NOT NULL, " +
+                    "teamed_at BIGINT NOT NULL, " +
+                    "PRIMARY KEY (uuid, mate))");
             s.execute("CREATE TABLE IF NOT EXISTS arena_payouts (" +
                     "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "arena VARCHAR(64) NOT NULL, " +
                     "amount DOUBLE NOT NULL, " +
                     "opponent VARCHAR(36) NULL, " +
+                    "opponent2 VARCHAR(36) NULL, " +
                     "leader BOOLEAN NOT NULL DEFAULT FALSE, " +
                     "paid_at BIGINT NOT NULL)");
+            // Payout logs created before 2v2 existed
+            if (!hasColumn(c, "arena_payouts", "opponent2"))
+                s.execute("ALTER TABLE arena_payouts ADD COLUMN opponent2 VARCHAR(36) NULL");
             s.execute("CREATE TABLE IF NOT EXISTS arena_reward_daily (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "reward_day VARCHAR(10) NOT NULL, " +
@@ -102,21 +111,67 @@ public class StatsManager {
         }
     }
 
+    // ── 2v2 teammate history ────────────────────────────────────────────────
+
+    private final java.util.Map<UUID, List<UUID>> recentTeammatesCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public void recordTeammate(UUID uuid, UUID mate) {
+        final String sql = "INSERT INTO recent_teammates (uuid, mate, teamed_at) VALUES (?, ?, ?) " +
+                "ON DUPLICATE KEY UPDATE teamed_at = VALUES(teamed_at)";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, mate.toString());
+            ps.setLong(3, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] recordTeammate: " + e.getMessage());
+        }
+        recentTeammatesCache.remove(uuid);
+    }
+
+    /** This player's most recent 2v2 teammates, newest first. */
+    public List<UUID> getRecentTeammates(UUID uuid, int limit) {
+        final List<UUID> cached = recentTeammatesCache.get(uuid);
+        if (cached != null)
+            return cached;
+
+        final List<UUID> mates = new ArrayList<>();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT mate FROM recent_teammates WHERE uuid=? ORDER BY teamed_at DESC LIMIT ?")) {
+            ps.setString(1, uuid.toString());
+            ps.setInt(2, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    mates.add(UUID.fromString(rs.getString(1)));
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getRecentTeammates: " + e.getMessage());
+            return mates;
+        }
+        recentTeammatesCache.put(uuid, mates);
+        return mates;
+    }
+
     // ── Payout log ──────────────────────────────────────────────────────────
 
-    public record Payout(String arena, double amount, UUID opponent, boolean leader, long paidAt) {}
+    /** {@code opponent2} is only set for 2v2 payouts. */
+    public record Payout(String arena, double amount, UUID opponent, UUID opponent2, boolean leader, long paidAt) {}
     public record OpponentTotal(UUID opponent, int payouts, double amount) {}
 
-    public void logPayout(UUID uuid, String arena, double amount, UUID opponent, boolean leader) {
-        final String sql = "INSERT INTO arena_payouts (uuid, arena, amount, opponent, leader, paid_at) VALUES (?, ?, ?, ?, ?, ?)";
+    /** {@code opponents}: the player(s) beaten — one for 1v1, two for 2v2. */
+    public void logPayout(UUID uuid, String arena, double amount, List<UUID> opponents, boolean leader) {
+        final String sql = "INSERT INTO arena_payouts (uuid, arena, amount, opponent, opponent2, leader, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             ps.setString(2, arena.toLowerCase());
             ps.setDouble(3, amount);
-            ps.setString(4, opponent == null ? null : opponent.toString());
-            ps.setBoolean(5, leader);
-            ps.setLong(6, System.currentTimeMillis());
+            ps.setString(4, opponents.size() > 0 ? opponents.get(0).toString() : null);
+            ps.setString(5, opponents.size() > 1 ? opponents.get(1).toString() : null);
+            ps.setBoolean(6, leader);
+            ps.setLong(7, System.currentTimeMillis());
             ps.executeUpdate();
         } catch (SQLException e) {
             Bukkit.getLogger().warning("[SpawnArena] logPayout: " + e.getMessage());
@@ -126,7 +181,7 @@ public class StatsManager {
     /** Newest first; page 1 is the latest {@code pageSize} payouts. */
     public List<Payout> getPayouts(UUID uuid, int page, int pageSize) {
         final List<Payout> payouts = new ArrayList<>();
-        final String sql = "SELECT arena, amount, opponent, leader, paid_at FROM arena_payouts WHERE uuid=? " +
+        final String sql = "SELECT arena, amount, opponent, opponent2, leader, paid_at FROM arena_payouts WHERE uuid=? " +
                 "ORDER BY paid_at DESC, id DESC LIMIT ? OFFSET ?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
@@ -136,8 +191,11 @@ public class StatsManager {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     final String opponent = rs.getString("opponent");
+                    final String opponent2 = rs.getString("opponent2");
                     payouts.add(new Payout(rs.getString("arena"), rs.getDouble("amount"),
-                            opponent == null ? null : UUID.fromString(opponent), rs.getBoolean("leader"), rs.getLong("paid_at")));
+                            opponent == null ? null : UUID.fromString(opponent),
+                            opponent2 == null ? null : UUID.fromString(opponent2),
+                            rs.getBoolean("leader"), rs.getLong("paid_at")));
                 }
             }
         } catch (SQLException e) {
@@ -149,12 +207,16 @@ public class StatsManager {
     /** Who this player has been paid against most, all time. */
     public List<OpponentTotal> getTopPayoutOpponents(UUID uuid, int limit) {
         final List<OpponentTotal> totals = new ArrayList<>();
-        final String sql = "SELECT opponent, COUNT(*) AS n, SUM(amount) AS total FROM arena_payouts " +
-                "WHERE uuid=? AND opponent IS NOT NULL GROUP BY opponent ORDER BY n DESC, total DESC LIMIT ?";
+        // Both 2v2 opponents count
+        final String sql = "SELECT o AS opponent, COUNT(*) AS n, SUM(amount) AS total FROM (" +
+                "SELECT opponent AS o, amount FROM arena_payouts WHERE uuid=? " +
+                "UNION ALL SELECT opponent2 AS o, amount FROM arena_payouts WHERE uuid=?" +
+                ") t WHERE o IS NOT NULL GROUP BY o ORDER BY n DESC, total DESC LIMIT ?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
-            ps.setInt(2, limit);
+            ps.setString(2, uuid.toString());
+            ps.setInt(3, limit);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next())
                     totals.add(new OpponentTotal(UUID.fromString(rs.getString("opponent")), rs.getInt("n"), rs.getDouble("total")));
@@ -845,17 +907,20 @@ public class StatsManager {
             if (!tables.next())
                 return;
         }
+        final boolean hasOpponent2 = hasColumn(h2, "arena_payouts", "opponent2");
         try (Statement read = h2.createStatement();
-             ResultSet rs = read.executeQuery("SELECT uuid, arena, amount, opponent, leader, paid_at FROM arena_payouts");
+             ResultSet rs = read.executeQuery("SELECT uuid, arena, amount, opponent, "
+                     + (hasOpponent2 ? "opponent2" : "NULL AS opponent2") + ", leader, paid_at FROM arena_payouts");
              PreparedStatement ps = target.prepareStatement(
-                     "INSERT INTO arena_payouts (uuid, arena, amount, opponent, leader, paid_at) VALUES (?, ?, ?, ?, ?, ?)")) {
+                     "INSERT INTO arena_payouts (uuid, arena, amount, opponent, opponent2, leader, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)")) {
             while (rs.next()) {
                 ps.setString(1, rs.getString("uuid"));
                 ps.setString(2, rs.getString("arena"));
                 ps.setDouble(3, rs.getDouble("amount"));
                 ps.setString(4, rs.getString("opponent"));
-                ps.setBoolean(5, rs.getBoolean("leader"));
-                ps.setLong(6, rs.getLong("paid_at"));
+                ps.setString(5, rs.getString("opponent2"));
+                ps.setBoolean(6, rs.getBoolean("leader"));
+                ps.setLong(7, rs.getLong("paid_at"));
                 ps.addBatch();
             }
             ps.executeBatch();

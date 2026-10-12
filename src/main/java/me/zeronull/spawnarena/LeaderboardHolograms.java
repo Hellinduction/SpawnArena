@@ -137,11 +137,61 @@ public final class LeaderboardHolograms {
                 "<#FFE066><bold>%spawnarena_reward_status_" + arena + "%</bold></#FFE066>",
                 "<gray>Last win: <white>%spawnarena_reward_last_" + arena + "%</white>",
                 "<gray>Earned today: <white>%spawnarena_reward_today%</white> <dark_gray>/</dark_gray> <white>%spawnarena_reward_dailycap%</white>",
-                "<white>Claimable once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
-                "<gold>★ <yellow>#1 win streak earns <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
-                        + "%</bold></#55FF55> <yellow>every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
+                "<white>Wins pay out at most once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
+                "<gold>★ <yellow>#1 win streak: <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
+                        + "%</bold></#55FF55> <yellow>per win, max once every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
                 "<dark_gray>Alts don't count · max %spawnarena_reward_samelimit% payouts in a row vs the same player"
         ));
+    }
+
+    // ── "Ready!" poof ───────────────────────────────────────────────────────
+
+    private static final double READY_EFFECT_RADIUS = 16;
+    /** "uuid:hologram" -> whether that player's reward was ready at the last check */
+    private static final java.util.Map<String, Boolean> WAS_READY = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Once a second: a poof at a reward hologram, for a nearby player, the moment their reward becomes ready. */
+    public static void startReadyEffects() {
+        me.zeronull.spawnarena.SpawnArena.scheduler.runTaskTimer(LeaderboardHolograms::tickReadyEffects, 20L, 20L);
+    }
+
+    private static void tickReadyEffects() {
+        final me.zeronull.spawnarena.StatsManager stats = me.zeronull.spawnarena.SpawnArena.statsManager;
+        if (stats == null)
+            return;
+
+        // Players who logged off near a hologram are never "far away", so drop them here
+        WAS_READY.keySet().removeIf(key -> org.bukkit.Bukkit.getPlayer(java.util.UUID.fromString(key.substring(0, key.indexOf(':')))) == null);
+
+        for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
+            final String name = h.getData().getName();
+            if (!name.startsWith(NAME_PREFIX))
+                continue;
+            final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
+            if (!rest.endsWith("_reward"))
+                continue;
+
+            final String arenaName = resolveArena(rest.substring(0, rest.length() - "_reward".length()));
+            final Arena arena = arenaName == null ? null : me.zeronull.spawnarena.SpawnArena.arenas.of(arenaName);
+            final Location loc = h.getData().getLocation();
+            if (arena == null || arena.getWinReward() <= 0 || loc == null || loc.getWorld() == null)
+                continue;
+
+            for (final org.bukkit.entity.Player p : loc.getWorld().getPlayers()) {
+                final String key = p.getUniqueId() + ":" + name;
+                if (p.getLocation().distanceSquared(loc) > READY_EFFECT_RADIUS * READY_EFFECT_RADIUS) {
+                    WAS_READY.remove(key); // coming back later starts fresh, without a poof
+                    continue;
+                }
+
+                final boolean ready = !stats.hasReachedDailyCap(p.getUniqueId())
+                        && stats.rewardCooldownRemaining(p.getUniqueId(), arena) <= 0;
+                final Boolean wasReady = WAS_READY.put(key, ready);
+                if (wasReady != null && !wasReady && ready)
+                    p.spawnParticle(org.bukkit.Particle.POOF,
+                            loc.clone().add(0, REWARD_LINES * LINE_HEIGHT / 2, 0), 30, 0.6, 0.6, 0.6, 0.02);
+            }
+        }
     }
 
     public record UpdateResult(int updated, List<String> skipped) {}

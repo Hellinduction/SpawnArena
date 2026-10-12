@@ -44,7 +44,7 @@ public final class ArenaConfig {
     public double leaderRewardMultiplier = 3;
 
     @Comment("Minutes between win rewards for the #1 current win streak holder")
-    public int leaderRewardCooldownMinutes = 5;
+    public int leaderRewardCooldownMinutes = 10;
 
     @Comment("Mode of the arena: SINGLE, MULTI")
     public String arenaMode = ArenaMode.SINGLE.toString();

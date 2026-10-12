@@ -88,8 +88,8 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 if (cleared < 0)
                     sender.sendMessage("§cCouldn't reset the cooldown — check the console.");
                 else
-                    sender.sendMessage(String.format("§aReset §e%s§a's win reward cooldown for §e%s§a. They can earn it on their next win.",
-                            target.getName(), all ? "all arenas" : arena));
+                    sender.sendMessage(String.format("§aReset §e%s§a win reward cooldown for §e%s§a. They can earn it on their next win.",
+                            me.zeronull.spawnarena.Grammar.possessive(target.getName()), all ? "all arenas" : arena));
             }
             case "get" -> {
                 final int wins = SpawnArena.statsManager.getWins(uuid, arena);
@@ -161,7 +161,8 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage(String.format("§7%s §8· §e%s §8· §a+%s%s §7vs §f%s",
                     PAYOUT_TIME.format(java.time.Instant.ofEpochMilli(p.paidAt())), p.arena(),
                     StatsManager.formatMoney(p.amount()), p.leader() ? " §6(#1)" : "",
-                    p.opponent() == null ? "-" : nameOf(p.opponent())));
+                    p.opponent() == null ? "-"
+                            : nameOf(p.opponent()) + (p.opponent2() == null ? "" : " & " + nameOf(p.opponent2()))));
         }
         if (list.size() == PAYOUTS_PER_PAGE)
             sender.sendMessage("§7More: /arenastats payouts " + target.getName() + " " + (page + 1));

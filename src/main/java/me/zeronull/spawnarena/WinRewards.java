@@ -19,16 +19,17 @@ public final class WinRewards {
      * Pays the winner's reward if allowed. Only a successful payout sends a chat message; the reason a
      * win didn't pay is shown on the reward hologram (%spawnarena_reward_last_<arena>%) instead.
      */
-    public static void reward(final Player winner, final Player loser, final Arena arena, final boolean alts) {
+    public static void reward(final Player winner, final java.util.List<Player> losers, final Arena arena, final boolean alts) {
         if (arena.getWinReward() <= 0)
             return;
 
         final StatsManager stats = SpawnArena.statsManager;
         final String arenaName = arena.getArenaName();
+        final UUID opponent = opponentKey(losers);
 
         // Beating someone new (who isn't an alt) clears the same-opponent count, even if this win doesn't pay
-        if (loser != null && !alts)
-            stats.noteWinAgainst(winner.getUniqueId(), arenaName, loser.getUniqueId());
+        if (opponent != null && !alts)
+            stats.noteWinAgainst(winner.getUniqueId(), arenaName, opponent);
 
         final Economy economy = economy();
         if (economy == null) {
@@ -39,7 +40,7 @@ public final class WinRewards {
             return;
         }
 
-        final String blocked = blockedReason(winner, loser, arena, alts);
+        final String blocked = blockedReason(winner, opponent, arena, alts);
         if (blocked != null) {
             stats.setLastResult(winner.getUniqueId(), arenaName, "Not paid: " + blocked);
             return;
@@ -51,6 +52,10 @@ public final class WinRewards {
         final double cap = stats.dailyCap();
         if (cap > 0)
             amount = Math.min(amount, cap - stats.getEarnedToday(winner.getUniqueId()));
+        if (amount <= 0) {
+            stats.setLastResult(winner.getUniqueId(), arenaName, "Not paid: daily limit reached");
+            return;
+        }
 
         final EconomyResponse response = economy.depositPlayer(winner, amount);
         if (!response.transactionSuccess()) {
@@ -58,10 +63,12 @@ public final class WinRewards {
             return;
         }
 
-        stats.recordPayout(winner.getUniqueId(), arenaName, System.currentTimeMillis(),
-                loser == null ? null : loser.getUniqueId());
+        stats.recordPayout(winner.getUniqueId(), arenaName, System.currentTimeMillis(), opponent);
         stats.addEarnedToday(winner.getUniqueId(), amount);
-        stats.logPayout(winner.getUniqueId(), arenaName, amount, loser == null ? null : loser.getUniqueId(), leader);
+        final java.util.List<UUID> beaten = new java.util.ArrayList<>();
+        for (final Player p : losers)
+            beaten.add(p.getUniqueId());
+        stats.logPayout(winner.getUniqueId(), arenaName, amount, beaten, leader);
         stats.setLastResult(winner.getUniqueId(), arenaName, "+" + StatsManager.formatMoney(amount));
 
         if (leader && arena.getLeaderRewardMultiplier() != 1)
@@ -71,8 +78,25 @@ public final class WinRewards {
             winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning!");
     }
 
+    /**
+     * Who this win counts against for the same-opponent limit: the player in 1v1, and the enemy
+     * pair as a whole in 2v2 (a stable ID for that exact pair, whatever order they're in).
+     */
+    static UUID opponentKey(final java.util.List<Player> losers) {
+        if (losers.isEmpty())
+            return null;
+        if (losers.size() == 1)
+            return losers.get(0).getUniqueId();
+        final java.util.List<String> ids = new java.util.ArrayList<>();
+        for (final Player p : losers)
+            ids.add(p.getUniqueId().toString());
+        java.util.Collections.sort(ids);
+        return UUID.nameUUIDFromBytes(("spawnarena-team:" + String.join("|", ids))
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     /** Why this win shouldn't pay, or null if it should. */
-    private static String blockedReason(final Player winner, final Player loser, final Arena arena, final boolean alts) {
+    private static String blockedReason(final Player winner, final UUID loser, final Arena arena, final boolean alts) {
         final StatsManager stats = SpawnArena.statsManager;
         final UUID uuid = winner.getUniqueId();
 
@@ -80,7 +104,7 @@ public final class WinRewards {
             return "same IP as your opponent";
 
         // Counted in payouts: the same opponent can only pay out sameOpponentLimit times in a row
-        if (loser != null && stats.isBlockedAgainst(uuid, arena.getArenaName(), loser.getUniqueId()))
+        if (loser != null && stats.isBlockedAgainst(uuid, arena.getArenaName(), loser))
             return "beat someone new to earn again";
 
         if (stats.hasReachedDailyCap(uuid))

@@ -35,11 +35,26 @@ public final class ArenaTeamPvPEvent implements Listener {
 
         final Fight fight = arena.getFight(attacker);
         if (fight == null || fight.getState() != FightState.IN_FIGHT) return;
-        if (!defender.equals(fight.getOtherFighter(attacker))) return;
+        if (!fight.isFighter(defender) || !fight.areOpponents(attacker, defender)) return;
         if (!arena.equals(SpawnArena.arenas.of(attacker.getLocation()))) return;
         if (!arena.equals(SpawnArena.arenas.of(defender.getLocation()))) return;
 
         e.setCancelled(false);
+    }
+
+    /** No friendly fire between 2v2 teammates, whatever WorldGuard or other plugins allow. */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onTeammateDamage(final EntityDamageByEntityEvent e) {
+        if (!(e.getEntity() instanceof Player defender)) return;
+
+        final Player attacker = resolveAttacker(e.getDamager());
+        if (attacker == null || attacker.equals(defender)) return;
+        if (!SpawnArena.arenas.hasActiveFight()) return;
+
+        final Arena arena = SpawnArena.arenas.of(attacker);
+        final Fight fight = arena == null ? null : arena.getFight(attacker);
+        if (fight != null && fight.areTeammates(attacker, defender))
+            e.setCancelled(true);
     }
 
     private static Player resolveAttacker(final Entity damager) {

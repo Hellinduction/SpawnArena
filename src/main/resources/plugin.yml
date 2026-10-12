@@ -14,7 +14,8 @@ folia-supported: true
 
 commands:
   joinarenaqueue:
-    description: join queue
+    description: Open the 1v1 / 2v2 / Auto queue menu for an arena, or join a mode directly
+    usage: "/joinarenaqueue <arena> [1v1|2v2|auto]"
     permission: spawnarena.joinarenaqueue
     permission-message: "§cYou don't have permission!"
   setarenaspawn:
@@ -30,7 +31,7 @@ commands:
     permission: spawnarena.togglearenamode
     permission-message: "§cYou don't have permission!"
   setupfight:
-    description: Add 2 players to the queue to ensure they fight each other
+    description: Set up a 1v1 (2 players) or a 2v2 (4 players; first two vs last two)
     permission: spawnarena.setupfight
     permission-message: "§cYou don't have permission!"
   setarenaschematic:
@@ -85,6 +86,12 @@ commands:
     permission: spawnarena.duel
     permission-message: "§cYou don't have permission!"
 
+  arenawins:
+    description: Toggle seeing other players' arena win announcements in chat
+    usage: "/arenawins"
+    permission: spawnarena.arenawins
+    permission-message: "§cYou don't have permission!"
+
 permissions:
   spawnarena.setarenaspawn:
     default: op
@@ -122,4 +129,6 @@ permissions:
     description: Can stay inside arenas during other players' fights
     default: false
   spawnarena.duel:
+    default: true
+  spawnarena.arenawins:
     default: true

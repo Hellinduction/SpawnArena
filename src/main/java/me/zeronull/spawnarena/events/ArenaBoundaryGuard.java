@@ -70,8 +70,7 @@ public final class ArenaBoundaryGuard implements Listener {
             // Knocked out of the ring by a teleport they didn't cause: put them back instead
             if (ArenaTeleportGrace.rescue(player))
                 return;
-            fight.announceWinner(player);
-            fight.endFight();
+            fight.eliminate(player);
             return;
         }
 
