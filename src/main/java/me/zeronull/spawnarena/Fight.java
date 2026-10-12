@@ -180,6 +180,10 @@ public class Fight {
         this.fightState = FightState.PRE_FIGHT_START;
         Arena.ArenaUtils.kickOutLingeringPlayers(this.arena);
 
+        // Fighters' pending duel requests are void once they're in a fight (cleared silently, before
+        // the teleport in, so they don't get a "cancelled because you teleported" message)
+        this.performOnFighters(DuelManager::clear);
+
         this.color = this.getRandomColor();
 
         this.performOnFighters(fighter -> fighter.setInvulnerable(false));

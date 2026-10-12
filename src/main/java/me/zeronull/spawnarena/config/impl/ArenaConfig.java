@@ -38,7 +38,7 @@ public final class ArenaConfig {
     public double winReward = 50000;
 
     @Comment("Minutes before the same player can earn this arena's win reward again")
-    public int winRewardCooldownMinutes = 60;
+    public int winRewardCooldownMinutes = 30;
 
     @Comment("Win reward multiplier for the #1 current win streak holder in this arena (one player; on a tie, whoever got there first)")
     public double leaderRewardMultiplier = 3;

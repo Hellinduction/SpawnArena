@@ -130,13 +130,13 @@ public final class DuelManager {
             }
         }
 
-        // Accepting a duel takes both players out of any queue
+        // Accepting a duel takes both players out of any queue, and drops every other request they had
         for (final Player p : new Player[]{target, requester}) {
             final ArenaQueue queue = ArenaQueue.PLAYER_QUEUE_MAP.get(p);
             if (queue != null)
                 queue.removePlayer(p);
+            clear(p);
         }
-        REQUESTS.remove(requester.getUniqueId());
 
         final String arenaName = Arena.displayName(arena.getArenaName());
         for (final Player p : new Player[]{target, requester}) {
