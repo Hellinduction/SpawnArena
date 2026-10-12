@@ -76,6 +76,7 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPotionSplashEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaFireFix(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaTeleportGrace(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new DuelRequestListener(), this);
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaSpectatorGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaBoundaryGuard(), this);
@@ -99,6 +100,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("arenalock", new ArenaLockCommand());
         this.registerCommand("arenareload", new ArenaReloadCommand());
         this.registerCommand("setarenaexit", new SetArenaExitCommand());
+        this.registerCommand("arenaduel", new ArenaDuelCommand());
     }
 
     private void registerCommand(final String cmdName, final CommandExecutor cmd) {

@@ -42,4 +42,10 @@ public final class SettingsConfig {
 
     @Comment({"Don't count fights between players who have ever connected from the same IP address (alts)",
             "towards wins, win streaks or the leaderboards."})
-    public boolean blockSameIpStats = true;}
+    public boolean blockSameIpStats = true;
+
+    @Comment("How close (in blocks) to an arena's region you must be to shift-right-click someone for a duel there")
+    public double duelRadius = 10;
+
+    @Comment("Seconds before an unanswered duel request expires")
+    public int duelRequestSeconds = 30;}

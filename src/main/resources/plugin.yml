@@ -79,6 +79,12 @@ commands:
     permission: spawnarena.setarenaexit
     permission-message: "§cYou don't have permission!"
 
+  arenaduel:
+    description: Accept, deny or toggle duel requests (shift-right-click a player near an arena to send one)
+    usage: "/arenaduel accept|deny <player> | toggle"
+    permission: spawnarena.duel
+    permission-message: "§cYou don't have permission!"
+
 permissions:
   spawnarena.setarenaspawn:
     default: op
@@ -115,3 +121,5 @@ permissions:
   spawnarena.bypasskickout:
     description: Can stay inside arenas during other players' fights
     default: false
+  spawnarena.duel:
+    default: true

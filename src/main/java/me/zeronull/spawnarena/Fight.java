@@ -34,6 +34,17 @@ public class Fight {
 
     UUID uuid = UUID.randomUUID();
     FightState fightState = FightState.COUNTDOWN;
+    /** Duels (from a duel request) never change stats or pay rewards. */
+    private boolean duel;
+
+    public boolean isDuel() {
+        return this.duel;
+    }
+
+    public Fight asDuel() {
+        this.duel = true;
+        return this;
+    }
     Arena arena;
     PlayerPreFightData preFightData1;
     PlayerPreFightData preFightData2;
@@ -360,6 +371,21 @@ public class Fight {
 
             loser = fighter2;
             loserName = fighter2.displayName();
+        }
+
+        if (this.duel) {
+            final Component duelResult = MiniMessage.miniMessage().deserialize(
+                    "<dark_red><winner> beat <loser> in a duel in the <arena>arena!",
+                    Placeholder.component("winner", winnerName),
+                    Placeholder.component("loser", loserName),
+                    Placeholder.parsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " "));
+            if (SpawnArena.settings == null || SpawnArena.settings.broadcastWins) {
+                Bukkit.broadcast(duelResult);
+            } else {
+                if (winner.isOnline()) winner.sendMessage(duelResult);
+                if (loser.isOnline()) loser.sendMessage(duelResult);
+            }
+            return; // duels: no stats, no rewards
         }
 
         // Fights between accounts that have shared an IP (alts) can't be used to pump stats or rewards

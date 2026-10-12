@@ -69,6 +69,20 @@ public abstract class Arena extends ArenaOptions {
         return target;
     }
 
+    /** All-lowercase names are title cased ("sumo_pit" → "Sumo Pit"); any other casing is kept as typed. */
+    public static String displayName(final String arena) {
+        if (!arena.equals(arena.toLowerCase()))
+            return arena;
+
+        final StringBuilder out = new StringBuilder();
+        for (final String word : arena.split("[_\\-\\s]+")) {
+            if (word.isEmpty()) continue;
+            if (!out.isEmpty()) out.append(' ');
+            out.append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+        }
+        return out.isEmpty() ? arena : out.toString();
+    }
+
     public Arena(String arenaName) {
         this.arenaName = arenaName;
     }
