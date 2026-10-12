@@ -79,6 +79,14 @@ public class StatsManager {
                 s.execute("ALTER TABLE arena_rewards ADD COLUMN opponent_payouts INT NOT NULL DEFAULT 0");
             if (!hasColumn(c, "arena_rewards", "last_result"))
                 s.execute("ALTER TABLE arena_rewards ADD COLUMN last_result VARCHAR(128) NULL");
+            s.execute("CREATE TABLE IF NOT EXISTS arena_payouts (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "arena VARCHAR(64) NOT NULL, " +
+                    "amount DOUBLE NOT NULL, " +
+                    "opponent VARCHAR(36) NULL, " +
+                    "leader BOOLEAN NOT NULL DEFAULT FALSE, " +
+                    "paid_at BIGINT NOT NULL)");
             s.execute("CREATE TABLE IF NOT EXISTS arena_reward_daily (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "reward_day VARCHAR(10) NOT NULL, " +
@@ -92,6 +100,84 @@ public class StatsManager {
         } catch (SQLException e) {
             Bukkit.getLogger().severe("[SpawnArena] Failed to create tables: " + e.getMessage());
         }
+    }
+
+    // ── Payout log ──────────────────────────────────────────────────────────
+
+    public record Payout(String arena, double amount, UUID opponent, boolean leader, long paidAt) {}
+    public record OpponentTotal(UUID opponent, int payouts, double amount) {}
+
+    public void logPayout(UUID uuid, String arena, double amount, UUID opponent, boolean leader) {
+        final String sql = "INSERT INTO arena_payouts (uuid, arena, amount, opponent, leader, paid_at) VALUES (?, ?, ?, ?, ?, ?)";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.setDouble(3, amount);
+            ps.setString(4, opponent == null ? null : opponent.toString());
+            ps.setBoolean(5, leader);
+            ps.setLong(6, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] logPayout: " + e.getMessage());
+        }
+    }
+
+    /** Newest first; page 1 is the latest {@code pageSize} payouts. */
+    public List<Payout> getPayouts(UUID uuid, int page, int pageSize) {
+        final List<Payout> payouts = new ArrayList<>();
+        final String sql = "SELECT arena, amount, opponent, leader, paid_at FROM arena_payouts WHERE uuid=? " +
+                "ORDER BY paid_at DESC, id DESC LIMIT ? OFFSET ?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setInt(2, pageSize);
+            ps.setInt(3, Math.max(0, page - 1) * pageSize);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    final String opponent = rs.getString("opponent");
+                    payouts.add(new Payout(rs.getString("arena"), rs.getDouble("amount"),
+                            opponent == null ? null : UUID.fromString(opponent), rs.getBoolean("leader"), rs.getLong("paid_at")));
+                }
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getPayouts: " + e.getMessage());
+        }
+        return payouts;
+    }
+
+    /** Who this player has been paid against most, all time. */
+    public List<OpponentTotal> getTopPayoutOpponents(UUID uuid, int limit) {
+        final List<OpponentTotal> totals = new ArrayList<>();
+        final String sql = "SELECT opponent, COUNT(*) AS n, SUM(amount) AS total FROM arena_payouts " +
+                "WHERE uuid=? AND opponent IS NOT NULL GROUP BY opponent ORDER BY n DESC, total DESC LIMIT ?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setInt(2, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    totals.add(new OpponentTotal(UUID.fromString(rs.getString("opponent")), rs.getInt("n"), rs.getDouble("total")));
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getTopPayoutOpponents: " + e.getMessage());
+        }
+        return totals;
+    }
+
+    /** {count, total amount} of all payouts this player has received. */
+    public double[] getPayoutTotals(UUID uuid) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM arena_payouts WHERE uuid=?")) {
+            ps.setString(1, uuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next())
+                    return new double[]{rs.getLong(1), rs.getDouble(2)};
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getPayoutTotals: " + e.getMessage());
+        }
+        return new double[]{0, 0};
     }
 
     // ── Daily reward earnings ───────────────────────────────────────────────
@@ -734,6 +820,7 @@ public class StatsManager {
                 }
                 ps.executeBatch();
                 copyRewardCooldowns(h2, target);
+                copyPayoutLog(h2, target);
                 target.commit();
                 rewardCache.clear();
             } catch (SQLException e) {
@@ -750,6 +837,29 @@ public class StatsManager {
     /** H2 files from older versions may lack a "reached at" column; read those as 0. */
     private static String reachedAtSelect(final Connection h2, final String column) throws SQLException {
         return hasColumn(h2, "arena_stats", column) ? ", " + column : ", 0 AS " + column;
+    }
+
+    /** Appends the H2 payout log to MySQL's (running the migration twice would copy it twice). */
+    private static void copyPayoutLog(final Connection h2, final Connection target) throws SQLException {
+        try (ResultSet tables = h2.getMetaData().getTables(null, null, "ARENA_PAYOUTS", null)) {
+            if (!tables.next())
+                return;
+        }
+        try (Statement read = h2.createStatement();
+             ResultSet rs = read.executeQuery("SELECT uuid, arena, amount, opponent, leader, paid_at FROM arena_payouts");
+             PreparedStatement ps = target.prepareStatement(
+                     "INSERT INTO arena_payouts (uuid, arena, amount, opponent, leader, paid_at) VALUES (?, ?, ?, ?, ?, ?)")) {
+            while (rs.next()) {
+                ps.setString(1, rs.getString("uuid"));
+                ps.setString(2, rs.getString("arena"));
+                ps.setDouble(3, rs.getDouble("amount"));
+                ps.setString(4, rs.getString("opponent"));
+                ps.setBoolean(5, rs.getBoolean("leader"));
+                ps.setLong(6, rs.getLong("paid_at"));
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
     }
 
     private static void copyRewardCooldowns(final Connection h2, final Connection target) throws SQLException {

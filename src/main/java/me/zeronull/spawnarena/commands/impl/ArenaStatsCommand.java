@@ -19,11 +19,12 @@ import java.util.UUID;
  * /arenastats set <player> <arena> wins|streak|best_streak <value>
  * /arenastats reset <player> <arena>
  * /arenastats resetcooldown <player> <arena|all>
+ * /arenastats payouts <player> [page]
  */
 public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> STATS = List.of("wins", "streak", "best_streak");
-    private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "resetcooldown", "migrate");
+    private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "resetcooldown", "payouts", "migrate");
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd,
@@ -33,8 +34,9 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
 
         final String sub = args.length >= 1 ? args[0].toLowerCase() : "";
         final boolean getAll = sub.equals("get") && args.length == 2;
-        if (args.length < 3 && !getAll) {
-            sender.sendMessage("§cUsage: /arenastats get <player> [arena]");
+        final boolean payouts = sub.equals("payouts") && args.length >= 2;
+        if (args.length < 3 && !getAll && !payouts) {
+            sender.sendMessage("§cUsage: /arenastats get <player> [arena]  §7or  §c/arenastats payouts <player> [page]");
             sender.sendMessage("§c       /arenastats <set|reset> <player> <arena> [stat] [value]");
             sender.sendMessage("§c       /arenastats resetcooldown <player> <arena|all>  §7or  §c/arenastats migrate");
             return true;
@@ -48,6 +50,15 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         final UUID uuid = target.getUniqueId();
+
+        if (payouts) {
+            int page = 1;
+            if (args.length >= 3) {
+                try { page = Math.max(1, Integer.parseInt(args[2])); } catch (NumberFormatException ignored) {}
+            }
+            showPayouts(sender, target, page);
+            return true;
+        }
 
         if (getAll) {
             sender.sendMessage("§6Stats for §e" + target.getName() + "§6:");
@@ -120,6 +131,47 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private static final int PAYOUTS_PER_PAGE = 10;
+    private static final java.time.format.DateTimeFormatter PAYOUT_TIME =
+            java.time.format.DateTimeFormatter.ofPattern("MMM d HH:mm").withZone(java.time.ZoneId.systemDefault());
+
+    private static void showPayouts(final CommandSender sender, final OfflinePlayer target, final int page) {
+        final StatsManager stats = SpawnArena.statsManager;
+        final UUID uuid = target.getUniqueId();
+        final double[] totals = stats.getPayoutTotals(uuid);
+
+        sender.sendMessage(String.format("§6Payouts for §e%s§6: §e%d§6 total, §e%s §6(today: §e%s§6)",
+                target.getName(), (long) totals[0], StatsManager.formatMoney(totals[1]),
+                StatsManager.formatMoney(stats.getEarnedToday(uuid))));
+
+        final List<StatsManager.OpponentTotal> top = stats.getTopPayoutOpponents(uuid, 3);
+        if (!top.isEmpty()) {
+            final List<String> parts = new java.util.ArrayList<>();
+            for (final StatsManager.OpponentTotal t : top)
+                parts.add(String.format("§e%s §7×%d (%s)", nameOf(t.opponent()), t.payouts(), StatsManager.formatMoney(t.amount())));
+            sender.sendMessage("§6Paid most against: " + String.join("§7, ", parts));
+        }
+
+        final List<StatsManager.Payout> list = stats.getPayouts(uuid, page, PAYOUTS_PER_PAGE);
+        if (list.isEmpty()) {
+            sender.sendMessage(page == 1 ? "§7No payouts yet." : "§7No payouts on page " + page + ".");
+            return;
+        }
+        for (final StatsManager.Payout p : list) {
+            sender.sendMessage(String.format("§7%s §8· §e%s §8· §a+%s%s §7vs §f%s",
+                    PAYOUT_TIME.format(java.time.Instant.ofEpochMilli(p.paidAt())), p.arena(),
+                    StatsManager.formatMoney(p.amount()), p.leader() ? " §6(#1)" : "",
+                    p.opponent() == null ? "-" : nameOf(p.opponent())));
+        }
+        if (list.size() == PAYOUTS_PER_PAGE)
+            sender.sendMessage("§7More: /arenastats payouts " + target.getName() + " " + (page + 1));
+    }
+
+    private static String nameOf(final UUID uuid) {
+        final String name = Bukkit.getOfflinePlayer(uuid).getName();
+        return name == null ? uuid.toString().substring(0, 8) : name;
+    }
+
     /** Online player by name, else a player the server has seen before (no web lookups, no invented IDs). */
     private static OfflinePlayer resolvePlayer(final String name) {
         final org.bukkit.entity.Player online = Bukkit.getPlayerExact(name);
@@ -165,7 +217,7 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
         if (args.length == 1) return filter(SUBCOMMANDS, args[0]);
         if (args.length == 2 && args[0].equalsIgnoreCase("migrate")) return filter(List.of("confirm"), args[1]);
         if (args.length == 4 && args[0].equalsIgnoreCase("set")) return filter(STATS, args[3]);
-        if (args.length == 3 && !args[0].equalsIgnoreCase("migrate")) {
+        if (args.length == 3 && !args[0].equalsIgnoreCase("migrate") && !args[0].equalsIgnoreCase("payouts")) {
             final List<String> arenas = new java.util.ArrayList<>();
             if (SpawnArena.arenas != null)
                 SpawnArena.arenas.forEach(a -> arenas.add(a.getArenaName()));

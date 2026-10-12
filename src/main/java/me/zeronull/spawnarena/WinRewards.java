@@ -61,6 +61,7 @@ public final class WinRewards {
         stats.recordPayout(winner.getUniqueId(), arenaName, System.currentTimeMillis(),
                 loser == null ? null : loser.getUniqueId());
         stats.addEarnedToday(winner.getUniqueId(), amount);
+        stats.logPayout(winner.getUniqueId(), arenaName, amount, loser == null ? null : loser.getUniqueId(), leader);
         stats.setLastResult(winner.getUniqueId(), arenaName, "+" + StatsManager.formatMoney(amount));
 
         if (leader && arena.getLeaderRewardMultiplier() != 1)
