@@ -276,10 +276,15 @@ public class Fight {
         }
     }
 
+    /** This fighter's spawn point in the arena, or null if they aren't in this fight. */
+    public Location getSpawnOf(final Player fighter) {
+        return fighter.equals(this.fighter1) ? this.arena.spawnPoint1
+                : fighter.equals(this.fighter2) ? this.arena.spawnPoint2 : null;
+    }
+
     /** True when {@code to} is this fighter's own spawn point, i.e. the plugin's start-of-fight teleport. */
     public boolean isSpawnTeleport(final Player fighter, final Location to) {
-        final Location spawn = fighter.equals(this.fighter1) ? this.arena.spawnPoint1
-                : fighter.equals(this.fighter2) ? this.arena.spawnPoint2 : null;
+        final Location spawn = this.getSpawnOf(fighter);
 
         return spawn != null && to != null && spawn.getWorld().equals(to.getWorld()) && spawn.distanceSquared(to) < 1.0;
     }

@@ -75,8 +75,10 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaTeamPvPEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPotionSplashEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaFireFix(), this);
-        if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
+        if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaSpectatorGuard(), this);
+            Bukkit.getServer().getPluginManager().registerEvents(new ArenaBoundaryGuard(), this);
+        }
         // Must stay registered after ArenaTeamPvPEvent/ArenaFireFix: same priority runs in registration order
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaDeathEvent(), this);
     }

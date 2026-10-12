@@ -20,6 +20,20 @@ public abstract class Arena extends ArenaOptions {
     protected Location spawnPoint1;
     protected Location spawnPoint2;
     protected Location exitLocation;
+    /**
+     * Whether a non-fighter at {@code loc} counts as being in this arena: inside its region, unless
+     * they're standing in a non-full block such as a slab (e.g. on top of the walls, which the region covers).
+     */
+    public boolean isInFightingSpace(final Location loc) {
+        return this.equals(SpawnArena.arenas.of(loc)) && !isInPartialBlock(loc);
+    }
+
+    private static boolean isInPartialBlock(final Location loc) {
+        final org.bukkit.block.Block block = loc.getBlock();
+        if (block.isPassable())
+            return false;
+        return block.getBoundingBox().getVolume() < 0.999;
+    }
     private List<Fight> fights = new ArrayList<>();
 
     /** True while a fight is actually inside the arena (not just counting down at spawn). */
@@ -243,7 +257,7 @@ public abstract class Arena extends ArenaOptions {
             for (final Player p : Bukkit.getOnlinePlayers()) {
                 if (isExemptFromKickOut(p))
                     continue;
-                if (arena.equals(SpawnArena.arenas.of(p.getLocation())))
+                if (arena.isInFightingSpace(p.getLocation()))
                     arena.kickOut(p);
             }
         }
@@ -256,7 +270,7 @@ public abstract class Arena extends ArenaOptions {
                 return;
 
             final Arena arena = SpawnArena.arenas.of(p.getLocation());
-            if (arena != null)
+            if (arena != null && arena.isInFightingSpace(p.getLocation()))
                 arena.kickOut(p);
         }
 
