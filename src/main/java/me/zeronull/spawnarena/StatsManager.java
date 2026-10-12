@@ -77,6 +77,8 @@ public class StatsManager {
                 s.execute("ALTER TABLE arena_rewards ADD COLUMN last_opponent VARCHAR(36) NULL");
             if (!hasColumn(c, "arena_rewards", "opponent_payouts"))
                 s.execute("ALTER TABLE arena_rewards ADD COLUMN opponent_payouts INT NOT NULL DEFAULT 0");
+            if (!hasColumn(c, "arena_rewards", "last_result"))
+                s.execute("ALTER TABLE arena_rewards ADD COLUMN last_result VARCHAR(128) NULL");
             s.execute("CREATE TABLE IF NOT EXISTS arena_reward_daily (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "reward_day VARCHAR(10) NOT NULL, " +
@@ -242,14 +244,45 @@ public class StatsManager {
 
     // ── Last win result (shown on the reward hologram instead of chat) ──────
 
+    // Stored in arena_rewards.last_result so it survives restarts; this map is just a cache
     private final java.util.Map<String, String> lastResults = new java.util.concurrent.ConcurrentHashMap<>();
 
     public void setLastResult(UUID uuid, String arena, String result) {
         lastResults.put(uuid + ":" + arena.toLowerCase(), result);
+        // last_reward 0 = "never paid" for a player whose first result here isn't a payout
+        final String sql = "INSERT INTO arena_rewards (uuid, arena, last_reward, last_result) VALUES (?, ?, 0, ?) " +
+                "ON DUPLICATE KEY UPDATE last_result = VALUES(last_result)";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.setString(3, result.length() > 128 ? result.substring(0, 128) : result);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] setLastResult: " + e.getMessage());
+        }
     }
 
     public String getLastResult(UUID uuid, String arena) {
-        return lastResults.getOrDefault(uuid + ":" + arena.toLowerCase(), "-");
+        final String key = uuid + ":" + arena.toLowerCase();
+        final String cached = lastResults.get(key);
+        if (cached != null)
+            return cached;
+
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT last_result FROM arena_rewards WHERE uuid=? AND arena=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                final String stored = rs.next() ? rs.getString(1) : null;
+                final String result = stored == null ? "-" : stored;
+                lastResults.put(key, result);
+                return result;
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getLastResult: " + e.getMessage());
+            return "-";
+        }
     }
 
     /** The column holding when a stat last reached its current value. */
@@ -394,6 +427,8 @@ public class StatsManager {
         } finally {
             final String prefix = uuid + ":";
             rewardCache.keySet().removeIf(key -> key.startsWith(prefix)
+                    && (arena == null || key.equals(prefix + arena.toLowerCase())));
+            lastResults.keySet().removeIf(key -> key.startsWith(prefix)
                     && (arena == null || key.equals(prefix + arena.toLowerCase())));
         }
     }
@@ -726,15 +761,18 @@ public class StatsManager {
 
         // Target is MySQL, which applies SET assignments left to right: compare against the old
         // last_reward before it's overwritten, so the newer row's opponent data wins
-        final String upsert = "INSERT INTO arena_rewards (uuid, arena, last_reward, last_opponent, opponent_payouts) " +
-                "VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_rewards (uuid, arena, last_reward, last_opponent, opponent_payouts, last_result) " +
+                "VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "last_opponent = IF(VALUES(last_reward) >= last_reward, VALUES(last_opponent), last_opponent), " +
                 "opponent_payouts = IF(VALUES(last_reward) >= last_reward, VALUES(opponent_payouts), opponent_payouts), " +
+                "last_result = IF(VALUES(last_reward) >= last_reward, VALUES(last_result), last_result), " +
                 "last_reward = GREATEST(last_reward, VALUES(last_reward))";
         final boolean hasOpponents = hasColumn(h2, "arena_rewards", "last_opponent");
+        final boolean hasLastResult = hasColumn(h2, "arena_rewards", "last_result");
         try (Statement read = h2.createStatement();
              ResultSet rs = read.executeQuery("SELECT uuid, arena, last_reward"
                      + (hasOpponents ? ", last_opponent, opponent_payouts" : ", NULL AS last_opponent, 0 AS opponent_payouts")
+                     + (hasLastResult ? ", last_result" : ", NULL AS last_result")
                      + " FROM arena_rewards");
              PreparedStatement ps = target.prepareStatement(upsert)) {
             while (rs.next()) {
@@ -743,6 +781,7 @@ public class StatsManager {
                 ps.setLong(3, rs.getLong("last_reward"));
                 ps.setString(4, rs.getString("last_opponent"));
                 ps.setInt(5, rs.getInt("opponent_payouts"));
+                ps.setString(6, rs.getString("last_result"));
                 ps.addBatch();
             }
             ps.executeBatch();
