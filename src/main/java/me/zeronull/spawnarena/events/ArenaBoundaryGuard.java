@@ -67,6 +67,9 @@ public final class ArenaBoundaryGuard implements Listener {
         final Arena arena = fight.getArena();
 
         if (arena.isDeathOnTouchLiquid()) {
+            // Knocked out of the ring by a teleport they didn't cause: put them back instead
+            if (ArenaTeleportGrace.rescue(player))
+                return;
             fight.announceWinner(player);
             fight.endFight();
             return;

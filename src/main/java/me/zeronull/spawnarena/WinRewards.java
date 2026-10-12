@@ -7,19 +7,27 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
+import java.util.UUID;
+
 /** Only touch this class after checking Vault is enabled — it links against Vault's API. */
 public final class WinRewards {
     private static boolean warnedNoEconomy;
 
     private WinRewards() {}
 
-    public static void reward(final Player winner, final Arena arena) {
+    /**
+     * Pays the winner's reward if allowed. Only a successful payout sends a chat message; the reason a
+     * win didn't pay is shown on the reward hologram (%spawnarena_reward_last_<arena>%) instead.
+     */
+    public static void reward(final Player winner, final Player loser, final Arena arena) {
         if (arena.getWinReward() <= 0)
             return;
 
-        // Checked after this win was recorded, so a win that takes the #1 streak already counts
-        final boolean leader = SpawnArena.statsManager.isStreakLeader(winner.getUniqueId(), arena.getArenaName());
-        final double amount = SpawnArena.statsManager.rewardAmountFor(winner.getUniqueId(), arena);
+        final StatsManager stats = SpawnArena.statsManager;
+        final String arenaName = arena.getArenaName();
+
+        // Tracked even when nothing is paid, so the same-opponent rule can't be dodged
+        final int winsInARow = loser == null ? 1 : stats.recordWinAgainst(winner.getUniqueId(), loser.getUniqueId(), arenaName);
 
         final Economy economy = economy();
         if (economy == null) {
@@ -30,9 +38,18 @@ public final class WinRewards {
             return;
         }
 
-        // Still on cooldown: say nothing — the reward hologram/placeholder shows the countdown
-        if (SpawnArena.statsManager.rewardCooldownRemaining(winner.getUniqueId(), arena) > 0)
+        final String blocked = blockedReason(winner, loser, arena, winsInARow);
+        if (blocked != null) {
+            stats.setLastResult(winner.getUniqueId(), arenaName, "Not paid: " + blocked);
             return;
+        }
+
+        // Checked after this win was recorded, so a win that takes the #1 streak already counts
+        final boolean leader = stats.isStreakLeader(winner.getUniqueId(), arenaName);
+        double amount = stats.rewardAmountFor(winner.getUniqueId(), arena);
+        final double cap = stats.dailyCap();
+        if (cap > 0)
+            amount = Math.min(amount, cap - stats.getEarnedToday(winner.getUniqueId()));
 
         final EconomyResponse response = economy.depositPlayer(winner, amount);
         if (!response.transactionSuccess()) {
@@ -40,12 +57,40 @@ public final class WinRewards {
             return;
         }
 
-        SpawnArena.statsManager.setLastReward(winner.getUniqueId(), arena.getArenaName(), System.currentTimeMillis());
+        stats.setLastReward(winner.getUniqueId(), arenaName, System.currentTimeMillis());
+        stats.addEarnedToday(winner.getUniqueId(), amount);
+        stats.setLastResult(winner.getUniqueId(), arenaName, "+" + StatsManager.formatMoney(amount));
+
         if (leader && arena.getLeaderRewardMultiplier() != 1)
             winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning! "
                     + ChatColor.GOLD + "(" + formatMultiplier(arena.getLeaderRewardMultiplier()) + " top win streak bonus)");
         else
             winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning!");
+    }
+
+    /** Why this win shouldn't pay, or null if it should. */
+    private static String blockedReason(final Player winner, final Player loser, final Arena arena, final int winsInARow) {
+        final StatsManager stats = SpawnArena.statsManager;
+        final UUID uuid = winner.getUniqueId();
+
+        if (loser != null && SpawnArena.settings.blockSameIpRewards) {
+            stats.recordIp(uuid, winner.getAddress() == null ? null : winner.getAddress().getAddress());
+            stats.recordIp(loser.getUniqueId(), loser.getAddress() == null ? null : loser.getAddress().getAddress());
+            if (stats.sharesIp(uuid, loser.getUniqueId()))
+                return "same IP as your opponent";
+        }
+
+        final int limit = SpawnArena.settings.sameOpponentLimit;
+        if (limit > 0 && winsInARow > limit)
+            return "beat someone new to earn again";
+
+        if (stats.hasReachedDailyCap(uuid))
+            return "daily limit reached";
+
+        if (stats.rewardCooldownRemaining(uuid, arena) > 0)
+            return "on cooldown";
+
+        return null;
     }
 
     static String formatMultiplier(final double multiplier) {

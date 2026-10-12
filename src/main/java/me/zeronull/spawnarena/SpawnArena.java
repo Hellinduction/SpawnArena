@@ -75,6 +75,7 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaTeamPvPEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPotionSplashEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaFireFix(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new ArenaTeleportGrace(), this);
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaSpectatorGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaBoundaryGuard(), this);

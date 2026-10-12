@@ -380,7 +380,7 @@ public class Fight {
         }
 
         if (winner.isOnline() && Bukkit.getPluginManager().isPluginEnabled("Vault"))
-            WinRewards.reward(winner, this.arena);
+            WinRewards.reward(winner, loser, this.arena);
     }
 
     private void handleDeath(final Player loser) {

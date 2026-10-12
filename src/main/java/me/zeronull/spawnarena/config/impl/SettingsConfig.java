@@ -26,4 +26,16 @@ public final class SettingsConfig {
 
     @Comment({"Currency symbol for short reward amounts like \"$5k\". Leave empty to copy it from the",
             "economy plugin's own formatting (falls back to \"$\" if there's no economy)."})
-    public String currencySymbol = "";}
+    public String currencySymbol = "";
+
+    @Comment({"Most money one player can earn from arena win rewards per day (server time), across all arenas.",
+            "0 = no limit."})
+    public double dailyRewardCap = 5_000_000;
+
+    @Comment({"Wins in a row against the same opponent that still pay. After that, wins against them don't pay",
+            "until the player beats someone else. 0 = no limit."})
+    public int sameOpponentLimit = 3;
+
+    @Comment({"Don't pay win rewards when the winner and loser have ever connected from the same IP address.",
+            "IPs are stored hashed. Local/LAN addresses are ignored."})
+    public boolean blockSameIpRewards = true;}

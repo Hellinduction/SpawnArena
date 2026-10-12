@@ -85,7 +85,15 @@ public final class PlayerPreFightData {
         ArenaPlayerConsumeEvent.PLAYER_FINISH_GAME_MAP.put(this.player.getUniqueId(), Instant.now().getEpochSecond());
 
         this.player.closeInventory();
-        FoliaUtils.teleport(this.player, this.previousLocation);
+
+        // Queued from inside an arena? Don't send them back into it (another fight may be running there)
+        Location destination = this.previousLocation;
+        if (destination != null && Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
+            final Arena inside = SpawnArena.arenas.of(destination);
+            if (inside != null)
+                destination = inside.exitFor(this.player);
+        }
+        FoliaUtils.teleport(this.player, destination);
 
         // These 2 just assume they were at this before
         this.player.setFireTicks(0);

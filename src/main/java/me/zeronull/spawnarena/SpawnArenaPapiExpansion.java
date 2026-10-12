@@ -25,6 +25,9 @@ import java.util.UUID;
  *   %spawnarena_reward_every_<arena>%      e.g. "2h" ("5m" for the #1 win streak holder)
  *   %spawnarena_reward_leaderamount_<arena>% / %spawnarena_reward_leaderevery_<arena>%  the #1 streak bonus
  *   %spawnarena_reward_leader_<arena>%     true / false (per player)
+ *   %spawnarena_reward_status_<arena>%     "Ready!", countdown, "Beat someone new to earn again" or "Daily limit reached"
+ *   %spawnarena_reward_last_<arena>%       last win's result, e.g. "+$50k" or "Not paid: on cooldown"
+ *   %spawnarena_reward_today% / %spawnarena_reward_dailycap% / %spawnarena_reward_dailyleft%
  */
 public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
@@ -108,6 +111,24 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
     /** reward_cooldown_<arena>, reward_ready_<arena>, reward_amount_<arena>, reward_every_<arena> */
     private static String reward(final Player player, final String rest) {
+        // Daily totals aren't per arena
+        final StatsManager stats = SpawnArena.statsManager;
+        switch (rest) {
+            case "today" -> { return player == null ? "" : formatAmount(stats.getEarnedToday(player.getUniqueId())); }
+            case "dailycap" -> { return stats.dailyCap() > 0 ? formatAmount(stats.dailyCap()) : "No limit"; }
+            // The first win that doesn't pay, e.g. limit 3 -> "4"
+            case "samelimit" -> {
+                final int limit = SpawnArena.settings == null ? 0 : SpawnArena.settings.sameOpponentLimit;
+                return limit > 0 ? String.valueOf(limit + 1) : "∞";
+            }
+            case "dailyleft" -> {
+                if (player == null) return "";
+                return stats.dailyCap() > 0
+                        ? formatAmount(Math.max(0, stats.dailyCap() - stats.getEarnedToday(player.getUniqueId())))
+                        : "No limit";
+            }
+        }
+
         final int split = rest.indexOf('_');
         if (split <= 0)
             return null;
@@ -135,8 +156,19 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
                 final long remaining = SpawnArena.statsManager.rewardCooldownRemaining(player.getUniqueId(), arena);
                 yield remaining <= 0 ? "Ready!" : StatsManager.formatCountdown(remaining);
             }
+            case "status" -> {
+                if (player == null) yield "";
+                if (!enabled) yield "-";
+                final UUID uuid = player.getUniqueId();
+                if (stats.hasReachedDailyCap(uuid)) yield "Daily limit reached";
+                if (stats.isSameOpponentBlocked(uuid, arena.getArenaName())) yield "Beat someone new to earn again";
+                final long remaining = stats.rewardCooldownRemaining(uuid, arena);
+                yield remaining <= 0 ? "Ready!" : StatsManager.formatCountdown(remaining);
+            }
+            case "last" -> player == null ? "" : stats.getLastResult(player.getUniqueId(), arena.getArenaName());
             case "ready" -> player == null || !enabled ? "false"
-                    : String.valueOf(SpawnArena.statsManager.rewardCooldownRemaining(player.getUniqueId(), arena) <= 0);
+                    : String.valueOf(!stats.hasReachedDailyCap(player.getUniqueId())
+                            && stats.rewardCooldownRemaining(player.getUniqueId(), arena) <= 0);
             default -> null;
         };
     }

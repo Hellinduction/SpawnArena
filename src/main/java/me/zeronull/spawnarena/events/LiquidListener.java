@@ -59,6 +59,10 @@ public final class LiquidListener implements Listener, Runnable {
             return;
         }
 
+        // Dropped into liquid by a teleport they didn't cause (e.g. anticheat setback): put them back instead
+        if (ArenaTeleportGrace.rescue(player))
+            return;
+
         fight.announceWinner(player);
         fight.endFight();
     }

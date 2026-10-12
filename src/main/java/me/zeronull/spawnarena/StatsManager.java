@@ -46,6 +46,9 @@ public class StatsManager {
 
         this.dataSource = new HikariDataSource(hc);
         createTable();
+
+        plugin.getDataFolder().mkdirs();
+        loadIpSecret(plugin.getDataFolder());
     }
 
     private void createTable() {
@@ -69,9 +72,188 @@ public class StatsManager {
                     "arena VARCHAR(64) NOT NULL, " +
                     "last_reward BIGINT NOT NULL, " +
                     "PRIMARY KEY (uuid, arena))");
+            s.execute("CREATE TABLE IF NOT EXISTS arena_reward_daily (" +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "reward_day VARCHAR(10) NOT NULL, " +
+                    "earned DOUBLE NOT NULL DEFAULT 0, " +
+                    "PRIMARY KEY (uuid, reward_day))");
+            s.execute("CREATE TABLE IF NOT EXISTS player_ips (" +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "ip_hash VARCHAR(64) NOT NULL, " +
+                    "last_seen BIGINT NOT NULL, " +
+                    "PRIMARY KEY (uuid, ip_hash))");
         } catch (SQLException e) {
             Bukkit.getLogger().severe("[SpawnArena] Failed to create tables: " + e.getMessage());
         }
+    }
+
+    // ── Daily reward earnings ───────────────────────────────────────────────
+
+    private record CachedDaily(String day, double earned) {}
+    private final java.util.Map<UUID, CachedDaily> dailyCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Today's date in server time, e.g. "2026-10-12". The daily cap resets when this changes. */
+    public static String today() {
+        return java.time.LocalDate.now().toString();
+    }
+
+    /** How much this player has earned from arena win rewards today (all arenas). */
+    public double getEarnedToday(UUID uuid) {
+        final String day = today();
+        final CachedDaily cached = dailyCache.get(uuid);
+        if (cached != null && cached.day().equals(day))
+            return cached.earned();
+
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT earned FROM arena_reward_daily WHERE uuid=? AND reward_day=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, day);
+            try (ResultSet rs = ps.executeQuery()) {
+                final double earned = rs.next() ? rs.getDouble(1) : 0;
+                dailyCache.put(uuid, new CachedDaily(day, earned));
+                return earned;
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getEarnedToday: " + e.getMessage());
+            return Double.MAX_VALUE; // fail closed: treat as capped
+        }
+    }
+
+    /** The configured daily cap, or 0 for no limit. */
+    public double dailyCap() {
+        return SpawnArena.settings == null ? 0 : Math.max(0, SpawnArena.settings.dailyRewardCap);
+    }
+
+    public boolean hasReachedDailyCap(UUID uuid) {
+        final double cap = dailyCap();
+        return cap > 0 && getEarnedToday(uuid) >= cap;
+    }
+
+    /** Whether the next win against the same opponent wouldn't pay (they need to beat someone new). */
+    public boolean isSameOpponentBlocked(UUID uuid, String arena) {
+        final int limit = SpawnArena.settings == null ? 0 : SpawnArena.settings.sameOpponentLimit;
+        return limit > 0 && winsInARowAgainstSameOpponent(uuid, arena) >= limit;
+    }
+
+    public void addEarnedToday(UUID uuid, double amount) {
+        final String day = today();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("INSERT INTO arena_reward_daily (uuid, reward_day, earned) VALUES (?, ?, ?) " +
+                     "ON DUPLICATE KEY UPDATE earned = earned + VALUES(earned)")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, day);
+            ps.setDouble(3, amount);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] addEarnedToday: " + e.getMessage());
+        }
+        dailyCache.remove(uuid);
+    }
+
+    // ── IP history (alt detection) ──────────────────────────────────────────
+
+    private byte[] ipSecret;
+
+    /** Remembers that this player connected from this address. Local/LAN addresses are ignored. */
+    public void recordIp(UUID uuid, java.net.InetAddress address) {
+        final String hash = hashIp(address);
+        if (hash == null)
+            return;
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("INSERT INTO player_ips (uuid, ip_hash, last_seen) VALUES (?, ?, ?) " +
+                     "ON DUPLICATE KEY UPDATE last_seen = VALUES(last_seen)")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, hash);
+            ps.setLong(3, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] recordIp: " + e.getMessage());
+        }
+    }
+
+    /** Whether two players have ever connected from the same (non-local) IP address. */
+    public boolean sharesIp(UUID a, UUID b) {
+        final String sql = "SELECT 1 FROM player_ips p1 JOIN player_ips p2 ON p1.ip_hash = p2.ip_hash " +
+                "WHERE p1.uuid=? AND p2.uuid=? LIMIT 1";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, a.toString());
+            ps.setString(2, b.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] sharesIp: " + e.getMessage());
+            return true; // fail closed: don't pay if we can't check
+        }
+    }
+
+    /**
+     * Keyed hash of an IP so plain addresses are never stored. The key lives in ip-secret.key in the
+     * plugin folder. Returns null for loopback/LAN addresses, which say nothing about who's an alt.
+     */
+    private String hashIp(final java.net.InetAddress address) {
+        if (address == null || address.isLoopbackAddress() || address.isSiteLocalAddress()
+                || address.isLinkLocalAddress() || address.isAnyLocalAddress())
+            return null;
+        try {
+            final javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(ipSecret, "HmacSHA256"));
+            return java.util.HexFormat.of().formatHex(mac.doFinal(address.getAddress()));
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[SpawnArena] hashIp: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private void loadIpSecret(final File dataFolder) {
+        final java.nio.file.Path file = new File(dataFolder, "ip-secret.key").toPath();
+        try {
+            if (java.nio.file.Files.exists(file)) {
+                this.ipSecret = java.util.HexFormat.of().parseHex(java.nio.file.Files.readString(file).trim());
+                return;
+            }
+            final byte[] secret = new byte[32];
+            new java.security.SecureRandom().nextBytes(secret);
+            java.nio.file.Files.writeString(file, java.util.HexFormat.of().formatHex(secret));
+            this.ipSecret = secret;
+        } catch (Exception e) {
+            Bukkit.getLogger().warning("[SpawnArena] Couldn't load ip-secret.key, using a temporary key: " + e.getMessage());
+            this.ipSecret = new byte[32];
+            new java.security.SecureRandom().nextBytes(this.ipSecret);
+        }
+    }
+
+    // ── Same-opponent streaks ───────────────────────────────────────────────
+
+    private record VersusStreak(UUID opponent, int wins) {}
+    private final java.util.Map<String, VersusStreak> versusStreaks = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Records a win and returns how many times in a row this winner has now beaten this loser here. */
+    public int recordWinAgainst(UUID winner, UUID loser, String arena) {
+        final String key = winner + ":" + arena.toLowerCase();
+        final VersusStreak previous = versusStreaks.get(key);
+        final int wins = previous != null && previous.opponent().equals(loser) ? previous.wins() + 1 : 1;
+        versusStreaks.put(key, new VersusStreak(loser, wins));
+        return wins;
+    }
+
+    /** Wins in a row against the same opponent (0 if none yet). */
+    public int winsInARowAgainstSameOpponent(UUID winner, String arena) {
+        final VersusStreak streak = versusStreaks.get(winner + ":" + arena.toLowerCase());
+        return streak == null ? 0 : streak.wins();
+    }
+
+    // ── Last win result (shown on the reward hologram instead of chat) ──────
+
+    private final java.util.Map<String, String> lastResults = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public void setLastResult(UUID uuid, String arena, String result) {
+        lastResults.put(uuid + ":" + arena.toLowerCase(), result);
+    }
+
+    public String getLastResult(UUID uuid, String arena) {
+        return lastResults.getOrDefault(uuid + ":" + arena.toLowerCase(), "-");
     }
 
     /** The column holding when a stat last reached its current value. */

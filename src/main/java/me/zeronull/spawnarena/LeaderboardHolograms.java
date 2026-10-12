@@ -106,7 +106,7 @@ public final class LeaderboardHolograms {
 
     private static final String REWARD_TAG = "_reward_";
     private static final int REWARD_UPDATE_INTERVAL_MS = 1_000;
-    public static final int REWARD_LINES = 7;
+    public static final int REWARD_LINES = 10;
 
     /** A per-viewer live countdown to that viewer's next win reward in this arena. */
     public static String spawnReward(final String arena, final Location loc) {
@@ -122,10 +122,13 @@ public final class LeaderboardHolograms {
                 "<gray>Win a fight to earn <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55>",
                 "<dark_gray><strikethrough>                              </strikethrough>",
                 "<gray>Your next reward",
-                "<#FFE066><bold>%spawnarena_reward_cooldown_" + arena + "%</bold></#FFE066>",
+                "<#FFE066><bold>%spawnarena_reward_status_" + arena + "%</bold></#FFE066>",
+                "<gray>Last win: <white>%spawnarena_reward_last_" + arena + "%</white>",
+                "<gray>Earned today: <white>%spawnarena_reward_today%</white> <dark_gray>/</dark_gray> <white>%spawnarena_reward_dailycap%</white>",
                 "<white>Claimable once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
                 "<gold>★ <yellow>#1 win streak earns <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
-                        + "%</bold></#55FF55> <yellow>every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★"
+                        + "%</bold></#55FF55> <yellow>every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
+                "<dark_gray>No pay for alts or beating the same player %spawnarena_reward_samelimit%+ times in a row"
         );
 
         final TextHologramData data = new TextHologramData(name, loc);

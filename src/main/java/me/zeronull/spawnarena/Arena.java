@@ -51,6 +51,12 @@ public abstract class Arena extends ArenaOptions {
      * fails on permissions/warm-ups): to the exit location if set, otherwise to the world's spawn.
      */
     public void kickOut(final Player player) {
+        FoliaUtils.teleport(player, this.exitFor(player));
+        player.sendMessage(org.bukkit.ChatColor.RED + "You can't be in the arena while a fight is going on.");
+    }
+
+    /** Where to send someone leaving this arena: the exit location if set, otherwise their world's spawn. */
+    public Location exitFor(final Player player) {
         Location target = this.exitLocation;
         if (target == null || target.getWorld() == null) {
             target = player.getWorld().getSpawnLocation();
@@ -60,10 +66,9 @@ public abstract class Arena extends ArenaOptions {
                         + " has no exit location; sending spectators to the world spawn. Set one with /setarenaexit " + this.arenaName);
             }
         }
-
-        FoliaUtils.teleport(player, target);
-        player.sendMessage(org.bukkit.ChatColor.RED + "You can't be in the arena while a fight is going on.");
+        return target;
     }
+
     public Arena(String arenaName) {
         this.arenaName = arenaName;
     }

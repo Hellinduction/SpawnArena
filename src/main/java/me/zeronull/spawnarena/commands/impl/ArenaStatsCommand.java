@@ -31,17 +31,44 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
         if (args.length >= 1 && args[0].equalsIgnoreCase("migrate"))
             return migrate(sender, args);
 
-        if (args.length < 3) {
-            sender.sendMessage("§cUsage: /arenastats <get|set|reset> <player> <arena> [stat] [value]");
+        final String sub = args.length >= 1 ? args[0].toLowerCase() : "";
+        final boolean getAll = sub.equals("get") && args.length == 2;
+        if (args.length < 3 && !getAll) {
+            sender.sendMessage("§cUsage: /arenastats get <player> [arena]");
+            sender.sendMessage("§c       /arenastats <set|reset> <player> <arena> [stat] [value]");
             sender.sendMessage("§c       /arenastats resetcooldown <player> <arena|all>  §7or  §c/arenastats migrate");
             return true;
         }
 
-        final String sub = args[0].toLowerCase();
-        @SuppressWarnings("deprecation")
-        final OfflinePlayer target = Bukkit.getOfflinePlayer(args[1]);
+        // Only players the server has actually seen: getOfflinePlayer(name) invents an ID for unknown
+        // names, which silently shows 0 stats
+        final OfflinePlayer target = resolvePlayer(args[1]);
+        if (target == null) {
+            sender.sendMessage("§cNo player named §e" + args[1] + "§c has played on this server.");
+            return true;
+        }
         final UUID uuid = target.getUniqueId();
+
+        if (getAll) {
+            sender.sendMessage("§6Stats for §e" + target.getName() + "§6:");
+            for (final me.zeronull.spawnarena.Arena a : SpawnArena.arenas) {
+                final String name = a.getArenaName();
+                sender.sendMessage(String.format("§7- §e%s§7: wins=§e%d §7streak=§e%d §7best=§e%d", name,
+                        SpawnArena.statsManager.getWins(uuid, name),
+                        SpawnArena.statsManager.getWinStreak(uuid, name),
+                        SpawnArena.statsManager.getBestWinStreak(uuid, name)));
+            }
+            return true;
+        }
+
         final String arena = args[2];
+        final boolean allArenas = sub.equals("resetcooldown") && arena.equalsIgnoreCase("all");
+        if (!allArenas && SpawnArena.arenas.of(arena) == null) {
+            final List<String> names = new java.util.ArrayList<>();
+            SpawnArena.arenas.forEach(a -> names.add(a.getArenaName()));
+            sender.sendMessage("§cNo arena named §e" + arena + "§c. Arenas: §e" + String.join("§c, §e", names));
+            return true;
+        }
 
         switch (sub) {
             case "resetcooldown" -> {
@@ -91,6 +118,14 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             default -> sender.sendMessage("§cUnknown subcommand. Use: get, set, reset");
         }
         return true;
+    }
+
+    /** Online player by name, else a player the server has seen before (no web lookups, no invented IDs). */
+    private static OfflinePlayer resolvePlayer(final String name) {
+        final org.bukkit.entity.Player online = Bukkit.getPlayerExact(name);
+        if (online != null)
+            return online;
+        return Bukkit.getOfflinePlayerIfCached(name);
     }
 
     private boolean migrate(CommandSender sender, String[] args) {
