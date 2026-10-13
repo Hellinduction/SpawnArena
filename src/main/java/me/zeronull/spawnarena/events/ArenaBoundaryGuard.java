@@ -24,8 +24,8 @@ import java.util.function.Consumer;
  */
 public final class ArenaBoundaryGuard implements Listener {
     private static final long MESSAGE_COOLDOWN_MILLIS = 3_000;
-    private final Map<UUID, Long> lastMessage = new HashMap<>();
-    private final Map<Arena, Boolean> warnedSpawnOutside = new HashMap<>();
+    private final Map<UUID, Long> lastMessage = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<Arena, Boolean> warnedSpawnOutside = new java.util.concurrent.ConcurrentHashMap<>();
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onMove(final PlayerMoveEvent e) {

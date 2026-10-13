@@ -30,7 +30,7 @@ public final class SettingsConfig {
 
     @Comment({"Most money one player can earn from arena win rewards per day (server time), across all arenas.",
             "0 = no limit."})
-    public double dailyRewardCap = 2_000_000;
+    public double dailyRewardCap = 1_000_000;
 
     @Comment({"Payouts in a row against the same opponent. After that many, beating them again doesn't pay",
             "until the player beats someone else (paid or not). 0 = no limit."})
@@ -45,10 +45,47 @@ public final class SettingsConfig {
     public boolean blockSameIpStats = true;
 
     @Comment("Losing a win streak at least this long gets a dramatic announcement. 0 disables it.")
-    public int streakEndAnnounceThreshold = 10;
+    public int streakEndAnnounceThreshold = 5;
 
     @Comment("How close (in blocks) to an arena's region you must be to shift-right-click someone for a duel there")
     public double duelRadius = 10;
 
     @Comment("Seconds before an unanswered duel request expires")
-    public int duelRequestSeconds = 30;}
+    public int duelRequestSeconds = 60;
+
+    @Comment({"With the SpawnArena bridge plugin on your Velocity proxy, win announcements go to every server on the",
+            "network. Without the bridge (or with this off), they're announced in this server's chat as usual."})
+    public boolean proxyBroadcast = true;
+
+    @Comment({"Most a player can bet with /arenabet. A bet only applies to a fight where their win reward is ready",
+            "(so at most once per reward cooldown), never to duels. 0 turns betting off."})
+    public double betMax = 50000;
+
+    @Comment({"What winning a bet pays on top of getting it back, as a percentage of the bet (50 = bet 50k, win 25k extra).",
+            "Losing loses the bet. The bonus counts toward dailyRewardCap."})
+    public int betWinBonusPercent = 50;
+
+    @Comment({"The #1 win streak only earns the leader bonus (an arena's leaderRewardMultiplier) once it's at least",
+            "this long, so the first winner in an empty arena doesn't get it straight away. 1 = any streak."})
+    public int leaderBonusMinStreak = 3;
+
+    @Comment({"If the arena's tick rate (TPS) averaged below this during a fight, the loser gets lagRefundPercent of their",
+            "bet back (not if they quit). On Folia it's the tick rate of the part of the world the arena is in. 0 turns it off."})
+    public double lagRefundBelowTps = 17;
+
+    @Comment("How much of a lost bet comes back after a laggy fight (see lagRefundBelowTps), as a percentage")
+    public int lagRefundPercent = 50;
+
+    @Comment({"A fighter whose connection drops mid-fight (the server times them out, or they send nothing for",
+            "lagOutQuietSeconds and then disconnect) doesn't lose: a 1v1 ends as a draw with no stats changed and bets",
+            "given back; in 2v2 they're out but get their bet back. At most this many per player per day, after which",
+            "it counts as quitting. 0 turns it off."})
+    public int lagOutsPerDay = 2;
+
+    @Comment("How long a fighter must have sent nothing before disconnecting for it to count as a lag-out")
+    public double lagOutQuietSeconds = 3;
+
+    @Comment({"Outline everyone in a running fight with a glow in that fight's own colour, so spectators can tell",
+            "matches apart. Fighters see it too (it shows through walls)."})
+    public boolean fightGlow = true;
+}

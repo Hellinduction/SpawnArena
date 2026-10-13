@@ -28,6 +28,15 @@ public final class SetUpFightCommand extends ArenaTabComplete implements Command
     @Override
     public boolean onCommand(final CommandSender sender, final Command command, final String label, final String[] args) {
         if (args.length != 3 && args.length != 5) {
+            // Nudge towards the nearest valid form
+            final int players = Math.max(0, args.length - 1);
+            if (players == 1)
+                sender.sendMessage(ChatColor.RED + "A 1v1 needs 2 players: /setupfight " + args[0] + " " + args[1] + " <p2>");
+            else if (players == 3)
+                sender.sendMessage(ChatColor.RED + "A 2v2 needs 4 players: /setupfight " + args[0] + " "
+                        + args[1] + " " + args[2] + " " + args[3] + " <p4>");
+            else if (players > 4)
+                sender.sendMessage(ChatColor.RED + "That's " + players + " players; fights are 1v1 (2 players) or 2v2 (4 players).");
             sender.sendMessage(ChatColor.translateAlternateColorCodes('&',
                     "&cUsage: /setupfight <arena> <p1> <p2>  &7or (2v2)  &c/setupfight <arena> <p1> <p2> <p3> <p4>"));
             return true;
@@ -73,16 +82,16 @@ public final class SetUpFightCommand extends ArenaTabComplete implements Command
                 SpawnArena.arenas.fromQueued(p).queue.removePlayer(p);
         }
 
-        if (players.size() == 2) {
-            // Queued last, so the 1v1 queue pairs exactly these two (waiting in SINGLE arenas until free)
-            JoinArenaQueueCommand.addToQueue(arena, players.get(0));
-            JoinArenaQueueCommand.addToQueue(arena, players.get(1));
-            sender.sendMessage(ChatColor.GREEN + String.format("Set up a 1v1: %s vs %s.", players.get(0).getName(), players.get(1).getName()));
+        if (arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty()) {
+            sender.sendMessage(ChatColor.RED + "That arena already has a fight going on.");
             return true;
         }
 
-        if (arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty()) {
-            sender.sendMessage(ChatColor.RED + "That arena already has a fight going on.");
+        if (players.size() == 2) {
+            // Started directly (the queue now gives players who've waited long a turn first)
+            new Fight().initiateFight(players.get(0), players.get(1), arena);
+            sender.sendMessage(ChatColor.GREEN + String.format("Set up a 1v1: %s vs %s. Starting in 5 seconds.",
+                    players.get(0).getName(), players.get(1).getName()));
             return true;
         }
         new Fight().initiateTeamFight(players.subList(0, 2), players.subList(2, 4), arena);

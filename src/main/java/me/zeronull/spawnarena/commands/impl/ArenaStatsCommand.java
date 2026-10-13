@@ -20,17 +20,24 @@ import java.util.UUID;
  * /arenastats reset <player> <arena>
  * /arenastats resetcooldown <player> <arena|all>
  * /arenastats payouts <player> [page]
+ * /arenastats log [player|console] [page]                     — staff/console stat changes, newest first
+ * /arenastats rollback <staff|console> [30m|12h|7d|all] [confirm] — undo that staff member's stat changes
  */
 public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> STATS = List.of("wins", "streak", "best_streak");
-    private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "resetcooldown", "payouts", "migrate");
+    private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "resetcooldown", "payouts", "log", "rollback", "migrate");
+    private static final String ROLLBACK_PERMISSION = "spawnarena.arenastats.rollback";
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd,
                              @NotNull String label, String[] args) {
         if (args.length >= 1 && args[0].equalsIgnoreCase("migrate"))
             return migrate(sender, args);
+        if (args.length >= 1 && args[0].equalsIgnoreCase("log"))
+            return log(sender, args);
+        if (args.length >= 1 && args[0].equalsIgnoreCase("rollback"))
+            return rollback(sender, args);
 
         final String sub = args.length >= 1 ? args[0].toLowerCase() : "";
         final boolean getAll = sub.equals("get") && args.length == 2;
@@ -39,6 +46,7 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage("§cUsage: /arenastats get <player> [arena]  §7or  §c/arenastats payouts <player> [page]");
             sender.sendMessage("§c       /arenastats <set|reset> <player> <arena> [stat] [value]");
             sender.sendMessage("§c       /arenastats resetcooldown <player> <arena|all>  §7or  §c/arenastats migrate");
+            sender.sendMessage("§c       /arenastats log [player|console] [page]  §7or  §c/arenastats rollback <staff|console> [time]");
             return true;
         }
 
@@ -85,6 +93,8 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             case "resetcooldown" -> {
                 final boolean all = arena.equalsIgnoreCase("all");
                 final int cleared = SpawnArena.statsManager.clearRewardCooldown(uuid, all ? null : arena);
+                if (cleared >= 0)
+                    audit(sender, target, all ? null : arena, null, null, null, "resetcooldown");
                 if (cleared < 0)
                     sender.sendMessage("§cCouldn't reset the cooldown — check the console.");
                 else
@@ -116,19 +126,177 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                     sender.sendMessage("§cValue must be an integer.");
                     return true;
                 }
+                if (value < 0) {
+                    sender.sendMessage("§cValue can't be negative.");
+                    return true;
+                }
+                final int old = SpawnArena.statsManager.getField(uuid, arena, field);
                 SpawnArena.statsManager.setField(uuid, arena, field, value);
+                audit(sender, target, arena, field, old, value, "set");
                 sender.sendMessage(String.format("§aSet §e%s §afor §e%s §ain §e%s §ato §e%d",
                         stat, target.getName(), arena, value));
             }
             case "reset" -> {
-                SpawnArena.statsManager.setField(uuid, arena, "wins", 0);
-                SpawnArena.statsManager.setField(uuid, arena, "win_streak", 0);
-                SpawnArena.statsManager.setField(uuid, arena, "best_win_streak", 0);
+                for (final String field : new String[]{"wins", "win_streak", "best_win_streak"}) {
+                    final int old = SpawnArena.statsManager.getField(uuid, arena, field);
+                    SpawnArena.statsManager.setField(uuid, arena, field, 0);
+                    if (old != 0)
+                        audit(sender, target, arena, field, old, 0, "reset");
+                }
                 sender.sendMessage(String.format("§aReset all stats for §e%s §ain §e%s", target.getName(), arena));
             }
             default -> sender.sendMessage("§cUnknown subcommand. Use: get, set, reset");
         }
         return true;
+    }
+
+    // ── Audit log and rollback ──────────────────────────────────────────────
+
+    private static void audit(final CommandSender sender, final OfflinePlayer target, final String arena, final String field,
+                              final Integer oldValue, final Integer newValue, final String action) {
+        final UUID actor = sender instanceof org.bukkit.entity.Player p ? p.getUniqueId() : null;
+        SpawnArena.statsManager.logStatChange(actor, sender.getName(), target.getUniqueId(), target.getName(),
+                arena, field, oldValue, newValue, action);
+    }
+
+    private static final int LOG_PER_PAGE = 10;
+
+    private boolean log(final CommandSender sender, final String[] args) {
+        UUID who = null;
+        boolean console = false;
+        String label = "everyone";
+        int page = 1;
+        int next = 1;
+        if (args.length >= 2 && !isNumber(args[1])) {
+            if (args[1].equalsIgnoreCase("console")) {
+                console = true;
+                label = "the console";
+            } else {
+                final OfflinePlayer p = resolvePlayer(args[1]);
+                if (p == null) {
+                    sender.sendMessage("§cNo player named §e" + args[1] + "§c has played on this server.");
+                    return true;
+                }
+                who = p.getUniqueId();
+                label = p.getName();
+            }
+            next = 2;
+        }
+        if (args.length > next && isNumber(args[next]))
+            page = Math.max(1, Integer.parseInt(args[next]));
+
+        final List<StatsManager.AuditEntry> entries = SpawnArena.statsManager.getAudit(who, console, page, LOG_PER_PAGE);
+        sender.sendMessage("§6Stat changes " + (console ? "made by " : who == null ? "by " : "by or to ") + "§e" + label + "§6 (page " + page + "):");
+        if (entries.isEmpty()) {
+            sender.sendMessage("§7None.");
+            return true;
+        }
+        for (final StatsManager.AuditEntry e : entries) {
+            final String change = e.field() == null ? "" : " §7" + e.field() + " §e" + e.oldValue() + "§7→§e" + e.newValue();
+            sender.sendMessage(String.format("§7%s §8· §f%s §7%s §f%s%s%s%s",
+                    PAYOUT_TIME.format(java.time.Instant.ofEpochMilli(e.changedAt())), e.actorName(), e.action(),
+                    nameOf(e.target()), e.arena() == null ? "" : " §7in §e" + e.arena(), change,
+                    e.rolledBack() ? " §c(rolled back)" : ""));
+        }
+        if (entries.size() == LOG_PER_PAGE)
+            sender.sendMessage("§7More: /arenastats log " + (args.length >= 2 && !isNumber(args[1]) ? args[1] + " " : "") + (page + 1));
+        return true;
+    }
+
+    private boolean rollback(final CommandSender sender, final String[] args) {
+        if (!sender.hasPermission(ROLLBACK_PERMISSION)) {
+            sender.sendMessage("§cYou don't have permission!");
+            return true;
+        }
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /arenastats rollback <staff|console> [30m|12h|7d|all] [confirm]");
+            return true;
+        }
+
+        final UUID actor;
+        final String actorLabel;
+        if (args[1].equalsIgnoreCase("console")) {
+            actor = null;
+            actorLabel = "the console";
+        } else {
+            final OfflinePlayer p = resolvePlayer(args[1]);
+            if (p == null) {
+                sender.sendMessage("§cNo player named §e" + args[1] + "§c has played on this server.");
+                return true;
+            }
+            actor = p.getUniqueId();
+            actorLabel = p.getName();
+        }
+
+        final String window = args.length >= 3 && !args[2].equalsIgnoreCase("confirm") ? args[2] : "all";
+        final long millis = parseDuration(window);
+        if (millis < 0) {
+            sender.sendMessage("§cTime must look like 30m, 12h, 7d or all.");
+            return true;
+        }
+        final long since = millis == 0 ? 0 : System.currentTimeMillis() - millis;
+        final boolean confirm = args[args.length - 1].equalsIgnoreCase("confirm");
+
+        final List<StatsManager.AuditEntry> entries = SpawnArena.statsManager.getRollbackable(actor, since);
+        final String when = millis == 0 ? "ever" : "in the last " + window;
+        if (entries.isEmpty()) {
+            sender.sendMessage("§7" + actorLabel + " hasn't changed any stats " + when + " (that aren't already rolled back).");
+            return true;
+        }
+
+        if (!confirm) {
+            final java.util.Set<UUID> players = new java.util.HashSet<>();
+            entries.forEach(e -> players.add(e.target()));
+            sender.sendMessage("§e" + actorLabel + " made §6" + me.zeronull.spawnarena.Grammar.count(entries.size(), "stat change")
+                    + "§e to §6" + me.zeronull.spawnarena.Grammar.count(players.size(), "player") + "§e " + when + ".");
+            sender.sendMessage("§7Each change is undone by its difference, so wins earned in real fights since then are kept.");
+            sender.sendMessage("§7See them with §e/arenastats log " + args[1] + "§7. Run §e/arenastats rollback " + args[1] + " " + window + " confirm§7 to undo them.");
+            return true;
+        }
+
+        final UUID performer = sender instanceof org.bukkit.entity.Player p ? p.getUniqueId() : null;
+        final String performerName = sender.getName();
+        sender.sendMessage("§7Rolling back...");
+        Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> {
+            final int[] result = SpawnArena.statsManager.rollback(entries, performer, performerName);
+            sender.sendMessage("§aRolled back §e" + me.zeronull.spawnarena.Grammar.count(result[0], "stat change")
+                    + "§a made by §e" + actorLabel + "§a.");
+            if (result[1] > 0)
+                sender.sendMessage("§e" + me.zeronull.spawnarena.Grammar.count(result[1], "cooldown reset")
+                        + " can't be undone (check §6/arenastats payouts§e for rewards paid after them).");
+        });
+        return true;
+    }
+
+    /** "30m", "12h", "7d" in millis; 0 for "all"; -1 if it can't be read. */
+    private static long parseDuration(final String raw) {
+        if (raw.equalsIgnoreCase("all"))
+            return 0;
+        if (raw.length() < 2)
+            return -1;
+        final long amount;
+        try {
+            amount = Long.parseLong(raw.substring(0, raw.length() - 1));
+        } catch (final NumberFormatException e) {
+            return -1;
+        }
+        if (amount <= 0)
+            return -1;
+        return switch (Character.toLowerCase(raw.charAt(raw.length() - 1))) {
+            case 'm' -> amount * 60_000L;
+            case 'h' -> amount * 3_600_000L;
+            case 'd' -> amount * 86_400_000L;
+            default -> -1;
+        };
+    }
+
+    private static boolean isNumber(final String s) {
+        try {
+            Integer.parseInt(s);
+            return true;
+        } catch (final NumberFormatException e) {
+            return false;
+        }
     }
 
     private static final int PAYOUTS_PER_PAGE = 10;
@@ -217,6 +385,16 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                                       @NotNull String label, String[] args) {
         if (args.length == 1) return filter(SUBCOMMANDS, args[0]);
         if (args.length == 2 && args[0].equalsIgnoreCase("migrate")) return filter(List.of("confirm"), args[1]);
+        if (args[0].equalsIgnoreCase("log") || args[0].equalsIgnoreCase("rollback")) {
+            if (args.length == 2) {
+                final List<String> names = new java.util.ArrayList<>(List.of("console"));
+                Bukkit.getOnlinePlayers().forEach(p -> names.add(p.getName()));
+                return names.stream().filter(n -> n.toLowerCase().startsWith(args[1].toLowerCase())).toList();
+            }
+            if (args.length == 3 && args[0].equalsIgnoreCase("rollback")) return filter(List.of("30m", "12h", "7d", "all"), args[2]);
+            if (args.length == 4 && args[0].equalsIgnoreCase("rollback")) return filter(List.of("confirm"), args[3]);
+            return Collections.emptyList();
+        }
         if (args.length == 4 && args[0].equalsIgnoreCase("set")) return filter(STATS, args[3]);
         if (args.length == 3 && !args[0].equalsIgnoreCase("migrate") && !args[0].equalsIgnoreCase("payouts")) {
             final List<String> arenas = new java.util.ArrayList<>();

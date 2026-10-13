@@ -1,7 +1,5 @@
 package me.zeronull.spawnarena;
 
-import me.nahu.scheduler.wrapper.WrappedScheduler;
-import me.nahu.scheduler.wrapper.WrappedSchedulerBuilder;
 import me.zeronull.spawnarena.commands.impl.*;
 import me.zeronull.spawnarena.config.ConfigHandler;
 import me.zeronull.spawnarena.events.*;
@@ -17,7 +15,6 @@ import java.util.logging.Level;
 public class SpawnArena extends JavaPlugin {
     public static SpawnArena INSTANCE;
     public static Arenas arenas;
-    public static WrappedScheduler scheduler;
     public static StatsManager statsManager;
     public static me.zeronull.spawnarena.config.impl.SettingsConfig settings;
 
@@ -27,8 +24,6 @@ public class SpawnArena extends JavaPlugin {
 
     @Override
     public void onEnable() {
-        final WrappedSchedulerBuilder schedulerBuilder = WrappedSchedulerBuilder.builder().plugin(this);
-        scheduler = schedulerBuilder.build();
 
         settings = ConfigHandler.getInstance().getSettingsConfig();
         Arena.SPAWN_WORLD = settings.spawnWorld;
@@ -49,8 +44,33 @@ public class SpawnArena extends JavaPlugin {
 
         registerEvents();
         registerCommands();
+        ProxyBridge.enable();
+        FightGlow.cleanUpOnEnable();
+        LagOuts.watchOnline();
+        // Bets held by fights that never finished (crash/shutdown) go back; a bit later, as the economy
+        // plugin may register after this one
+        Threads.globalLater(() -> {
+            if (Bukkit.getPluginManager().isPluginEnabled("Vault"))
+                Bets.refundLeftovers();
+        }, 100L);
+        if (Bukkit.getPluginManager().isPluginEnabled("voicechat")) {
+            try {
+                ArenaVoicechat.register();
+            } catch (final LinkageError | RuntimeException e) {
+                getLogger().warning("Couldn't hook into Simple Voice Chat (" + e + "); separate fights may hear each other.");
+            }
+        }
 
         arenas = Arenas.fromList(ConfigHandler.getInstance().registerArenasFromConfig());
+
+        if (!Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
+            for (final Arena arena : arenas)
+                if (arena.isCrystalPvp())
+                    getLogger().warning("Arena " + arena.getArenaName() + " has crystalPvp on, but WorldGuard isn't installed, so it can't be used.");
+
+        // Undo anything a crash left in crystal arenas, then keep the crash-safety file up to date
+        CrystalPvp.restoreLeftovers();
+        CrystalPvp.startSaving();
     }
 
     private void registerEvents() {
@@ -78,12 +98,24 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaTeleportGrace(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new DuelRequestListener(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new QueueMenuListener(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.ThrownTridents(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new LagOuts(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new FightGlow(), this);
 
         if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
             LeaderboardHolograms.startReadyEffects();
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaSpectatorGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaBoundaryGuard(), this);
+            Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.CrystalArenaListener(), this);
+            // Uses WorldGuard's internal events; if a WorldGuard update changes them, crystal arenas still work
+            // (fighters just see WorldGuard's "can't place" messages unless the region allows building)
+            try {
+                Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.CrystalWorldGuardBypass(), this);
+            } catch (final LinkageError | RuntimeException e) {
+                getLogger().warning("Couldn't hook into WorldGuard's events for crystal arenas (" + e
+                        + "). Set the build flag to allow in crystal arena regions instead.");
+            }
         }
         // Must stay registered after ArenaTeamPvPEvent/ArenaFireFix: same priority runs in registration order
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaDeathEvent(), this);
@@ -106,6 +138,13 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("setarenaexit", new SetArenaExitCommand());
         this.registerCommand("arenaduel", new ArenaDuelCommand());
         this.registerCommand("arenawins", new ArenaWinsCommand());
+        this.registerCommand("arenabet", new me.zeronull.spawnarena.commands.impl.ArenaBetCommand());
+        this.registerCommand("arenasetup", new me.zeronull.spawnarena.commands.impl.ArenaSetupCommand());
+        if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
+            ArenaWizard.startTimeouts();
+            // Undo pastes from arena setups that never finished (the server stopped mid-setup)
+            Threads.globalLater(ArenaWizard::restoreLeftovers, 40L);
+        }
     }
 
     private void registerCommand(final String cmdName, final CommandExecutor cmd) {
@@ -120,6 +159,7 @@ public class SpawnArena extends JavaPlugin {
     @Override
     public void onDisable() {
         this.shutdownArenas();
+        LagOuts.unwatchAll();
         if (statsManager != null) statsManager.close();
     }
 
@@ -129,11 +169,13 @@ public class SpawnArena extends JavaPlugin {
 
         for (final Arena arena : arenas) {
             new ArrayList<>(arena.getFights()).forEach(fight -> {
-                if (fight.getState() == FightState.IN_FIGHT)
+                // Including fights still sending players in: some may already have been snapshotted
+                if (fight.getState() == FightState.IN_FIGHT || fight.getState() == FightState.PRE_FIGHT_START)
                     fight.endFight();
             });
         }
 
+        CrystalPvp.cleanupAll();
         Arena.ArenaUtils.kickOutLingeringPlayers();
     }
 }

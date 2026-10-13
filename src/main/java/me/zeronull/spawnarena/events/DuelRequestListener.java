@@ -26,6 +26,11 @@ public final class DuelRequestListener implements Listener {
         final Player requester = e.getPlayer();
         if (!requester.isSneaking() || requester.equals(target))
             return;
+        // Only someone you can actually see: not a vanished/hidden player, and not a spectator unless you
+        // are one too. Silently, so it doesn't give away that they're there.
+        if (!requester.canSee(target)
+                || (target.getGameMode() == org.bukkit.GameMode.SPECTATOR && requester.getGameMode() != org.bukkit.GameMode.SPECTATOR))
+            return;
 
         final Arena arena = DuelManager.arenaNear(requester.getLocation());
         if (arena == null)

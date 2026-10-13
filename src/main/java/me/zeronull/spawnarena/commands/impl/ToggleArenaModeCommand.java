@@ -50,6 +50,11 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             return true;
         }
 
+        if (arena.isCrystalPvp()) {
+            sender.sendMessage(ChatColor.RED + "Crystal PvP arenas always run one fight at a time (SINGLE).");
+            return true;
+        }
+
         ArenaMode curentArenaMode = arena.getArenaMode();
 
         if (curentArenaMode == null)

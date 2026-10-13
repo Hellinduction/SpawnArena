@@ -20,6 +20,7 @@ public final class ArenaWinsCommand implements CommandExecutor {
         }
 
         final boolean on = WinMessagePrefs.toggle(player);
+        me.zeronull.spawnarena.ProxyBridge.sendPreference(player); // so it applies network-wide too
         player.sendMessage(on
                 ? ChatColor.GREEN + "You'll now see arena win announcements in chat."
                 : ChatColor.YELLOW + "You won't see other players' arena win announcements anymore. Your own results still show. Run /arenawins to turn them back on.");

@@ -90,7 +90,7 @@ public final class DuelManager {
         LAST_SENT.values().removeIf(sent -> now - sent >= RESEND_COOLDOWN_MILLIS); // keep the map from growing forever
         LAST_SENT.put(pair, now);
 
-        final int seconds = SpawnArena.settings == null ? 30 : SpawnArena.settings.duelRequestSeconds;
+        final int seconds = SpawnArena.settings == null ? 60 : SpawnArena.settings.duelRequestSeconds;
         REQUESTS.computeIfAbsent(target.getUniqueId(), k -> new ConcurrentHashMap<>())
                 .put(requester.getUniqueId(), new Request(requester.getUniqueId(), arena.getArenaName(), now + seconds * 1000L));
 
@@ -104,7 +104,7 @@ public final class DuelManager {
                 Placeholder.unparsed("requester", requester.getName()),
                 Placeholder.unparsed("arena", arenaName)));
         requester.sendMessage(MiniMessage.miniMessage().deserialize(
-                "<red><bold>NO STATS OR PAYOUTS</bold></red> <dark_gray>·</dark_gray> <yellow>Duel request sent to </yellow><gold><target></gold><yellow> in </yellow><gold><arena></gold><yellow>. It expires in <seconds>s.</yellow>",
+                "<red><bold>NO STATS OR PAYOUTS</bold></red> <dark_gray>·</dark_gray> <yellow>Duel request sent to </yellow><gold><target></gold><yellow> in </yellow><gold><arena></gold><yellow>. It expires in </yellow><gold><seconds>s</gold><yellow>.</yellow>",
                 Placeholder.unparsed("target", target.getName()),
                 Placeholder.unparsed("arena", arenaName),
                 Placeholder.unparsed("seconds", String.valueOf(seconds))));
@@ -160,6 +160,24 @@ public final class DuelManager {
                 Placeholder.unparsed("target", target.getName())));
     }
 
+    /**
+     * Withdraws the duel requests this player has sent (e.g. they joined a queue, where they can't duel),
+     * telling them and each player they'd challenged.
+     */
+    public static void cancelSentRequests(final Player requester, final String because) {
+        for (final Map.Entry<UUID, Map<UUID, Request>> entry : REQUESTS.entrySet()) {
+            if (entry.getValue().remove(requester.getUniqueId()) == null)
+                continue;
+            final Player target = org.bukkit.Bukkit.getPlayer(entry.getKey());
+            if (target == null)
+                continue;
+            requester.sendMessage(MiniMessage.miniMessage().deserialize("<gray>Your duel request to <target> was cancelled because you <because>.",
+                    Placeholder.unparsed("target", target.getName()), Placeholder.unparsed("because", because)));
+            target.sendMessage(MiniMessage.miniMessage().deserialize("<gray><requester> withdrew their duel request.",
+                    Placeholder.unparsed("requester", requester.getName())));
+        }
+    }
+
     /** Removes every request this player sent or received; returns whether there were any. */
     public static boolean clear(final Player player) {
         boolean had = REQUESTS.remove(player.getUniqueId()) != null;
@@ -205,6 +223,8 @@ public final class DuelManager {
             return self ? "You're too far from the arena." : name + " is too far from the arena.";
         if (arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty())
             return "There's already a fight in that arena.";
+        if (arena.isResetting())
+            return "That arena is being reset. Try again in a moment.";
         return null;
     }
 }

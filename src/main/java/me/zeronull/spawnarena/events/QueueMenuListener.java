@@ -16,10 +16,10 @@ public final class QueueMenuListener implements Listener {
 
     public QueueMenuListener() {
         // Keep open menus' player counts live
-        SpawnArena.scheduler.runTaskTimer(() -> {
+        me.zeronull.spawnarena.Threads.globalTimer(task -> {
             for (final Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
                 if (p.getOpenInventory().getTopInventory().getHolder() instanceof QueueMenu)
-                    SpawnArena.scheduler.runTaskAtEntity(p, () -> {
+                    me.zeronull.spawnarena.Threads.entity(p, () -> {
                         if (p.getOpenInventory().getTopInventory().getHolder() instanceof QueueMenu menu)
                             menu.refresh(p);
                     });

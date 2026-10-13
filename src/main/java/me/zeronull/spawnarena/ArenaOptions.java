@@ -8,6 +8,7 @@ public abstract class ArenaOptions {
     private boolean winOnStepStonePressurePlate;
     private boolean giveKnockBackStick;
     private ArenaMode arenaMode;
+    private boolean crystalPvp;
     private double winReward;
     private int winRewardCooldownMinutes;
 
@@ -94,8 +95,18 @@ public abstract class ArenaOptions {
         return this;
     }
 
+    /** Crystal PvP arenas always run one fight at a time: blocks placed in one fight would show up in the other. */
     public ArenaMode getArenaMode() {
-        return this.arenaMode;
+        return this.crystalPvp ? ArenaMode.SINGLE : this.arenaMode;
+    }
+
+    public boolean isCrystalPvp() {
+        return this.crystalPvp;
+    }
+
+    public ArenaOptions setCrystalPvp(final boolean value) {
+        this.crystalPvp = value;
+        return this;
     }
 
     public ArenaOptions setArenaMode(final String arenaMode) {

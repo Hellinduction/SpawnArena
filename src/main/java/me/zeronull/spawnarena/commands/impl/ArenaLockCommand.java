@@ -57,11 +57,11 @@ public final class ArenaLockCommand implements CommandExecutor, TabCompleter {
             }
 
             for (final Fight fight : new ArrayList<>(arena.getFights())) {
-                if (fight.getState() == FightState.COUNTDOWN) {
-                    for (final Player p : fight.getFighters())
+                final List<Player> members = fight.getFighters();
+                if (fight.cancelFight()) { // only fights still counting down
+                    for (final Player p : members)
                         if (p != null && p.isOnline())
                             p.sendMessage(ChatColor.RED + "The arenas have been closed, so your fight was cancelled.");
-                    fight.cancelFight();
                     cancelled++;
                 } else if (fight.getState() != FightState.OVER) {
                     running++;

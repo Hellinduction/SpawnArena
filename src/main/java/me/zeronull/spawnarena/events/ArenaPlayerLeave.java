@@ -33,7 +33,23 @@ public class ArenaPlayerLeave implements Listener {
             return;
         }
 
-        fight.eliminate(player);
+        // Their connection dropped (rather than them leaving): no loss, while they have lag-outs left today
+        final boolean laggedOut = me.zeronull.spawnarena.LagOuts.looksLikeLagOut(event)
+                && fight.isFighter(player)
+                && me.zeronull.spawnarena.LagOuts.takeAllowance(player, fight);
+
+        // Anything owed back that doesn't fit is saved for their next join instead of dropped
+        me.zeronull.spawnarena.PlayerPreFightData.QUITTING.add(player.getUniqueId());
+        try {
+            if (laggedOut) {
+                fight.lagOut(player);
+            } else {
+                fight.markQuit(player);
+                fight.eliminate(player);
+            }
+        } finally {
+            me.zeronull.spawnarena.PlayerPreFightData.QUITTING.remove(player.getUniqueId());
+        }
     }
 
 }

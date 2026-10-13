@@ -28,12 +28,15 @@ public final class ArenaReloadCommand implements CommandExecutor {
 
         int reloaded = 0;
         int failed = 0;
+        final java.util.List<String> waiting = new java.util.ArrayList<>();
         for (final Arena arena : SpawnArena.arenas) {
             if (!(arena instanceof SavableArena savable))
                 continue;
             try {
-                savable.reloadFromDisk();
-                reloaded++;
+                if (savable.reloadFromDisk())
+                    reloaded++;
+                else
+                    waiting.add(arena.getArenaName());
             } catch (final Exception e) {
                 failed++;
                 SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Failed to reload arena " + arena.getArenaName(), e);
@@ -43,6 +46,9 @@ public final class ArenaReloadCommand implements CommandExecutor {
         SpawnArena.statsManager.invalidateLeaderboards();
 
         sender.sendMessage("§aReloaded settings.yml and " + me.zeronull.spawnarena.Grammar.count(reloaded, "arena") + ".");
+        if (!waiting.isEmpty())
+            sender.sendMessage("§e" + String.join(", ", waiting) + (waiting.size() == 1 ? " has" : " have")
+                    + " a fight going on, so " + (waiting.size() == 1 ? "its" : "their") + " new settings apply once it ends.");
         if (failed > 0)
             sender.sendMessage("§c" + me.zeronull.spawnarena.Grammar.count(failed, "arena file")
                     + " had errors and kept the old values. Check the console.");

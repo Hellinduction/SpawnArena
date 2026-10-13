@@ -26,9 +26,9 @@ import java.util.UUID;
  */
 public final class ArenaSpectatorGuard implements Listener {
     private static final long MESSAGE_COOLDOWN_MILLIS = 3_000;
-    private final Map<UUID, Long> lastMessage = new HashMap<>();
+    private final Map<UUID, Long> lastMessage = new java.util.concurrent.ConcurrentHashMap<>();
     private static final long KICK_COOLDOWN_MILLIS = 2_000;
-    private final Map<UUID, Long> lastKick = new HashMap<>();
+    private final Map<UUID, Long> lastKick = new java.util.concurrent.ConcurrentHashMap<>();
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onMove(final PlayerMoveEvent e) {

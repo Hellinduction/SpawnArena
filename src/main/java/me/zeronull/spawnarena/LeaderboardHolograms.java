@@ -152,7 +152,7 @@ public final class LeaderboardHolograms {
 
     /** Once a second: a poof at a reward hologram, for a nearby player, the moment their reward becomes ready. */
     public static void startReadyEffects() {
-        me.zeronull.spawnarena.SpawnArena.scheduler.runTaskTimer(LeaderboardHolograms::tickReadyEffects, 20L, 20L);
+        me.zeronull.spawnarena.Threads.globalTimer(task -> tickReadyEffects(), 20L, 20L);
     }
 
     private static void tickReadyEffects() {
@@ -177,21 +177,29 @@ public final class LeaderboardHolograms {
             if (arena == null || arena.getWinReward() <= 0 || loc == null || loc.getWorld() == null)
                 continue;
 
-            for (final org.bukkit.entity.Player p : loc.getWorld().getPlayers()) {
-                final String key = p.getUniqueId() + ":" + name;
-                if (p.getLocation().distanceSquared(loc) > READY_EFFECT_RADIUS * READY_EFFECT_RADIUS) {
-                    WAS_READY.remove(key); // coming back later starts fresh, without a poof
+            // Each player is checked on their own thread (Folia)
+            for (final org.bukkit.entity.Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
+                if (!loc.getWorld().equals(p.getWorld()))
                     continue;
-                }
-
-                final boolean ready = !stats.hasReachedDailyCap(p.getUniqueId())
-                        && stats.rewardCooldownRemaining(p.getUniqueId(), arena) <= 0;
-                final Boolean wasReady = WAS_READY.put(key, ready);
-                if (wasReady != null && !wasReady && ready)
-                    p.spawnParticle(org.bukkit.Particle.POOF,
-                            loc.clone().add(0, REWARD_LINES * LINE_HEIGHT / 2, 0), 30, 0.6, 0.6, 0.6, 0.02);
+                me.zeronull.spawnarena.Threads.entity(p, () -> checkReady(p, name, loc, arena, stats));
             }
         }
+    }
+
+    private static void checkReady(final org.bukkit.entity.Player p, final String name, final Location loc, final Arena arena,
+                                   final me.zeronull.spawnarena.StatsManager stats) {
+        final String key = p.getUniqueId() + ":" + name;
+        if (!loc.getWorld().equals(p.getWorld()) || p.getLocation().distanceSquared(loc) > READY_EFFECT_RADIUS * READY_EFFECT_RADIUS) {
+            WAS_READY.remove(key); // coming back later starts fresh, without a poof
+            return;
+        }
+
+        final boolean ready = !stats.hasReachedDailyCap(p.getUniqueId())
+                && stats.rewardCooldownRemaining(p.getUniqueId(), arena) <= 0;
+        final Boolean wasReady = WAS_READY.put(key, ready);
+        if (wasReady != null && !wasReady && ready)
+            p.spawnParticle(org.bukkit.Particle.POOF,
+                    loc.clone().add(0, REWARD_LINES * LINE_HEIGHT / 2, 0), 30, 0.6, 0.6, 0.6, 0.02);
     }
 
     public record UpdateResult(int updated, List<String> skipped) {}
@@ -275,6 +283,21 @@ public final class LeaderboardHolograms {
             count++;
         }
         return count;
+    }
+
+    /** Removes every leaderboard/reward hologram belonging to this arena. Returns how many. */
+    public static int removeForArena(final String arena) {
+        int removed = 0;
+        for (final String name : list()) {
+            // spawnarena_lb_<arena>_<stat|reward>_<4 digits>
+            final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
+            for (final String kind : new String[]{"best_streak", "streak", "wins", "reward"})
+                if (rest.equalsIgnoreCase(arena + "_" + kind) && remove(name)) {
+                    removed++;
+                    break;
+                }
+        }
+        return removed;
     }
 
     public static List<String> list() {

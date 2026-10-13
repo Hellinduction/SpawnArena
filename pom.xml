@@ -17,6 +17,10 @@
 
     <repositories>
         <repository>
+            <id>henkelmax</id>
+            <url>https://maven.maxhenkel.de/repository/public</url>
+        </repository>
+        <repository>
             <id>paper-repo</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
@@ -68,6 +72,13 @@
             <version>1.21.11-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
+        <!-- The server ships netty; only compiled against (LagOuts watches player connections) -->
+        <dependency>
+            <groupId>io.netty</groupId>
+            <artifactId>netty-transport</artifactId>
+            <version>4.2.7.Final</version>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>me.clip</groupId>
             <artifactId>placeholderapi</artifactId>
@@ -88,6 +99,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Soft-dep: Simple Voice Chat, so players hidden from each other can't hear each other either -->
+        <dependency>
+            <groupId>de.maxhenkel.voicechat</groupId>
+            <artifactId>voicechat-api</artifactId>
+            <version>2.5.0</version>
+            <scope>provided</scope>
+        </dependency>
         <!-- Soft-dep: win reward payouts -->
         <dependency>
             <groupId>com.github.MilkBowl</groupId>

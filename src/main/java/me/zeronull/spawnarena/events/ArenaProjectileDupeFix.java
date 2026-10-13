@@ -23,7 +23,7 @@ import java.util.*;
  * when their fight ends.
  */
 public final class ArenaProjectileDupeFix implements Listener {
-    private static final Map<UUID, Set<Projectile>> TRACKED = new HashMap<>();
+    private static final Map<UUID, Set<Projectile>> TRACKED = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static void discardProjectiles(final Player fighter) {
         if (fighter == null)
@@ -33,10 +33,12 @@ public final class ArenaProjectileDupeFix implements Listener {
         if (projectiles == null)
             return;
 
-        for (final Projectile projectile : projectiles) {
-            if (projectile.isValid())
-                projectile.remove();
-        }
+        // Each on its own thread (on Folia it may have flown somewhere else)
+        for (final Projectile projectile : projectiles)
+            me.zeronull.spawnarena.Threads.entity(projectile, () -> {
+                if (projectile.isValid())
+                    projectile.remove();
+            });
     }
 
     private static boolean isTracked(final Projectile projectile) {
@@ -59,7 +61,7 @@ public final class ArenaProjectileDupeFix implements Listener {
         if (!SpawnArena.arenas.hasActiveFight() || !SpawnArena.arenas.hasFighter(shooter))
             return;
 
-        TRACKED.computeIfAbsent(shooter.getUniqueId(), k -> new HashSet<>()).add(projectile);
+        TRACKED.computeIfAbsent(shooter.getUniqueId(), k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(projectile);
     }
 
     @EventHandler(priority = EventPriority.LOWEST)

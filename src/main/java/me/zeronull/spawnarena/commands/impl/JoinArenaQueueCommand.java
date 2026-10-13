@@ -16,8 +16,9 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * /joinarenaqueue <arena>              — opens the 1v1 / Auto / 2v2 menu (also used to leave or switch queues)
- * /joinarenaqueue <arena> <1v1|2v2|auto> — joins that queue directly (handy for NPCs)
+ * /joinarenaqueue <arena>                — joins the 1v1 queue straight away; again to leave (the original NPC command)
+ * /joinarenaqueue <arena> <1v1|2v2|auto> — joins that queue straight away; again to leave
+ * /joinarenaqueue <arena> menu           — opens the 1v1 / Auto / 2v2 menu
  */
 public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandExecutor {
     public JoinArenaQueueCommand() {
@@ -36,14 +37,17 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             final Arena current = SpawnArena.arenas.of(player);
             final me.zeronull.spawnarena.Fight fight = current == null ? null : current.getFight(player);
             if (fight != null && fight.getState() == me.zeronull.spawnarena.FightState.COUNTDOWN) {
-                fight.cancelBecause(player, player.getName() + " left the queue, so the fight was cancelled.");
-                player.sendMessage(ChatColor.YELLOW + "You left the queue.");
+                if (fight.cancelBecause(player, player.getName() + " left the queue, so the fight was cancelled.")) {
+                    player.sendMessage(ChatColor.YELLOW + "You left the queue.");
+                    return true;
+                }
+                player.sendMessage(ChatColor.RED + "Too late, the fight is starting!");
                 return true;
             }
         }
 
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /joinarenaqueue <arena> [1v1|2v2|auto]"));
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /joinarenaqueue <arena> [1v1|2v2|auto|menu]"));
             return true;
         }
 
@@ -53,24 +57,33 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return true;
         }
 
-        if (args.length >= 2) {
-            final FightMode mode = args[1].equalsIgnoreCase("auto") ? QueueMenu.autoMode(arena) : FightMode.fromLabel(args[1]);
-            if (mode == null) {
-                sender.sendMessage(ChatColor.RED + "Unknown mode. Use 1v1, 2v2 or auto.");
+        if (args.length >= 2 && args[1].equalsIgnoreCase("menu")) {
+            // Already queued here: the menu shows which queue they're in and lets them leave or switch
+            final String problem = arena.queue.playerInQueue(player) ? null : cantJoin(player, arena);
+            if (problem != null) {
+                sender.sendMessage(ChatColor.RED + problem);
                 return true;
             }
-            join(player, arena, mode);
+            QueueMenu.open(player, arena);
             return true;
         }
 
-        // Already queued here: the menu shows which queue they're in and lets them leave or switch
-        final String problem = arena.queue.playerInQueue(player) ? null : cantJoin(player, arena);
-        if (problem != null) {
-            sender.sendMessage(ChatColor.RED + problem);
+        // Running it again while queued here leaves (auto and no mode leave whichever queue they're in)
+        final FightMode current = arena.queue.modeOf(player);
+        final boolean anyMode = args.length < 2 || args[1].equalsIgnoreCase("auto");
+        if (current != null && (anyMode || current == FightMode.fromLabel(args[1]))) {
+            arena.queue.removePlayer(player);
+            player.sendMessage(ChatColor.YELLOW + "You've been removed from the queue!");
             return true;
         }
 
-        QueueMenu.open(player, arena);
+        final FightMode mode = args.length < 2 ? FightMode.ONE_V_ONE
+                : args[1].equalsIgnoreCase("auto") ? QueueMenu.autoMode(arena) : FightMode.fromLabel(args[1]);
+        if (mode == null) {
+            sender.sendMessage(ChatColor.RED + "Unknown mode. Use 1v1, 2v2, auto or menu.");
+            return true;
+        }
+        join(player, arena, mode);
         return true;
     }
 
@@ -111,6 +124,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
     }
 
     public static void addToQueue(final Arena arena, final Player player, final FightMode mode) {
+        me.zeronull.spawnarena.DuelManager.cancelSentRequests(player, "joined a queue");
         arena.queue.addPlayerToQueue(player, mode);
 
         // Joining can immediately start a match, which takes players back out of the queue
@@ -131,7 +145,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 2)
-            return List.of("1v1", "2v2", "auto").stream().filter(s -> s.startsWith(args[1].toLowerCase())).toList();
+            return List.of("1v1", "2v2", "auto", "menu").stream().filter(s -> s.startsWith(args[1].toLowerCase())).toList();
         if (args.length > 2)
             return Collections.emptyList();
         return super.onTabComplete(sender, command, label, args);

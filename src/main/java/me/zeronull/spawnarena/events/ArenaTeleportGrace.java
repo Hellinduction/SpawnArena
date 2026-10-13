@@ -55,8 +55,8 @@ public final class ArenaTeleportGrace implements Listener {
         player.setFireTicks(0);
         player.setFallDistance(0);
         RESCUING.add(player.getUniqueId());
-        FoliaUtils.teleport(player, grace.safe());
-        RESCUING.remove(player.getUniqueId());
+        // On Folia the teleport (and its event) happens later, so the marker is cleared once it's done
+        FoliaUtils.teleport(player, grace.safe()).whenComplete((ok, error) -> RESCUING.remove(player.getUniqueId()));
         return true;
     }
 

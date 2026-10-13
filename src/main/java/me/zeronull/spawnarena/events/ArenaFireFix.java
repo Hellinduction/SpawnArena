@@ -24,8 +24,8 @@ import java.util.UUID;
  * event for invincible players, so the fire an opponent caused is tracked here and put back.
  */
 public final class ArenaFireFix implements Listener {
-    /** Fighter UUID -> server tick at which opponent-caused fire should go out. */
-    private final Map<UUID, Integer> burnUntil = new HashMap<>();
+    /** Fighter UUID -> when (epoch millis) opponent-caused fire should go out. Real time, not ticks: Folia has no single tick count. */
+    private final Map<UUID, Long> burnUntil = new java.util.concurrent.ConcurrentHashMap<>();
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onCombust(final EntityCombustByEntityEvent e) {
@@ -37,8 +37,7 @@ public final class ArenaFireFix implements Listener {
             return;
 
         e.setCancelled(false);
-        final int ticks = (int) Math.round(((double) e.getDuration()) * 20);
-        final int until = Bukkit.getCurrentTick() + ticks;
+        final long until = System.currentTimeMillis() + Math.round(((double) e.getDuration()) * 1000);
         burnUntil.merge(defender.getUniqueId(), until, Math::max);
     }
 
@@ -47,11 +46,11 @@ public final class ArenaFireFix implements Listener {
         if (!(e.getEntity() instanceof Player defender))
             return;
 
-        final Integer until = burnUntil.get(defender.getUniqueId());
+        final Long until = burnUntil.get(defender.getUniqueId());
         if (until == null)
             return;
 
-        final int remaining = until - Bukkit.getCurrentTick();
+        final int remaining = (int) ((until - System.currentTimeMillis()) / 50); // in ticks
         if (remaining <= 0 || !isInRunningFight(defender)) {
             burnUntil.remove(defender.getUniqueId());
             return;

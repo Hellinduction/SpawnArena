@@ -13,7 +13,7 @@ import org.bukkit.event.player.PlayerMoveEvent;
 
 public final class LiquidListener implements Listener, Runnable {
     public LiquidListener() {
-        SpawnArena.scheduler.runTaskTimer(this, 1L, (3 * 20L));
+        me.zeronull.spawnarena.Threads.globalTimer(task -> this.run(), 1L, 3 * 20L);
     }
 
     @EventHandler(priority = EventPriority.LOWEST)
@@ -25,7 +25,7 @@ public final class LiquidListener implements Listener, Runnable {
     @Override
     public void run() {
         for (final Player p : SpawnArena.INSTANCE.getServer().getOnlinePlayers()) {
-            SpawnArena.scheduler.runTaskAtEntity(p, () -> {
+            me.zeronull.spawnarena.Threads.entity(p, () -> {
                 if (p.getLocation().getBlock().isLiquid())
                     SpawnArena.INSTANCE.getServer().getPluginManager().callEvent(new PlayerLiquidEnterEvent(p));
             });

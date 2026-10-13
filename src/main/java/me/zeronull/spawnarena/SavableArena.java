@@ -140,9 +140,43 @@ public final class SavableArena extends Arena {
     }
 
     /** Re-reads this arena's file and applies it without writing anything back. */
-    public void reloadFromDisk() {
-        final ArenaConfig config = getArenaConfig(this.getConfigFile());
+    /** Read on reload while a fight is running here, applied when the arena's last fight ends. */
+    private volatile ArenaConfig pendingReload;
 
+    /**
+     * Re-reads this arena's file (errors are thrown now). If a fight is running here, the new settings wait
+     * until it's over, so e.g. crystal PvP, the mode or the spawns can't change mid-fight. Returns true if
+     * applied now, false if waiting.
+     */
+    public boolean reloadFromDisk() {
+        final ArenaConfig config = getArenaConfig(this.getConfigFile());
+        synchronized (this) {
+            if (!this.getFights().isEmpty()) {
+                this.pendingReload = config;
+                return false;
+            }
+        }
+        this.apply(config);
+        return true;
+    }
+
+    /** Called when a fight leaves this arena: applies a reload that was waiting for the arena to be free. */
+    @Override
+    public void removeFight(final Fight fight) {
+        super.removeFight(fight);
+        final ArenaConfig pending;
+        synchronized (this) {
+            pending = this.getFights().isEmpty() ? this.pendingReload : null;
+            if (pending != null)
+                this.pendingReload = null;
+        }
+        if (pending != null) {
+            this.apply(pending);
+            SpawnArena.INSTANCE.getLogger().info("Applied the reloaded settings for arena " + this.getArenaName() + " now that its fight is over.");
+        }
+    }
+
+    private void apply(final ArenaConfig config) {
         super.setSpawnPoint1(config.spawnPoint1);
         super.setSpawnPoint2(config.spawnPoint2);
         this.exitLocation = config.exitLocation;
@@ -153,6 +187,7 @@ public final class SavableArena extends Arena {
         super.setWinOnStepStonePressurePlate(config.winOnStepStonePressurePlate);
         super.setGiveKnockBackStick(config.giveKnockBackStick);
         super.setArenaMode(config.arenaMode);
+        super.setCrystalPvp(config.crystalPvp);
         this.setWinReward(config.winReward, config.winRewardCooldownMinutes);
         this.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
     }
@@ -170,15 +205,21 @@ public final class SavableArena extends Arena {
         saveArenaConfig(configFile, config);
     }
 
-    public void resetArena() {
+    /**
+     * Pastes the arena's schematic back after a fight. Crystal arenas get the whole thing, air included, as a
+     * safety net for anything the crystal cleanup missed; other arenas only get their blocks put back (air is
+     * skipped, like //paste -a), which fixes anything broken and is quicker. Completes once the paste is done,
+     * straight away if the arena has no schematic.
+     */
+    public java.util.concurrent.CompletableFuture<Void> resetArena() {
         final ArenaConfig config = getArenaConfig(this.getConfigFile());
         final Location loc = config.pasteLocation;
 
         if (loc == null)
-            return;
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
 
         if (config.schematic == null || config.schematic.isEmpty())
-            return;
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
 
         // Older configs store just the schematic's name; newer ones its path
         File schematic = new File(config.schematic);
@@ -189,6 +230,6 @@ public final class SavableArena extends Arena {
             throw new IllegalStateException("Schematic '" + config.schematic + "' for arena " + this.getArenaName()
                     + " was not found in the WorldEdit/FastAsyncWorldEdit schematics folders");
 
-        WorldEditUtils.paste(loc, schematic);
+        return WorldEditUtils.paste(loc, schematic, !this.isCrystalPvp());
     }
 }

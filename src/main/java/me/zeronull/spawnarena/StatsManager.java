@@ -17,8 +17,17 @@ public class StatsManager {
     private final HikariDataSource dataSource;
     private final boolean mysql;
     private final File h2File;
+    /**
+     * This server's ID (server-id.txt), stored with every row so several servers can share one database.
+     * Always a validated UUID, so it's safe to put straight into SQL as {@link #sid}.
+     */
+    private final String serverId;
+    private final String sid;
 
     public StatsManager(SpawnArena plugin, DatabaseConfig config) {
+        plugin.getDataFolder().mkdirs();
+        this.serverId = loadServerId(plugin.getDataFolder());
+        this.sid = "'" + this.serverId + "'";
         this.mysql = config.type.equalsIgnoreCase("MYSQL");
         this.h2File = new File(plugin.getDataFolder(), "stats");
 
@@ -42,18 +51,81 @@ public class StatsManager {
             hc.setJdbcUrl(h2Url());
             hc.setUsername("sa");
             hc.setPassword("");
+            // An embedded file database gains nothing from recycling connections (that's for MySQL, which drops
+            // idle ones), and every recycle risked H2 closing and reopening the database mid-run
+            hc.setMaxLifetime(0);
         }
 
         this.dataSource = new HikariDataSource(hc);
-        createTable();
+        try {
+            createTable();
+        } catch (final RuntimeException e) {
+            this.dataSource.close(); // the plugin disables itself; don't leave the pool running
+            throw e;
+        }
 
         plugin.getDataFolder().mkdirs();
         loadIpSecret(plugin.getDataFolder());
     }
 
+    /**
+     * Reads (or creates) server-id.txt. Copying this file to another server makes the two share stats;
+     * leaving it out gives the other server its own.
+     */
+    private static String loadServerId(final File dataFolder) {
+        final java.nio.file.Path file = new File(dataFolder, "server-id.txt").toPath();
+        try {
+            if (java.nio.file.Files.exists(file)) {
+                final String id = java.nio.file.Files.readString(file).trim();
+                return UUID.fromString(id).toString(); // throws if someone broke the file
+            }
+            final String id = UUID.randomUUID().toString();
+            java.nio.file.Files.writeString(file, id);
+            Bukkit.getLogger().info("[SpawnArena] Created server-id.txt (" + id + "). Servers sharing a database keep separate stats by this ID.");
+            return id;
+        } catch (final IllegalArgumentException e) {
+            throw new IllegalStateException("server-id.txt doesn't contain a valid UUID. Fix it (or restore it from a backup) so this server keeps its stats.", e);
+        } catch (final java.io.IOException e) {
+            throw new IllegalStateException("Couldn't read or create server-id.txt", e);
+        }
+    }
+
+    public String getServerId() {
+        return this.serverId;
+    }
+
+    /**
+     * Older databases have no server_id: add it, give every existing row to this server (the only one that
+     * could have been using it), and make it part of the primary key so servers never overwrite each other.
+     */
+    private void scopeToServer(final Connection c, final Statement s, final String table, final String... keyColumns) throws SQLException {
+        if (!hasColumn(c, table, "server_id")) {
+            s.execute("ALTER TABLE " + table + " ADD COLUMN server_id VARCHAR(36) NOT NULL DEFAULT ''");
+            final int rows = s.executeUpdate("UPDATE " + table + " SET server_id=" + sid + " WHERE server_id=''");
+            Bukkit.getLogger().info("[SpawnArena] Assigned " + rows + " existing " + table + " row(s) to this server (" + serverId + ").");
+        }
+        if (keyColumns.length == 0 || primaryKey(c, table).contains("server_id"))
+            return;
+        if (!primaryKey(c, table).isEmpty())
+            s.execute("ALTER TABLE " + table + " DROP PRIMARY KEY");
+        s.execute("ALTER TABLE " + table + " ADD PRIMARY KEY (server_id, " + String.join(", ", keyColumns) + ")");
+    }
+
+    private static java.util.Set<String> primaryKey(final Connection c, final String table) throws SQLException {
+        final java.util.Set<String> columns = new java.util.HashSet<>();
+        for (final String t : new String[]{table, table.toUpperCase()}) {
+            try (ResultSet rs = c.getMetaData().getPrimaryKeys(c.getCatalog(), null, t)) {
+                while (rs.next())
+                    columns.add(rs.getString("COLUMN_NAME").toLowerCase());
+            }
+        }
+        return columns;
+    }
+
     private void createTable() {
         try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
             s.execute("CREATE TABLE IF NOT EXISTS arena_stats (" +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "arena VARCHAR(64) NOT NULL, " +
                     "wins INT NOT NULL DEFAULT 0, " +
@@ -62,16 +134,17 @@ public class StatsManager {
                     "streak_at BIGINT NOT NULL DEFAULT 0, " +
                     "wins_at BIGINT NOT NULL DEFAULT 0, " +
                     "best_at BIGINT NOT NULL DEFAULT 0, " +
-                    "PRIMARY KEY (uuid, arena))");
+                    "PRIMARY KEY (server_id, uuid, arena))");
             // Tables created before the "reached at" columns existed
             for (final String column : new String[]{"streak_at", "wins_at", "best_at"})
                 if (!hasColumn(c, "arena_stats", column))
                     s.execute("ALTER TABLE arena_stats ADD COLUMN " + column + " BIGINT NOT NULL DEFAULT 0");
             s.execute("CREATE TABLE IF NOT EXISTS arena_rewards (" +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "arena VARCHAR(64) NOT NULL, " +
                     "last_reward BIGINT NOT NULL, " +
-                    "PRIMARY KEY (uuid, arena))");
+                    "PRIMARY KEY (server_id, uuid, arena))");
             // Reward tables created before same-opponent payout tracking existed
             if (!hasColumn(c, "arena_rewards", "last_opponent"))
                 s.execute("ALTER TABLE arena_rewards ADD COLUMN last_opponent VARCHAR(36) NULL");
@@ -80,12 +153,14 @@ public class StatsManager {
             if (!hasColumn(c, "arena_rewards", "last_result"))
                 s.execute("ALTER TABLE arena_rewards ADD COLUMN last_result VARCHAR(128) NULL");
             s.execute("CREATE TABLE IF NOT EXISTS recent_teammates (" +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "mate VARCHAR(36) NOT NULL, " +
                     "teamed_at BIGINT NOT NULL, " +
-                    "PRIMARY KEY (uuid, mate))");
+                    "PRIMARY KEY (server_id, uuid, mate))");
             s.execute("CREATE TABLE IF NOT EXISTS arena_payouts (" +
                     "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "arena VARCHAR(64) NOT NULL, " +
                     "amount DOUBLE NOT NULL, " +
@@ -97,17 +172,291 @@ public class StatsManager {
             if (!hasColumn(c, "arena_payouts", "opponent2"))
                 s.execute("ALTER TABLE arena_payouts ADD COLUMN opponent2 VARCHAR(36) NULL");
             s.execute("CREATE TABLE IF NOT EXISTS arena_reward_daily (" +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "reward_day VARCHAR(10) NOT NULL, " +
                     "earned DOUBLE NOT NULL DEFAULT 0, " +
-                    "PRIMARY KEY (uuid, reward_day))");
+                    "PRIMARY KEY (server_id, uuid, reward_day))");
+            s.execute("CREATE TABLE IF NOT EXISTS bet_escrow (" +
+                    "server_id VARCHAR(36) NOT NULL, " +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "amount DOUBLE NOT NULL, " +
+                    "placed_at BIGINT NOT NULL, " +
+                    "PRIMARY KEY (server_id, uuid))");
+            s.execute("CREATE TABLE IF NOT EXISTS owed_items (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "item BLOB NOT NULL, " +
+                    "owed_at BIGINT NOT NULL)");
+            s.execute("CREATE TABLE IF NOT EXISTS stat_audit (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
+                    "actor VARCHAR(36) NULL, " +
+                    "actor_name VARCHAR(32) NOT NULL, " +
+                    "target VARCHAR(36) NOT NULL, " +
+                    "arena VARCHAR(64) NULL, " +
+                    "field VARCHAR(32) NULL, " +
+                    "old_value INT NULL, " +
+                    "new_value INT NULL, " +
+                    "action VARCHAR(32) NOT NULL, " +
+                    "changed_at BIGINT NOT NULL, " +
+                    "rolled_back BOOLEAN NOT NULL DEFAULT FALSE)");
             s.execute("CREATE TABLE IF NOT EXISTS player_ips (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "ip_hash VARCHAR(64) NOT NULL, " +
                     "last_seen BIGINT NOT NULL, " +
                     "PRIMARY KEY (uuid, ip_hash))");
+
+            // Everything but IP history (shared, so alts are caught across the whole network) is per server
+            scopeToServer(c, s, "arena_stats", "uuid", "arena");
+            scopeToServer(c, s, "arena_rewards", "uuid", "arena");
+            scopeToServer(c, s, "recent_teammates", "uuid", "mate");
+            scopeToServer(c, s, "arena_reward_daily", "uuid", "reward_day");
+            scopeToServer(c, s, "arena_payouts");
+            scopeToServer(c, s, "owed_items");
+            scopeToServer(c, s, "stat_audit");
+
+            // Get the tables onto disk now rather than whenever H2 next writes
+            if (!this.mysql)
+                s.execute("CHECKPOINT SYNC");
         } catch (SQLException e) {
-            Bukkit.getLogger().severe("[SpawnArena] Failed to create tables: " + e.getMessage());
+            // Running on a half-upgraded database could mix servers' rows, so stop instead (it's retried next start)
+            throw new IllegalStateException("Failed to create or upgrade the database tables", e);
+        }
+    }
+
+    // ── Deleting an arena ───────────────────────────────────────────────────
+
+    /** Removes an arena's stats, reward cooldowns and payout history on this server. Returns rows removed. */
+    public int deleteArenaData(final String arena) {
+        int removed = 0;
+        try (Connection c = dataSource.getConnection()) {
+            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts"}) {
+                try (PreparedStatement ps = c.prepareStatement("DELETE FROM " + table + " WHERE server_id=" + sid + " AND arena=?")) {
+                    ps.setString(1, arena.toLowerCase());
+                    removed += ps.executeUpdate();
+                }
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] deleteArenaData: " + e.getMessage());
+        }
+        rewardCache.clear();
+        lastResults.clear();
+        invalidateLeaderboards();
+        return removed;
+    }
+
+    // ── Bets held during a fight ────────────────────────────────────────────
+
+    /** Records a bet taken from a player for the fight that's starting, so a crash can refund it. */
+    public void holdBet(final UUID uuid, final double amount) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("INSERT INTO bet_escrow (server_id, uuid, amount, placed_at) VALUES ("
+                     + sid + ", ?, ?, ?) ON DUPLICATE KEY UPDATE amount = amount + VALUES(amount), placed_at = VALUES(placed_at)")) {
+            ps.setString(1, uuid.toString());
+            ps.setDouble(2, amount);
+            ps.setLong(3, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().severe("[SpawnArena] Couldn't record a bet held for " + uuid + " (" + amount + "): " + e.getMessage());
+        }
+    }
+
+    /** The bet was settled (paid out, refunded or lost). */
+    public void releaseBet(final UUID uuid) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("DELETE FROM bet_escrow WHERE server_id=" + sid + " AND uuid=?")) {
+            ps.setString(1, uuid.toString());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] releaseBet: " + e.getMessage());
+        }
+    }
+
+    /** Bets still held from fights that never finished (the server stopped mid-fight); clears them. */
+    public java.util.Map<UUID, Double> takeHeldBets() {
+        final java.util.Map<UUID, Double> held = new java.util.HashMap<>();
+        try (Connection c = dataSource.getConnection(); Statement st = c.createStatement()) {
+            try (ResultSet rs = st.executeQuery("SELECT uuid, amount FROM bet_escrow WHERE server_id=" + sid)) {
+                while (rs.next())
+                    held.put(UUID.fromString(rs.getString(1)), rs.getDouble(2));
+            }
+            st.executeUpdate("DELETE FROM bet_escrow WHERE server_id=" + sid);
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] takeHeldBets: " + e.getMessage());
+        }
+        return held;
+    }
+
+    // ── Items owed to players who logged out mid-fight ──────────────────────
+
+    /** Saves an item to hand back to this player the next time they join (survives restarts). */
+    public void addOwedItem(final UUID uuid, final byte[] item) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("INSERT INTO owed_items (server_id, uuid, item, owed_at) VALUES (" + sid + ", ?, ?, ?)")) {
+            ps.setString(1, uuid.toString());
+            ps.setBytes(2, item);
+            ps.setLong(3, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().severe("[SpawnArena] Couldn't save an item owed to " + uuid + ": " + e.getMessage());
+        }
+    }
+
+    /** Takes (reads and deletes, in one transaction) everything owed to this player. */
+    public List<byte[]> takeOwedItems(final UUID uuid) {
+        final List<byte[]> items = new ArrayList<>();
+        try (Connection c = dataSource.getConnection()) {
+            c.setAutoCommit(false);
+            try (PreparedStatement read = c.prepareStatement("SELECT item FROM owed_items WHERE server_id=" + sid + " AND uuid=? ORDER BY id");
+                 PreparedStatement delete = c.prepareStatement("DELETE FROM owed_items WHERE server_id=" + sid + " AND uuid=?")) {
+                read.setString(1, uuid.toString());
+                try (ResultSet rs = read.executeQuery()) {
+                    while (rs.next())
+                        items.add(rs.getBytes(1));
+                }
+                if (!items.isEmpty()) {
+                    delete.setString(1, uuid.toString());
+                    delete.executeUpdate();
+                }
+                c.commit();
+            } catch (SQLException e) {
+                c.rollback();
+                throw e;
+            } finally {
+                c.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] takeOwedItems: " + e.getMessage());
+            return List.of();
+        }
+        return items;
+    }
+
+    // ── Staff stat changes (audit log) ──────────────────────────────────────
+
+    /** {@code actor} is null for the console. {@code field}/values are null for changes that aren't a number (cooldown resets). */
+    public record AuditEntry(long id, UUID actor, String actorName, UUID target, String arena, String field,
+                             Integer oldValue, Integer newValue, String action, long changedAt, boolean rolledBack) {}
+
+    /** Records a stat change made by staff or the console, and writes it to the server log. */
+    public void logStatChange(final UUID actor, final String actorName, final UUID target, final String targetName,
+                              final String arena, final String field, final Integer oldValue, final Integer newValue,
+                              final String action) {
+        final String sql = "INSERT INTO stat_audit (server_id, actor, actor_name, target, arena, field, old_value, new_value, action, changed_at) "
+                + "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, actor == null ? null : actor.toString());
+            ps.setString(2, actorName);
+            ps.setString(3, target.toString());
+            ps.setString(4, arena == null ? null : arena.toLowerCase());
+            ps.setString(5, field);
+            if (oldValue == null) ps.setNull(6, java.sql.Types.INTEGER); else ps.setInt(6, oldValue);
+            if (newValue == null) ps.setNull(7, java.sql.Types.INTEGER); else ps.setInt(7, newValue);
+            ps.setString(8, action);
+            ps.setLong(9, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] logStatChange: " + e.getMessage());
+        }
+        Bukkit.getLogger().info(String.format("[SpawnArena] [Stat change] %s %s %s%s%s%s", actorName, action, targetName,
+                arena == null ? "" : " in " + arena, field == null ? "" : " " + field,
+                oldValue == null ? "" : ": " + oldValue + " -> " + newValue));
+    }
+
+    /**
+     * Newest first. {@code who} (optional) matches changes made by OR to that player; {@code console}
+     * matches only changes made from the console.
+     */
+    public List<AuditEntry> getAudit(final UUID who, final boolean console, final int page, final int pageSize) {
+        final String where = " WHERE server_id=" + sid + (console ? " AND actor IS NULL" : who == null ? "" : " AND (actor=? OR target=?)");
+        final String sql = "SELECT * FROM stat_audit" + where + " ORDER BY id DESC LIMIT ? OFFSET ?";
+        final List<AuditEntry> out = new ArrayList<>();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            int i = 1;
+            if (!console && who != null) {
+                ps.setString(i++, who.toString());
+                ps.setString(i++, who.toString());
+            }
+            ps.setInt(i++, pageSize);
+            ps.setInt(i, Math.max(0, page - 1) * pageSize);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    out.add(readAudit(rs));
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getAudit: " + e.getMessage());
+        }
+        return out;
+    }
+
+    private static AuditEntry readAudit(final ResultSet rs) throws SQLException {
+        final String actor = rs.getString("actor");
+        final int oldValue = rs.getInt("old_value");
+        final boolean oldNull = rs.wasNull();
+        final int newValue = rs.getInt("new_value");
+        final boolean newNull = rs.wasNull();
+        return new AuditEntry(rs.getLong("id"), actor == null ? null : UUID.fromString(actor), rs.getString("actor_name"),
+                UUID.fromString(rs.getString("target")), rs.getString("arena"), rs.getString("field"),
+                oldNull ? null : oldValue, newNull ? null : newValue, rs.getString("action"),
+                rs.getLong("changed_at"), rs.getBoolean("rolled_back"));
+    }
+
+    /** Stat changes by this actor (null = console) since a time that haven't been rolled back yet, newest first. */
+    public List<AuditEntry> getRollbackable(final UUID actor, final long since) {
+        final String sql = "SELECT * FROM stat_audit WHERE server_id=" + sid + " AND " + (actor == null ? "actor IS NULL" : "actor=?")
+                + " AND rolled_back=FALSE AND action <> 'rollback' AND changed_at >= ? ORDER BY id DESC";
+        final List<AuditEntry> out = new ArrayList<>();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            int i = 1;
+            if (actor != null)
+                ps.setString(i++, actor.toString());
+            ps.setLong(i, since);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    out.add(readAudit(rs));
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getRollbackable: " + e.getMessage());
+        }
+        return out;
+    }
+
+    /**
+     * Undoes stat changes, newest first. Each is undone by its difference rather than by writing the old
+     * value back, so wins earned in fights since then are kept (never below 0). Cooldown resets can't be
+     * undone and are only counted. Returns {undone, notUndoable}.
+     */
+    public int[] rollback(final List<AuditEntry> entries, final UUID performer, final String performerName) {
+        int undone = 0, skipped = 0;
+        for (final AuditEntry e : entries) {
+            if (e.field() == null || e.oldValue() == null || e.newValue() == null || e.arena() == null) {
+                skipped++;
+                continue;
+            }
+            final int current = getField(e.target(), e.arena(), e.field());
+            final int restored = Math.max(0, current - (e.newValue() - e.oldValue()));
+            setField(e.target(), e.arena(), e.field(), restored);
+            markRolledBack(e.id());
+            final String targetName = Bukkit.getOfflinePlayer(e.target()).getName();
+            logStatChange(performer, performerName, e.target(), targetName == null ? e.target().toString() : targetName,
+                    e.arena(), e.field(), current, restored, "rollback");
+            undone++;
+        }
+        return new int[]{undone, skipped};
+    }
+
+    private void markRolledBack(final long id) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("UPDATE stat_audit SET rolled_back=TRUE WHERE id=?")) {
+            ps.setLong(1, id);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] markRolledBack: " + e.getMessage());
         }
     }
 
@@ -116,7 +465,7 @@ public class StatsManager {
     private final java.util.Map<UUID, List<UUID>> recentTeammatesCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     public void recordTeammate(UUID uuid, UUID mate) {
-        final String sql = "INSERT INTO recent_teammates (uuid, mate, teamed_at) VALUES (?, ?, ?) " +
+        final String sql = "INSERT INTO recent_teammates (server_id, uuid, mate, teamed_at) VALUES (" + sid + ", ?, ?, ?) " +
                 "ON DUPLICATE KEY UPDATE teamed_at = VALUES(teamed_at)";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
@@ -139,7 +488,7 @@ public class StatsManager {
         final List<UUID> mates = new ArrayList<>();
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "SELECT mate FROM recent_teammates WHERE uuid=? ORDER BY teamed_at DESC LIMIT ?")) {
+                     "SELECT mate FROM recent_teammates WHERE server_id=" + sid + " AND uuid=? ORDER BY teamed_at DESC LIMIT ?")) {
             ps.setString(1, uuid.toString());
             ps.setInt(2, limit);
             try (ResultSet rs = ps.executeQuery()) {
@@ -162,7 +511,7 @@ public class StatsManager {
 
     /** {@code opponents}: the player(s) beaten — one for 1v1, two for 2v2. */
     public void logPayout(UUID uuid, String arena, double amount, List<UUID> opponents, boolean leader) {
-        final String sql = "INSERT INTO arena_payouts (uuid, arena, amount, opponent, opponent2, leader, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        final String sql = "INSERT INTO arena_payouts (server_id, uuid, arena, amount, opponent, opponent2, leader, paid_at) VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?)";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
@@ -181,7 +530,7 @@ public class StatsManager {
     /** Newest first; page 1 is the latest {@code pageSize} payouts. */
     public List<Payout> getPayouts(UUID uuid, int page, int pageSize) {
         final List<Payout> payouts = new ArrayList<>();
-        final String sql = "SELECT arena, amount, opponent, opponent2, leader, paid_at FROM arena_payouts WHERE uuid=? " +
+        final String sql = "SELECT arena, amount, opponent, opponent2, leader, paid_at FROM arena_payouts WHERE server_id=" + sid + " AND uuid=? " +
                 "ORDER BY paid_at DESC, id DESC LIMIT ? OFFSET ?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
@@ -209,8 +558,8 @@ public class StatsManager {
         final List<OpponentTotal> totals = new ArrayList<>();
         // Both 2v2 opponents count
         final String sql = "SELECT o AS opponent, COUNT(*) AS n, SUM(amount) AS total FROM (" +
-                "SELECT opponent AS o, amount FROM arena_payouts WHERE uuid=? " +
-                "UNION ALL SELECT opponent2 AS o, amount FROM arena_payouts WHERE uuid=?" +
+                "SELECT opponent AS o, amount FROM arena_payouts WHERE server_id=" + sid + " AND uuid=? " +
+                "UNION ALL SELECT opponent2 AS o, amount FROM arena_payouts WHERE server_id=" + sid + " AND uuid=?" +
                 ") t WHERE o IS NOT NULL GROUP BY o ORDER BY n DESC, total DESC LIMIT ?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
@@ -230,7 +579,7 @@ public class StatsManager {
     /** {count, total amount} of all payouts this player has received. */
     public double[] getPayoutTotals(UUID uuid) {
         try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM arena_payouts WHERE uuid=?")) {
+             PreparedStatement ps = c.prepareStatement("SELECT COUNT(*), COALESCE(SUM(amount), 0) FROM arena_payouts WHERE server_id=" + sid + " AND uuid=?")) {
             ps.setString(1, uuid.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next())
@@ -248,6 +597,13 @@ public class StatsManager {
     private final java.util.Map<UUID, CachedDaily> dailyCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** Today's date in server time, e.g. "2026-10-12". The daily cap resets when this changes. */
+    /** Minutes until the daily reward cap starts over (midnight, server time), rounded up. */
+    public static int minutesUntilDailyReset() {
+        final java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        final java.time.LocalDateTime midnight = now.toLocalDate().plusDays(1).atStartOfDay();
+        return (int) Math.max(1, java.time.Duration.between(now, midnight).toMinutes() + 1);
+    }
+
     public static String today() {
         return java.time.LocalDate.now().toString();
     }
@@ -260,7 +616,7 @@ public class StatsManager {
             return cached.earned();
 
         try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement("SELECT earned FROM arena_reward_daily WHERE uuid=? AND reward_day=?")) {
+             PreparedStatement ps = c.prepareStatement("SELECT earned FROM arena_reward_daily WHERE server_id=" + sid + " AND uuid=? AND reward_day=?")) {
             ps.setString(1, uuid.toString());
             ps.setString(2, day);
             try (ResultSet rs = ps.executeQuery()) {
@@ -293,7 +649,7 @@ public class StatsManager {
     public void addEarnedToday(UUID uuid, double amount) {
         final String day = today();
         try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement("INSERT INTO arena_reward_daily (uuid, reward_day, earned) VALUES (?, ?, ?) " +
+             PreparedStatement ps = c.prepareStatement("INSERT INTO arena_reward_daily (server_id, uuid, reward_day, earned) VALUES (" + sid + ", ?, ?, ?) " +
                      "ON DUPLICATE KEY UPDATE earned = earned + VALUES(earned)")) {
             ps.setString(1, uuid.toString());
             ps.setString(2, day);
@@ -398,7 +754,7 @@ public class StatsManager {
     public void setLastResult(UUID uuid, String arena, String result) {
         lastResults.put(uuid + ":" + arena.toLowerCase(), result);
         // last_reward 0 = "never paid" for a player whose first result here isn't a payout
-        final String sql = "INSERT INTO arena_rewards (uuid, arena, last_reward, last_result) VALUES (?, ?, 0, ?) " +
+        final String sql = "INSERT INTO arena_rewards (server_id, uuid, arena, last_reward, last_result) VALUES (" + sid + ", ?, ?, 0, ?) " +
                 "ON DUPLICATE KEY UPDATE last_result = VALUES(last_result)";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
@@ -418,7 +774,7 @@ public class StatsManager {
             return cached;
 
         try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement("SELECT last_result FROM arena_rewards WHERE uuid=? AND arena=?")) {
+             PreparedStatement ps = c.prepareStatement("SELECT last_result FROM arena_rewards WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
             ps.setString(1, uuid.toString());
             ps.setString(2, arena.toLowerCase());
             try (ResultSet rs = ps.executeQuery()) {
@@ -446,7 +802,8 @@ public class StatsManager {
     private static boolean hasColumn(final Connection c, final String table, final String column) throws SQLException {
         // H2 stores unquoted identifiers upper-case, MySQL as written
         for (final String t : new String[]{table, table.toUpperCase()}) {
-            try (ResultSet rs = c.getMetaData().getColumns(null, null, t, null)) {
+            // This database only: a MySQL server can hold other databases with the same table names
+            try (ResultSet rs = c.getMetaData().getColumns(c.getCatalog(), null, t, null)) {
                 while (rs.next())
                     if (rs.getString("COLUMN_NAME").equalsIgnoreCase(column))
                         return true;
@@ -477,7 +834,7 @@ public class StatsManager {
 
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "SELECT last_reward, last_opponent, opponent_payouts FROM arena_rewards WHERE uuid=? AND arena=?")) {
+                     "SELECT last_reward, last_opponent, opponent_payouts FROM arena_rewards WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
             ps.setString(1, uuid.toString());
             ps.setString(2, arena.toLowerCase());
             try (ResultSet rs = ps.executeQuery()) {
@@ -523,7 +880,7 @@ public class StatsManager {
 
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(
-                     "UPDATE arena_rewards SET last_opponent=?, opponent_payouts=0 WHERE uuid=? AND arena=?")) {
+                     "UPDATE arena_rewards SET last_opponent=?, opponent_payouts=0 WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
             ps.setString(1, loser.toString());
             ps.setString(2, winner.toString());
             ps.setString(3, arena.toLowerCase());
@@ -540,8 +897,8 @@ public class StatsManager {
         final RewardState previous = getRewardState(uuid, arena);
         final int payouts = opponent != null && opponent.equals(previous.lastOpponent()) ? previous.opponentPayouts() + 1 : 1;
 
-        final String sql = "INSERT INTO arena_rewards (uuid, arena, last_reward, last_opponent, opponent_payouts) " +
-                "VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE last_reward = VALUES(last_reward), " +
+        final String sql = "INSERT INTO arena_rewards (server_id, uuid, arena, last_reward, last_opponent, opponent_payouts) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE last_reward = VALUES(last_reward), " +
                 "last_opponent = VALUES(last_opponent), opponent_payouts = VALUES(opponent_payouts)";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
@@ -561,8 +918,8 @@ public class StatsManager {
     /** Clears a player's win reward cooldown for one arena, or every arena when {@code arena} is null. */
     public int clearRewardCooldown(UUID uuid, String arena) {
         final String sql = arena == null
-                ? "DELETE FROM arena_rewards WHERE uuid=?"
-                : "DELETE FROM arena_rewards WHERE uuid=? AND arena=?";
+                ? "DELETE FROM arena_rewards WHERE server_id=" + sid + " AND uuid=?"
+                : "DELETE FROM arena_rewards WHERE server_id=" + sid + " AND uuid=? AND arena=?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
@@ -589,7 +946,9 @@ public class StatsManager {
     public boolean isStreakLeader(UUID uuid, String arena) {
         final List<LeaderboardEntry> top = getTopPlayersCached(arena, "win_streak",
                 me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT);
-        return !top.isEmpty() && top.get(0).value() > 0 && top.get(0).uuid().equals(uuid);
+        // Only once the #1 streak is long enough, so the first winner in an empty arena isn't the leader straight away
+        final int min = SpawnArena.settings == null ? 1 : Math.max(1, SpawnArena.settings.leaderBonusMinStreak);
+        return !top.isEmpty() && top.get(0).value() >= min && top.get(0).uuid().equals(uuid);
     }
 
     public double rewardAmountFor(UUID uuid, Arena arena) {
@@ -679,8 +1038,8 @@ public class StatsManager {
         return getField(uuid, arena, "best_win_streak");
     }
 
-    private int getField(UUID uuid, String arena, String field) {
-        final String sql = "SELECT " + field + " FROM arena_stats WHERE uuid=? AND arena=?";
+    public int getField(UUID uuid, String arena, String field) {
+        final String sql = "SELECT " + field + " FROM arena_stats WHERE server_id=" + sid + " AND uuid=? AND arena=?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
@@ -708,7 +1067,7 @@ public class StatsManager {
                 "wins_at = ?, " +
                 "streak_at = ?, " +
                 "win_streak = win_streak + 1 " +
-                "WHERE uuid=? AND arena=?";
+                "WHERE server_id=" + sid + " AND uuid=? AND arena=?";
         final long now = System.currentTimeMillis();
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
@@ -736,7 +1095,7 @@ public class StatsManager {
         // A changed value counts as reached now, for leaderboard tie-breaks
         final String reachedAt = reachedAtColumn(field);
         final String sql = "UPDATE arena_stats SET " + field + "=?" + (reachedAt != null ? ", " + reachedAt + "=?" : "")
-                + " WHERE uuid=? AND arena=?";
+                + " WHERE server_id=" + sid + " AND uuid=? AND arena=?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             int i = 1;
@@ -780,8 +1139,8 @@ public class StatsManager {
     /** Inserts a default row if none exists. */
     private void ensure(UUID uuid, String arena) {
         // INSERT IGNORE works on MySQL and on H2 in MODE=MySQL
-        final String sql = "INSERT IGNORE INTO arena_stats (uuid, arena, wins, win_streak, best_win_streak) " +
-                "VALUES (?, ?, 0, 0, 0)";
+        final String sql = "INSERT IGNORE INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak) " +
+                "VALUES (" + sid + ", ?, ?, 0, 0, 0)";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
@@ -806,7 +1165,7 @@ public class StatsManager {
         final String reachedAt = reachedAtColumn(field);
         final String tieBreak = reachedAt != null ? ", " + reachedAt + " ASC" : "";
         final String sql = "SELECT uuid, " + field + " FROM arena_stats " +
-                "WHERE arena=? ORDER BY " + field + " DESC" + tieBreak + ", uuid ASC LIMIT ?";
+                "WHERE server_id=" + sid + " AND arena=? ORDER BY " + field + " DESC" + tieBreak + ", uuid ASC LIMIT ?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, arena.toLowerCase());
@@ -828,7 +1187,17 @@ public class StatsManager {
 
     // ── Migration ───────────────────────────────────────────────────────────
 
+    /**
+     * DB_CLOSE_DELAY=-1 keeps the database open while the plugin runs, even with no connection open; it's only
+     * closed by the SHUTDOWN in {@link #close}. Without it H2 closed and reopened the file whenever the pool
+     * briefly had no connections, and on a test server one such reopen came back with only some of the tables.
+     */
     private String h2Url() {
+        return h2FileUrl() + ";DB_CLOSE_DELAY=-1";
+    }
+
+    /** For a one-off look at the file (migrating from it): closes again with its last connection. */
+    private String h2FileUrl() {
         return "jdbc:h2:" + h2File.getAbsolutePath() + ";MODE=MySQL;DB_CLOSE_ON_EXIT=FALSE";
     }
 
@@ -852,13 +1221,13 @@ public class StatsManager {
         props.setProperty("user", "sa");
         props.setProperty("password", "");
 
-        final String upsert = "INSERT INTO arena_stats (uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak), " +
                 "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at)";
 
         int copied = 0;
-        try (Connection h2 = new org.h2.Driver().connect(h2Url() + ";IFEXISTS=TRUE", props);
+        try (Connection h2 = new org.h2.Driver().connect(h2FileUrl() + ";IFEXISTS=TRUE", props);
              Statement read = h2.createStatement();
              ResultSet rs = read.executeQuery("SELECT uuid, arena, wins, win_streak, best_win_streak"
                      + reachedAtSelect(h2, "streak_at") + reachedAtSelect(h2, "wins_at") + reachedAtSelect(h2, "best_at")
@@ -881,8 +1250,10 @@ public class StatsManager {
                         ps.executeBatch();
                 }
                 ps.executeBatch();
-                copyRewardCooldowns(h2, target);
-                copyPayoutLog(h2, target);
+                copyRewardCooldowns(h2, target, sid);
+                copyPayoutLog(h2, target, sid);
+                copyAuditLog(h2, target, sid);
+                copyOwedItems(h2, target, sid);
                 target.commit();
                 rewardCache.clear();
             } catch (SQLException e) {
@@ -902,7 +1273,7 @@ public class StatsManager {
     }
 
     /** Appends the H2 payout log to MySQL's (running the migration twice would copy it twice). */
-    private static void copyPayoutLog(final Connection h2, final Connection target) throws SQLException {
+    private static void copyPayoutLog(final Connection h2, final Connection target, final String sid) throws SQLException {
         try (ResultSet tables = h2.getMetaData().getTables(null, null, "ARENA_PAYOUTS", null)) {
             if (!tables.next())
                 return;
@@ -912,7 +1283,7 @@ public class StatsManager {
              ResultSet rs = read.executeQuery("SELECT uuid, arena, amount, opponent, "
                      + (hasOpponent2 ? "opponent2" : "NULL AS opponent2") + ", leader, paid_at FROM arena_payouts");
              PreparedStatement ps = target.prepareStatement(
-                     "INSERT INTO arena_payouts (uuid, arena, amount, opponent, opponent2, leader, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+                     "INSERT INTO arena_payouts (server_id, uuid, arena, amount, opponent, opponent2, leader, paid_at) VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?)")) {
             while (rs.next()) {
                 ps.setString(1, rs.getString("uuid"));
                 ps.setString(2, rs.getString("arena"));
@@ -927,7 +1298,54 @@ public class StatsManager {
         }
     }
 
-    private static void copyRewardCooldowns(final Connection h2, final Connection target) throws SQLException {
+    /** Items still owed to players who logged out mid-fight. */
+    private static void copyOwedItems(final Connection h2, final Connection target, final String sid) throws SQLException {
+        try (ResultSet tables = h2.getMetaData().getTables(null, null, "OWED_ITEMS", null)) {
+            if (!tables.next())
+                return;
+        }
+        try (Statement read = h2.createStatement();
+             ResultSet rs = read.executeQuery("SELECT uuid, item, owed_at FROM owed_items ORDER BY id");
+             PreparedStatement ps = target.prepareStatement("INSERT INTO owed_items (server_id, uuid, item, owed_at) VALUES (" + sid + ", ?, ?, ?)")) {
+            while (rs.next()) {
+                ps.setString(1, rs.getString("uuid"));
+                ps.setBytes(2, rs.getBytes("item"));
+                ps.setLong(3, rs.getLong("owed_at"));
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    /** Appends the H2 staff stat-change log to MySQL's. */
+    private static void copyAuditLog(final Connection h2, final Connection target, final String sid) throws SQLException {
+        try (ResultSet tables = h2.getMetaData().getTables(null, null, "STAT_AUDIT", null)) {
+            if (!tables.next())
+                return;
+        }
+        try (Statement read = h2.createStatement();
+             ResultSet rs = read.executeQuery("SELECT actor, actor_name, target, arena, field, old_value, new_value, "
+                     + "action, changed_at, rolled_back FROM stat_audit ORDER BY id");
+             PreparedStatement ps = target.prepareStatement("INSERT INTO stat_audit (server_id, actor, actor_name, target, arena, "
+                     + "field, old_value, new_value, action, changed_at, rolled_back) VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            while (rs.next()) {
+                ps.setString(1, rs.getString("actor"));
+                ps.setString(2, rs.getString("actor_name"));
+                ps.setString(3, rs.getString("target"));
+                ps.setString(4, rs.getString("arena"));
+                ps.setString(5, rs.getString("field"));
+                ps.setObject(6, rs.getObject("old_value"), java.sql.Types.INTEGER);
+                ps.setObject(7, rs.getObject("new_value"), java.sql.Types.INTEGER);
+                ps.setString(8, rs.getString("action"));
+                ps.setLong(9, rs.getLong("changed_at"));
+                ps.setBoolean(10, rs.getBoolean("rolled_back"));
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    private static void copyRewardCooldowns(final Connection h2, final Connection target, final String sid) throws SQLException {
         // H2 files from before win rewards existed don't have this table
         try (ResultSet tables = h2.getMetaData().getTables(null, null, "ARENA_REWARDS", null)) {
             if (!tables.next())
@@ -936,8 +1354,8 @@ public class StatsManager {
 
         // Target is MySQL, which applies SET assignments left to right: compare against the old
         // last_reward before it's overwritten, so the newer row's opponent data wins
-        final String upsert = "INSERT INTO arena_rewards (uuid, arena, last_reward, last_opponent, opponent_payouts, last_result) " +
-                "VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_rewards (server_id, uuid, arena, last_reward, last_opponent, opponent_payouts, last_result) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "last_opponent = IF(VALUES(last_reward) >= last_reward, VALUES(last_opponent), last_opponent), " +
                 "opponent_payouts = IF(VALUES(last_reward) >= last_reward, VALUES(opponent_payouts), opponent_payouts), " +
                 "last_result = IF(VALUES(last_reward) >= last_reward, VALUES(last_result), last_result), " +
@@ -971,10 +1389,14 @@ public class StatsManager {
         // jar is closed; H2 would then fail to load the classes it needs to close the file cleanly.
         // Shut H2 down here, on the disabling thread, while the jar is still open.
         if (!mysql) {
+            boolean shutDown = false;
             try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
                 s.execute("SHUTDOWN");
+                shutDown = true;
             } catch (SQLException e) {
-                Bukkit.getLogger().warning("[SpawnArena] H2 shutdown: " + e.getMessage());
+                // After a successful SHUTDOWN, closing the connection always reports the database as already closed
+                if (!shutDown)
+                    Bukkit.getLogger().warning("[SpawnArena] H2 shutdown: " + e.getMessage());
             }
         }
 

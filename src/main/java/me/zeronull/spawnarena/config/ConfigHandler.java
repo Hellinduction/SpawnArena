@@ -28,7 +28,7 @@ public class ConfigHandler {
         return config;
     }
 
-    public void savePreFightConfig(PreFightConfig config) {
+    public synchronized void savePreFightConfig(PreFightConfig config) {
         YamlConfigurationProperties properties = PreFightConfig.PROPERTIES;
 
         SpawnArena plugin = SpawnArena.getPlugin(SpawnArena.class);
@@ -42,7 +42,7 @@ public class ConfigHandler {
         );
     }
 
-    public void updatePreFightConfig() {
+    public synchronized void updatePreFightConfig() {
         YamlConfigurationProperties properties = PreFightConfig.PROPERTIES;
 
         SpawnArena plugin = SpawnArena.getPlugin(SpawnArena.class);
@@ -55,7 +55,7 @@ public class ConfigHandler {
         );
     }
 
-    public PreFightConfig getPreFightConfig() {
+    public synchronized PreFightConfig getPreFightConfig() {
         YamlConfigurationProperties properties = PreFightConfig.PROPERTIES;
 
         SpawnArena plugin = SpawnArena.getPlugin(SpawnArena.class);
@@ -94,6 +94,7 @@ public class ConfigHandler {
             arena.setWinOnStepStonePressurePlate(config.winOnStepStonePressurePlate);
             arena.setGiveKnockBackStick(config.giveKnockBackStick);
             arena.setArenaMode(config.arenaMode);
+            arena.setCrystalPvp(config.crystalPvp);
             arena.setWinReward(config.winReward, config.winRewardCooldownMinutes);
             arena.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
 
@@ -123,7 +124,7 @@ public class ConfigHandler {
         return YamlConfigurations.load(file, DatabaseConfig.class, DatabaseConfig.PROPERTIES);
     }
 
-    public void register(final UUID uuid, final PlayerPreFightData data) {
+    public synchronized void register(final UUID uuid, final PlayerPreFightData data) {
         final PreFightConfig conf = getPreFightConfig();
         conf.map.put(uuid, data);
         savePreFightConfig(conf);

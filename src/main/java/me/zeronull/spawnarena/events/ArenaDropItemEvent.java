@@ -12,10 +12,13 @@ public class ArenaDropItemEvent implements Listener {
     public void onCommandExecution(PlayerDropItemEvent event) {
         Player player = event.getPlayer();
 
-        if (!SpawnArena.arenas.hasActiveFight())
+        // Fight just ended but their inventory isn't back yet (a tick on Folia): still their fight inventory
+        final boolean awaitingRestore = me.zeronull.spawnarena.Fight.AWAITING_RESTORE.contains(player.getUniqueId());
+
+        if (!awaitingRestore && !SpawnArena.arenas.hasActiveFight())
             return;
 
-        if (!SpawnArena.arenas.hasFighter(player)) {
+        if (!awaitingRestore && !SpawnArena.arenas.hasFighter(player)) {
             return;
         }
 

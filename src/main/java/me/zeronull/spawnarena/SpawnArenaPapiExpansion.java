@@ -25,7 +25,7 @@ import java.util.UUID;
  *   %spawnarena_reward_every_<arena>%      e.g. "2h" ("5m" for the #1 win streak holder)
  *   %spawnarena_reward_leaderamount_<arena>% / %spawnarena_reward_leaderevery_<arena>%  the #1 streak bonus
  *   %spawnarena_reward_leader_<arena>%     true / false (per player)
- *   %spawnarena_reward_status_<arena>%     "Ready!", countdown, "Beat someone new to earn again" or "Daily limit reached"
+ *   %spawnarena_reward_status_<arena>%     "Ready!", countdown, "Beat someone new to earn again", "Daily limit reached · resets in 5h 12m" or "Resetting the arena..."
  *   %spawnarena_reward_last_<arena>%       last win's result, e.g. "+$50k" or "Not paid: on cooldown"
  *   %spawnarena_reward_today% / %spawnarena_reward_dailycap% / %spawnarena_reward_dailyleft%
  *   %spawnarena_queue_<1v1|2v2|total>_<arena>%    players waiting
@@ -180,9 +180,11 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             }
             case "status" -> {
                 if (player == null) yield "";
+                if (arena.isResetting()) yield "Resetting the arena...";
                 if (!enabled) yield "-";
                 final UUID uuid = player.getUniqueId();
-                if (stats.hasReachedDailyCap(uuid)) yield "Daily limit reached";
+                if (stats.hasReachedDailyCap(uuid))
+                    yield "Daily limit reached · resets in " + StatsManager.formatMinutes(StatsManager.minutesUntilDailyReset());
                 if (stats.isSameOpponentBlocked(uuid, arena.getArenaName())) yield "Beat someone new to earn again";
                 final long remaining = stats.rewardCooldownRemaining(uuid, arena);
                 yield remaining <= 0 ? "Ready!" : StatsManager.formatCountdown(remaining);

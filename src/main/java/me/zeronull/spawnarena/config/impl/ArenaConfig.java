@@ -46,6 +46,12 @@ public final class ArenaConfig {
     @Comment("Minutes between win rewards for the #1 current win streak holder")
     public int leaderRewardCooldownMinutes = 10;
 
+    @Comment({"Crystal PvP: fighters can place blocks and end crystals inside the arena's region, but can only",
+            "break or blow up blocks placed during the fight. Everything placed is removed when the fight ends.",
+            "The plugin lets fighters past WorldGuard itself, so the region's flags can stay as they are (build denied).",
+            "Always runs as SINGLE."})
+    public boolean crystalPvp = false;
+
     @Comment("Mode of the arena: SINGLE, MULTI")
     public String arenaMode = ArenaMode.SINGLE.toString();
 

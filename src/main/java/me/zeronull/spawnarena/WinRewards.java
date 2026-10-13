@@ -7,21 +7,26 @@ import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Only touch this class after checking Vault is enabled — it links against Vault's API. */
 public final class WinRewards {
+    /** Who's already been told today that they hit the daily reward limit (player -> day), so it's said once a day. */
+    private static final Map<UUID, String> TOLD_DAILY_LIMIT = new ConcurrentHashMap<>();
+
     private static boolean warnedNoEconomy;
 
     private WinRewards() {}
 
     /**
-     * Pays the winner's reward if allowed. Only a successful payout sends a chat message; the reason a
+     * Pays the winner's reward if allowed; returns the amount paid (0 if it wasn't). Only a successful payout sends a chat message; the reason a
      * win didn't pay is shown on the reward hologram (%spawnarena_reward_last_<arena>%) instead.
      */
-    public static void reward(final Player winner, final java.util.List<Player> losers, final Arena arena, final boolean alts) {
+    public static double reward(final Player winner, final java.util.List<Player> losers, final Arena arena, final boolean alts) {
         if (arena.getWinReward() <= 0)
-            return;
+            return 0;
 
         final StatsManager stats = SpawnArena.statsManager;
         final String arenaName = arena.getArenaName();
@@ -37,13 +42,15 @@ public final class WinRewards {
                 warnedNoEconomy = true;
                 SpawnArena.INSTANCE.getLogger().warning("Vault has no economy provider registered; win rewards are not being paid.");
             }
-            return;
+            return 0;
         }
 
         final String blocked = blockedReason(winner, opponent, arena, alts);
         if (blocked != null) {
             stats.setLastResult(winner.getUniqueId(), arenaName, "Not paid: " + blocked);
-            return;
+            if (stats.hasReachedDailyCap(winner.getUniqueId()))
+                tellDailyLimitOnce(winner);
+            return 0;
         }
 
         // Checked after this win was recorded, so a win that takes the #1 streak already counts
@@ -54,13 +61,14 @@ public final class WinRewards {
             amount = Math.min(amount, cap - stats.getEarnedToday(winner.getUniqueId()));
         if (amount <= 0) {
             stats.setLastResult(winner.getUniqueId(), arenaName, "Not paid: daily limit reached");
-            return;
+            tellDailyLimitOnce(winner);
+            return 0;
         }
 
         final EconomyResponse response = economy.depositPlayer(winner, amount);
         if (!response.transactionSuccess()) {
             SpawnArena.INSTANCE.getLogger().warning("Couldn't pay " + winner.getName() + " their win reward: " + response.errorMessage);
-            return;
+            return 0;
         }
 
         stats.recordPayout(winner.getUniqueId(), arenaName, System.currentTimeMillis(), opponent);
@@ -76,6 +84,19 @@ public final class WinRewards {
                     + ChatColor.GOLD + "(" + formatMultiplier(arena.getLeaderRewardMultiplier()) + " top win streak bonus)");
         else
             winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning!");
+        if (stats.hasReachedDailyCap(winner.getUniqueId()))
+            tellDailyLimitOnce(winner);
+        return amount;
+    }
+
+    /** Tells a player they've hit today's reward limit, the first time it happens each day. */
+    private static void tellDailyLimitOnce(final Player player) {
+        final String today = StatsManager.today();
+        if (today.equals(TOLD_DAILY_LIMIT.put(player.getUniqueId(), today)))
+            return;
+        player.sendMessage(ChatColor.GOLD + "You've hit today's arena reward limit. " + ChatColor.GRAY
+                + "Wins still count; rewards start again in " + ChatColor.WHITE
+                + StatsManager.formatMinutes(StatsManager.minutesUntilDailyReset()) + ChatColor.GRAY + ".");
     }
 
     /**
@@ -144,7 +165,7 @@ public final class WinRewards {
     }
 
     // Looked up each time: the economy provider (Cuy) may register after SpawnArena enables
-    private static Economy economy() {
+    static Economy economy() {
         final RegisteredServiceProvider<Economy> rsp = Bukkit.getServicesManager().getRegistration(Economy.class);
         return rsp == null ? null : rsp.getProvider();
     }

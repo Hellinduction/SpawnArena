@@ -1,47 +1,20 @@
 package me.zeronull.spawnarena;
 
 import org.bukkit.Location;
-import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 
-import java.lang.reflect.Method;
+import java.util.concurrent.CompletableFuture;
 
+/** Kept for existing callers; see {@link Threads}. */
 public final class FoliaUtils {
+    private FoliaUtils() {}
+
     public static boolean isFolia() {
-        try {
-            Class.forName("io.papermc.paper.threadedregions.RegionizedServer");
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
+        return Threads.FOLIA;
     }
 
-    public static void teleport(final Player player, final Location location) {
-        teleport(player, location, false);
-    }
-
-    public static void teleport(final Player player, final Location location, final boolean sync) {
-        final Runnable runnable = () -> {
-            if (isFolia()) {
-                try {
-                    final Class<?> clazz = Entity.class;
-                    final Method method = clazz.getDeclaredMethod("teleportAsync", Location.class);
-
-                    method.setAccessible(true);
-                    method.invoke(player, location);
-                } catch (final Exception exception) {
-                    exception.printStackTrace();
-                }
-
-                return;
-            }
-
-            player.teleport(location);
-        };
-
-        if (sync)
-            SpawnArena.scheduler.runTaskAtEntity(player, runnable);
-        else
-            runnable.run();
+    /** Teleports from any thread (instantly on Paper, on the player's own thread on Folia). */
+    public static CompletableFuture<Boolean> teleport(final Player player, final Location location) {
+        return Threads.teleport(player, location);
     }
 }

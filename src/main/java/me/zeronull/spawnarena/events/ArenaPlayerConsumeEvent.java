@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.UUID;
 
 public final class ArenaPlayerConsumeEvent implements Listener {
-    public static final Map<UUID, Long> PLAYER_FINISH_GAME_MAP = new HashMap<>();
+    public static final Map<UUID, Long> PLAYER_FINISH_GAME_MAP = new java.util.concurrent.ConcurrentHashMap<>();
     public static final int PREVENT_EATING_AFTER = 2;
 
     @EventHandler(ignoreCancelled = true)

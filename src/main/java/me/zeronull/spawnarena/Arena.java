@@ -16,6 +16,16 @@ public abstract class Arena extends ArenaOptions {
     /** Loaded from settings.yml on enable. */
     public static String SPAWN_WORLD = "Spawn";
     public ArenaQueue queue;
+    /** True while a crystal arena is being pasted back after a fight: no fight starts in it until that's done. */
+    private volatile boolean resetting;
+
+    public boolean isResetting() {
+        return this.resetting;
+    }
+
+    public void setResetting(final boolean resetting) {
+        this.resetting = resetting;
+    }
     protected String arenaName;
     protected Location spawnPoint1;
     protected Location spawnPoint2;
@@ -34,7 +44,8 @@ public abstract class Arena extends ArenaOptions {
             return false;
         return block.getBoundingBox().getVolume() < 0.999;
     }
-    private List<Fight> fights = new ArrayList<>();
+    // Read from every player's thread on Folia
+    private final List<Fight> fights = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     /** True while a fight is actually inside the arena (not just counting down at spawn). */
     public boolean hasRunningFight() {
@@ -154,11 +165,12 @@ public abstract class Arena extends ArenaOptions {
         this.fights.clear();
     }
 
-    public void teleportFighter(final Player fighter, final Location spawn) {
+    /** Call on the fighter's thread. Completes once they've arrived (or the teleport failed). */
+    public java.util.concurrent.CompletableFuture<Boolean> teleportFighter(final Player fighter, final Location spawn) {
         if (spawn == null)
-            return;
+            return java.util.concurrent.CompletableFuture.completedFuture(false);
         this.dismount(fighter);
-        FoliaUtils.teleport(fighter, spawn);
+        return Threads.teleport(fighter, spawn);
     }
 
     private void dismount(final Player player) {
@@ -234,6 +246,11 @@ public abstract class Arena extends ArenaOptions {
         return arena.getArenaName().equals(this.getArenaName());
     }
 
+    @Override
+    public int hashCode() {
+        return this.getArenaName().hashCode();
+    }
+
     public static final class ArenaUtils {
         public static final boolean WORLD_EDIT_SUPPORT;
         public static final WorldGuard WORLD_GUARD_INSTANCE;
@@ -257,7 +274,7 @@ public abstract class Arena extends ArenaOptions {
 
         public static void kickOutLingeringPlayers() {
             for (final Player p : Bukkit.getOnlinePlayers())
-                kickOutLingeringPlayer(p);
+                Threads.entity(p, () -> kickOutLingeringPlayer(p));
         }
 
         /** Fighters, vanished players, spectator mode and spawnarena.bypasskickout may stay in arenas. */
@@ -273,12 +290,12 @@ public abstract class Arena extends ArenaOptions {
             if (!WORLD_EDIT_SUPPORT)
                 return;
 
-            for (final Player p : Bukkit.getOnlinePlayers()) {
-                if (isExemptFromKickOut(p))
-                    continue;
-                if (arena.isInFightingSpace(p.getLocation()))
-                    arena.kickOut(p);
-            }
+            // Each player is checked on their own thread (block checks, teleport)
+            for (final Player p : Bukkit.getOnlinePlayers())
+                Threads.entity(p, () -> {
+                    if (!isExemptFromKickOut(p) && arena.isInFightingSpace(p.getLocation()))
+                        arena.kickOut(p);
+                });
         }
 
         public static void kickOutLingeringPlayer(final Player p) {

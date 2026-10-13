@@ -3,19 +3,21 @@ name: SpawnArena
 version: 1.0.0
 api-version: '1.21'
 softdepend:
+  - voicechat
   - Vault
   - WorldEdit
   - FastAsyncWorldEdit
   - WorldGuard
   - PlaceholderAPI
   - FancyHolograms
+  - TAB
   - Parkour
 folia-supported: true
 
 commands:
   joinarenaqueue:
-    description: Open the 1v1 / 2v2 / Auto queue menu for an arena, or join a mode directly
-    usage: "/joinarenaqueue <arena> [1v1|2v2|auto]"
+    description: Join an arena's queue straight away (again to leave), or open the 1v1 / 2v2 / Auto menu
+    usage: "/joinarenaqueue <arena> [1v1|2v2|auto|menu]"
     permission: spawnarena.joinarenaqueue
     permission-message: "§cYou don't have permission!"
   setarenaspawn:
@@ -86,6 +88,16 @@ commands:
     permission: spawnarena.duel
     permission-message: "§cYou don't have permission!"
 
+  arenasetup:
+    description: Set up a new arena step by step (paste, region, spawns, exit, options), with undo
+    usage: "/arenasetup <name>"
+    permission: spawnarena.arenasetup
+    permission-message: "§cYou don't have permission!"
+  arenabet:
+    description: Bet on your next fight where your win reward is ready (win it back plus a bonus, lose it)
+    usage: "/arenabet <amount|off>"
+    permission: spawnarena.arenabet
+    permission-message: "§cYou don't have permission!"
   arenawins:
     description: Toggle seeing other players' arena win announcements in chat
     usage: "/arenawins"
@@ -93,6 +105,12 @@ commands:
     permission-message: "§cYou don't have permission!"
 
 permissions:
+  spawnarena.arenastats.rollback:
+    description: Roll back stat changes made by a staff member (/arenastats rollback)
+    default: op
+  spawnarena.crystalarena.build:
+    description: Build in crystal PvP arenas when no fight is running (to edit the arena)
+    default: op
   spawnarena.setarenaspawn:
     default: op
   spawnarena.joinarenaqueue:
@@ -129,6 +147,10 @@ permissions:
     description: Can stay inside arenas during other players' fights
     default: false
   spawnarena.duel:
+    default: true
+  spawnarena.arenasetup:
+    default: op
+  spawnarena.arenabet:
     default: true
   spawnarena.arenawins:
     default: true

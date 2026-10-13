@@ -36,12 +36,15 @@ public final class RestoreCommand implements CommandExecutor {
         }
 
         data.player = player;
-        data.restore();
-
-        config.map.remove(player.getUniqueId());
-        handler.savePreFightConfig(config);
-
-        sender.sendMessage(ChatColor.GREEN + String.format("Attempted to restore the items of %s.", player.getName()));
+        // On the player's own thread (Folia); restore() also removes them from prefights.yml
+        me.zeronull.spawnarena.Threads.entity(player, () -> {
+            try {
+                data.restore();
+                sender.sendMessage(ChatColor.GREEN + String.format("Restored the items of %s.", player.getName()));
+            } catch (final Exception e) {
+                sender.sendMessage(ChatColor.RED + "Couldn't restore " + player.getName() + ": " + e.getMessage());
+            }
+        });
         return true;
     }
 }
