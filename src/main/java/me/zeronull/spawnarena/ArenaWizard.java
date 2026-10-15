@@ -70,7 +70,10 @@ public final class ArenaWizard {
         Location spawn1, spawn2, exit;
         boolean exitChosen;
         boolean crystalPvp, waterDeath, knockbackFish, plateWin, clearItems, multi, resetAfterFight = true;
-        double winReward = 50000;
+        // Starts at the plugin's default for new arenas
+        double winReward = new me.zeronull.spawnarena.config.impl.ArenaConfig().winReward;
+        /** What the −/+ buttons change it by: a fifth of the default (50k -> 10k, 50m -> 10m) */
+        final double rewardStep = winReward > 0 ? winReward / 5 : 10000;
         volatile long touched = System.currentTimeMillis();
         volatile boolean busy;
         ScheduledTask preview;
@@ -206,7 +209,9 @@ public final class ArenaWizard {
             case "back" -> back(player, s, args);
             default -> {
                 // Everything else belongs to a step; old buttons from earlier steps just re-show where we are
-                final String stepArg = args.length >= 2 ? args[args.length - 1] : "";
+                // "/arenasetup reward set <step> <amount>": the amount is typed after the step
+                final boolean typedAmount = action.equals("reward") && args.length >= 3 && args[1].equals("set");
+                final String stepArg = typedAmount ? args[2] : args.length >= 2 ? args[args.length - 1] : "";
                 if (!stepArg.equals(String.valueOf(s.step.ordinal()))) {
                     show(player, s);
                     return;
@@ -353,20 +358,33 @@ public final class ArenaWizard {
                 switch (action) {
                     case "toggle" -> {
                         switch (args.length >= 3 ? args[1] : "") {
-                            case "crystal" -> s.crystalPvp = !s.crystalPvp;
+                            case "crystal" -> {
+                                s.crystalPvp = !s.crystalPvp;
+                                if (s.crystalPvp)
+                                    s.multi = false; // crystal arenas always run one fight at a time
+                            }
                             case "water" -> s.waterDeath = !s.waterDeath;
                             case "fish" -> s.knockbackFish = !s.knockbackFish;
                             case "plate" -> s.plateWin = !s.plateWin;
                             case "clear" -> s.clearItems = !s.clearItems;
-                            case "multi" -> s.multi = !s.multi;
+                            case "multi" -> s.multi = !s.multi && !s.crystalPvp;
                             case "reset" -> s.resetAfterFight = !s.resetAfterFight;
                             default -> { }
                         }
                         show(player, s);
                     }
                     case "reward" -> {
-                        final double change = args.length >= 3 && args[1].equals("down") ? -10000 : 10000;
-                        s.winReward = Math.max(0, s.winReward + change);
+                        if (args[1].equals("set")) {
+                            final double amount = args.length >= 4 ? parseAmount(args[3]) : -1;
+                            if (amount < 0) {
+                                tell(player, "<red>Type an amount after it, like 75000, 75k or 1m.");
+                                return;
+                            }
+                            s.winReward = amount;
+                        } else {
+                            final double change = args[1].equals("down") ? -s.rewardStep : s.rewardStep;
+                            s.winReward = Math.max(0, s.winReward + change);
+                        }
                         show(player, s);
                     }
                     case "ok" -> goTo(player, s, Step.SUMMARY);
@@ -466,7 +484,8 @@ public final class ArenaWizard {
 
     // ── Region ──────────────────────────────────────────────────────────────
 
-    private static final int[][] DIRECTIONS = {{1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1}};
+    /** Rays cast to find the walls: enough that the outline follows round arenas closely. */
+    private static final int RAYS = 32;
 
     /**
      * Works out the fighting area from {@code from} (the floor where you stand): eight rays go out until they
@@ -494,19 +513,25 @@ public final class ArenaWizard {
                 s.minY = Math.min(cy - 3, s.paste != null ? min.y() : cy - 3);
                 s.maxY = cy + 12;
             } else {
-                for (final int[] d : DIRECTIONS) {
-                    int steps = 0;
-                    for (;;) {
-                        final int nx = cx + d[0] * (steps + 1), nz = cz + d[1] * (steps + 1);
+                for (int i = 0; i < RAYS; i++) {
+                    final double angle = Math.PI * 2 * i / RAYS, dx = Math.cos(angle), dz = Math.sin(angle);
+                    // March out half a block at a time until a wall; the corner goes one block into the wall,
+                    // so the straight edges between corners never cut off floor next to it
+                    int lastX = cx, lastZ = cz;
+                    for (double t = 0.5; ; t += 0.5) {
+                        final int nx = (int) Math.floor(cx + 0.5 + dx * t), nz = (int) Math.floor(cz + 0.5 + dz * t);
                         if (nx < min.x() || nx > max.x() || nz < min.z() || nz > max.z())
                             break;
+                        lastX = nx;
+                        lastZ = nz;
                         // A wall is something at least 3 high: bumps in the floor (like the crystal pit's
                         // bedrock) and low fences don't stop the ray
                         if (!w.getBlockAt(nx, cy + 2, nz).isPassable())
                             break;
-                        steps++;
                     }
-                    points.add(BlockVector2.at(cx + d[0] * steps, cz + d[1] * steps));
+                    final BlockVector2 corner = BlockVector2.at(lastX, lastZ);
+                    if (points.isEmpty() || !points.get(points.size() - 1).equals(corner))
+                        points.add(corner);
                 }
                 // Up to the first ceiling (barriers count), or a dozen blocks
                 int ceiling = Math.min(cy + 12, max.y());
@@ -517,7 +542,9 @@ public final class ArenaWizard {
                         break;
                     }
                 }
-                s.minY = cy - 2;
+                // Down past uneven floors too: standing on a 2-high lump of the crystal pit's bedrock, this still
+                // reaches its lowest layer
+                s.minY = cy - 4;
                 s.maxY = ceiling;
             }
             s.points = points;
@@ -867,14 +894,17 @@ public final class ArenaWizard {
                     .append(toggle("Slap Fish", s.knockbackFish, "fish", tag, "Give everyone a knockback fish")).append("\n")
                     .append(toggle("Pressure plate wins", s.plateWin, "plate", tag, "Stepping on a stone pressure plate wins")).append("  ")
                     .append(toggle("Clear inventory", s.clearItems, "clear", tag, "Fight with an empty inventory (it's given back after)")).append("  ")
-                    .append(toggle("Several fights at once", s.multi, "multi", tag, "MULTI mode: more than one fight at a time")).append("\n")
+                    .append(s.crystalPvp ? "<dark_gray>[One fight at a time (crystal PvP)]</dark_gray>"
+                            : toggle("Several fights at once", s.multi, "multi", tag, "MULTI mode: more than one fight at a time")).append("\n")
                     .append(s.schematic == null
                             ? toggle("Reset after each fight", s.resetAfterFight, "reset", tag,
                                     "Saves the arena as it is now as a schematic at Finish, and pastes it back after every fight")
                             : toggle("Reset after each fight", s.resetAfterFight, "reset", tag, "Paste the schematic again after every fight"))
                     .append("\n<gray>Win reward: <white>").append(StatsManager.formatMoney(s.winReward)).append("</white> ")
-                    .append(button("−10k", "/arenasetup reward down" + tag, "Lower the win reward", "red")).append(" ")
-                    .append(button("+10k", "/arenasetup reward up" + tag, "Raise the win reward", "green")).append("\n")
+                    .append(button("−" + StatsManager.formatMoney(s.rewardStep), "/arenasetup reward down" + tag, "Lower the win reward", "red")).append(" ")
+                    .append(button("+" + StatsManager.formatMoney(s.rewardStep), "/arenasetup reward up" + tag, "Raise the win reward", "green")).append(" ")
+                    .append("<click:suggest_command:'/arenasetup reward set" + tag + " '><hover:show_text:'<gray>Type any amount (75000, 75k, 1m); 0 = no reward'>"
+                            + "<yellow>[Type amount]</yellow></hover></click>").append("\n")
                     .append(button("✔ Done", "/arenasetup ok" + tag, "On to the summary", "green"));
             case SUMMARY -> {
                 m.append("<gray>Type: <white>").append(s.type).append("</white>  Schematic: <white>")
@@ -987,6 +1017,20 @@ public final class ArenaWizard {
 
     private static String escape(final String text) {
         return MiniMessage.miniMessage().escapeTags(text);
+    }
+
+    /** "75000", "75k", "1.5m" -> the number; -1 if it isn't one. */
+    private static double parseAmount(final String raw) {
+        String t = raw.trim().toLowerCase().replace(",", "").replace("$", "");
+        double multiplier = 1;
+        if (t.endsWith("k")) { multiplier = 1_000; t = t.substring(0, t.length() - 1); }
+        else if (t.endsWith("m")) { multiplier = 1_000_000; t = t.substring(0, t.length() - 1); }
+        try {
+            final double value = Double.parseDouble(t) * multiplier;
+            return Double.isFinite(value) && value >= 0 ? Math.floor(value) : -1;
+        } catch (final NumberFormatException e) {
+            return -1;
+        }
     }
 
     private static int parseInt(final String s, final int fallback) {

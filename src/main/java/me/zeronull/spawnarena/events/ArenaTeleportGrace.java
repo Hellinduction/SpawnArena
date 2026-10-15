@@ -26,6 +26,46 @@ public final class ArenaTeleportGrace implements Listener {
     private static final Map<UUID, Grace> GRACE = new ConcurrentHashMap<>();
     private static final java.util.Set<UUID> RESCUING = ConcurrentHashMap.newKeySet();
 
+    /**
+     * A plugin teleport mid-fight (almost always an anticheat setback) that would put a fighter in lava, or over
+     * it, or in water where touching it loses: they're sent back to where they were instead, so they never touch
+     * it. The teleport still happens (just to there), which anticheats cope with better than a cancelled one.
+     */
+    @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
+    public void onTeleportIntoDanger(final PlayerTeleportEvent e) {
+        if (e.getCause() != TeleportCause.PLUGIN && e.getCause() != TeleportCause.UNKNOWN)
+            return;
+        final Player player = e.getPlayer();
+        if (RESCUING.contains(player.getUniqueId()))
+            return;
+        final Fight fight = runningFight(player);
+        final Location to = e.getTo();
+        final Location from = e.getFrom();
+        if (fight == null || to == null || from == null || to.getWorld() != from.getWorld() || fight.isSpawnTeleport(player, to))
+            return;
+        // Only blocks this thread may read (on Folia the destination can belong to another region)
+        if (!to.isChunkLoaded() || !org.bukkit.Bukkit.isOwnedByCurrentRegion(to))
+            return;
+        final Arena arena = fight.getArena();
+        if (!dangerAtOrBelow(arena, to) || dangerAtOrBelow(arena, from))
+            return; // fine where it's going, or where they were is no better (the rescue below handles that)
+        e.setTo(from.clone());
+        player.setFallDistance(0);
+    }
+
+    /** Lava, or (in an arena where touching liquid loses) water, at that spot or in the drop straight below it. */
+    private static boolean dangerAtOrBelow(final Arena arena, final Location loc) {
+        org.bukkit.block.Block block = loc.getBlock();
+        final int bottom = loc.getWorld().getMinHeight();
+        for (int i = 0; i < 64 && block.getY() >= bottom; i++, block = block.getRelative(org.bukkit.block.BlockFace.DOWN)) {
+            if (block.getType() == org.bukkit.Material.LAVA || (arena.isDeathOnTouchLiquid() && block.isLiquid()))
+                return true;
+            if (!block.isPassable())
+                return false; // they'd land on this
+        }
+        return false;
+    }
+
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTeleport(final PlayerTeleportEvent e) {
         final TeleportCause cause = e.getCause();
@@ -64,13 +104,11 @@ public final class ArenaTeleportGrace implements Listener {
         GRACE.remove(player.getUniqueId());
     }
 
-    /** Where they were before the teleport, unless that's also in liquid or outside the arena — then their spawn. */
+    /** Where they were before the teleport; none (so no rescue) if that's in liquid too or outside the arena. */
     private static Location safeSpot(final Fight fight, final Player player, final Location from) {
-        final Arena arena = fight.getArena();
-        if (from != null && !from.getBlock().isLiquid() && arena.equals(SpawnArena.arenas.of(from)))
+        if (from != null && !from.getBlock().isLiquid() && fight.getArena().equals(SpawnArena.arenas.of(from)))
             return from.clone();
-        final Location spawn = fight.getSpawnOf(player);
-        return spawn == null ? null : spawn.clone();
+        return null;
     }
 
     private static Fight runningFight(final Player player) {

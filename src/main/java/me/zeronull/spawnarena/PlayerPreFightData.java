@@ -22,6 +22,7 @@ import java.util.UUID;
 public final class PlayerPreFightData {
     public Player player;
 
+    protected UUID uuid;
     protected String username;
     protected ItemStack[] contents;
     protected ItemStack[] armorContents;
@@ -33,7 +34,8 @@ public final class PlayerPreFightData {
     protected int foodLevel;
     protected List<PotionEffect> effects;
     /** Items that belong to the player but didn't fit in their inventory when the fight started (e.g. a recalled trident). */
-    protected List<ItemStack> extraItems = new ArrayList<>();
+    // Copy-on-write: added to on the player's thread while a save on another thread may be serializing it
+    protected List<ItemStack> extraItems = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public PlayerPreFightData(Player player) {
         this.player = player;
@@ -48,15 +50,11 @@ public final class PlayerPreFightData {
         foodLevel = player.getFoodLevel();
         effects = new ArrayList<>(player.getActivePotionEffects());
 
+        this.uuid = player.getUniqueId();
+
         final ConfigHandler handler = ConfigHandler.getInstance();
-        synchronized (handler) { // one load-change-save at a time (players get ready on their own threads on Folia)
-            final File configFile = new File(SpawnArena.INSTANCE.getDataFolder(), "prefights.yml");
-
-            if (!configFile.exists())
-                handler.updatePreFightConfig();
-
+        synchronized (handler) { // one change-save at a time (players get ready on their own threads on Folia)
             final PreFightConfig config = handler.getPreFightConfig();
-
             config.map.put(player.getUniqueId(), this);
             handler.savePreFightConfig(config);
         }
@@ -69,7 +67,8 @@ public final class PlayerPreFightData {
      * @throws IOException
      */
     public PlayerPreFightData(final JSONObject obj) throws Exception {
-        this.player = Bukkit.getPlayer(UUID.fromString(obj.getString("uuid")));
+        this.uuid = UUID.fromString(obj.getString("uuid"));
+        this.player = Bukkit.getPlayer(this.uuid); // null if they're offline: their entry must still save fine
         this.username = obj.getString("username");
         this.contents = ItemSerializer.deserialize(obj.getString("contents"));
         this.armorContents = ItemSerializer.deserialize(obj.getString("armor_contents"));
@@ -84,6 +83,12 @@ public final class PlayerPreFightData {
                 if (item != null)
                     this.extraItems.add(item);
         }
+    }
+
+    /** Holds one item to hand back at restore, without a message (the caller says why). */
+    public void keepForAfter(final ItemStack item) {
+        this.extraItems.add(item.clone());
+        ConfigHandler.getInstance().register(this.player.getUniqueId(), this);
     }
 
     /** Holds items to hand back at restore (and saves them, so /restore has them too). */
@@ -142,10 +147,8 @@ public final class PlayerPreFightData {
         final ConfigHandler handler = ConfigHandler.getInstance();
         synchronized (handler) {
             final PreFightConfig config = handler.getPreFightConfig();
-            if (config != null) {
-                config.map.remove(player.getUniqueId());
-                handler.savePreFightConfig(config);
-            }
+            config.map.remove(this.uuid);
+            handler.savePreFightConfig(config);
         }
     }
 
@@ -247,8 +250,7 @@ public final class PlayerPreFightData {
         final ConfigHandler handler = ConfigHandler.getInstance();
         final PlayerPreFightData data;
         synchronized (handler) {
-            final PreFightConfig config = handler.getPreFightConfig();
-            data = config == null ? null : config.map.get(player.getUniqueId());
+            data = handler.getPreFightConfig().map.get(player.getUniqueId());
         }
         if (data == null)
             return;
@@ -297,7 +299,7 @@ public final class PlayerPreFightData {
     public JSONObject toJsonObject() throws Exception {
         final JSONObject obj = new JSONObject();
 
-        obj.put("uuid", this.player.getUniqueId().toString());
+        obj.put("uuid", this.uuid.toString());
         obj.put("username", this.username);
         obj.put("contents", ItemSerializer.serialize(this.contents));
         obj.put("armor_contents", ItemSerializer.serialize(this.armorContents));

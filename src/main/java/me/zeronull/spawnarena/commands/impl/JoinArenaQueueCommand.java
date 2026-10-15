@@ -99,6 +99,10 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return "You are already in a fight!";
         if (!player.getLocation().getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
             return "You must be at spawn to use this command!";
+        if (player.getGameMode() == org.bukkit.GameMode.SPECTATOR)
+            return "You can't join while in spectator mode.";
+        if (SpawnArena.settings.queueMaxDistance > 0 && arena.distanceFrom(player.getLocation()) > SpawnArena.settings.queueMaxDistance)
+            return "You are too far from that arena!";
         if (!arena.queue.playerInQueue(player) && arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty())
             return "There's already a fight in that arena. Wait for it to finish, then join!";
         return null;

@@ -68,7 +68,7 @@ public final class WorldEditUtils {
     }
 
     private static void pasteNow(final Clipboard clipboard, final Location loc, final boolean ignoreAir) {
-        try (EditSession session = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(loc.getWorld()))) {
+        try (EditSession session = newSession(loc.getWorld())) {
             Operations.complete(new ClipboardHolder(clipboard)
                     .createPaste(session)
                     .to(BlockVector3.at(loc.getX(), loc.getY(), loc.getZ()))
@@ -77,6 +77,21 @@ public final class WorldEditUtils {
         } catch (final Exception e) {
             SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Failed to paste arena schematic at " + loc, e);
         }
+    }
+
+    /**
+     * An edit session for pasting arenas. On plain WorldEdit (Folia, or Paper without FAWE) it skips neighbour
+     * updates, physics and block-state fixing: the schematic is put back exactly as saved, and those updates
+     * are most of the time a paste takes. Lighting stays on so the arena isn't left dark. FAWE is left as is.
+     */
+    private static EditSession newSession(final org.bukkit.World world) {
+        final EditSession session = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(world));
+        if (!FAWE)
+            session.setSideEffectApplier(com.sk89q.worldedit.util.SideEffectSet.defaults()
+                    .with(com.sk89q.worldedit.util.SideEffect.NEIGHBORS, com.sk89q.worldedit.util.SideEffect.State.OFF)
+                    .with(com.sk89q.worldedit.util.SideEffect.UPDATE, com.sk89q.worldedit.util.SideEffect.State.OFF)
+                    .with(com.sk89q.worldedit.util.SideEffect.VALIDATION, com.sk89q.worldedit.util.SideEffect.State.OFF));
+        return session;
     }
 
     /** A paste that can be undone, and the box it covers in the world. */
@@ -105,7 +120,7 @@ public final class WorldEditUtils {
                     // What's there now, kept on disk: if the server stops before the setup is finished, it's put back
                     if (backup != null)
                         copyToFile(loc.getWorld(), min, max, loc, backup);
-                    final EditSession session = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(loc.getWorld()));
+                    final EditSession session = newSession(loc.getWorld());
                     try {
                         Operations.complete(new ClipboardHolder(clipboard).createPaste(session).to(to).ignoreAirBlocks(false).build());
                     } finally {

@@ -190,6 +190,7 @@ public final class SavableArena extends Arena {
         super.setCrystalPvp(config.crystalPvp);
         this.setWinReward(config.winReward, config.winRewardCooldownMinutes);
         this.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
+        this.setEgapCooldownSeconds(config.egapCooldownSeconds);
     }
 
     public File getConfigFile() {

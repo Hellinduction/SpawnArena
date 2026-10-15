@@ -139,6 +139,16 @@ public class StatsManager {
             for (final String column : new String[]{"streak_at", "wins_at", "best_at"})
                 if (!hasColumn(c, "arena_stats", column))
                     s.execute("ALTER TABLE arena_stats ADD COLUMN " + column + " BIGINT NOT NULL DEFAULT 0");
+            // The streak they had when they last lost one, and when
+            if (!hasColumn(c, "arena_stats", "lost_streak"))
+                s.execute("ALTER TABLE arena_stats ADD COLUMN lost_streak INT NOT NULL DEFAULT 0");
+            if (!hasColumn(c, "arena_stats", "lost_at"))
+                s.execute("ALTER TABLE arena_stats ADD COLUMN lost_at BIGINT NOT NULL DEFAULT 0");
+            // Elo rating (display only): everyone starts at START_ELO
+            if (!hasColumn(c, "arena_stats", "elo"))
+                s.execute("ALTER TABLE arena_stats ADD COLUMN elo INT NOT NULL DEFAULT " + START_ELO);
+            if (!hasColumn(c, "arena_stats", "elo_at"))
+                s.execute("ALTER TABLE arena_stats ADD COLUMN elo_at BIGINT NOT NULL DEFAULT 0");
             s.execute("CREATE TABLE IF NOT EXISTS arena_rewards (" +
                     "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
@@ -171,6 +181,13 @@ public class StatsManager {
             // Payout logs created before 2v2 existed
             if (!hasColumn(c, "arena_payouts", "opponent2"))
                 s.execute("ALTER TABLE arena_payouts ADD COLUMN opponent2 VARCHAR(36) NULL");
+            s.execute("CREATE TABLE IF NOT EXISTS arena_bet_bonuses (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "arena VARCHAR(64) NOT NULL, " +
+                    "amount DOUBLE NOT NULL, " +
+                    "paid_at BIGINT NOT NULL)");
             s.execute("CREATE TABLE IF NOT EXISTS arena_reward_daily (" +
                     "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
@@ -232,7 +249,7 @@ public class StatsManager {
     public int deleteArenaData(final String arena) {
         int removed = 0;
         try (Connection c = dataSource.getConnection()) {
-            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts"}) {
+            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts", "arena_bet_bonuses"}) {
                 try (PreparedStatement ps = c.prepareStatement("DELETE FROM " + table + " WHERE server_id=" + sid + " AND arena=?")) {
                     ps.setString(1, arena.toLowerCase());
                     removed += ps.executeUpdate();
@@ -576,6 +593,57 @@ public class StatsManager {
         return totals;
     }
 
+    /** A bet bonus paid out (what winning a bet paid on top of getting it back). */
+    public void logBetBonus(final UUID uuid, final String arena, final double amount) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("INSERT INTO arena_bet_bonuses (server_id, uuid, arena, amount, paid_at) VALUES (" + sid + ", ?, ?, ?, ?)")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.setDouble(3, amount);
+            ps.setLong(4, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] logBetBonus: " + e.getMessage());
+        }
+    }
+
+    /** All the money the arenas have paid this player (win rewards + bet bonuses; lost bets aren't taken off): {in this arena, in all}. */
+    public double[] getMoneyMade(final UUID uuid, final String arena) {
+        final String sql = "SELECT COALESCE(SUM(CASE WHEN arena=? THEN amount ELSE 0 END), 0), COALESCE(SUM(amount), 0) FROM ("
+                + "SELECT arena, amount FROM arena_payouts WHERE server_id=" + sid + " AND uuid=? "
+                + "UNION ALL SELECT arena, amount FROM arena_bet_bonuses WHERE server_id=" + sid + " AND uuid=?) m";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, arena.toLowerCase());
+            ps.setString(2, uuid.toString());
+            ps.setString(3, uuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next())
+                    return new double[]{rs.getDouble(1), rs.getDouble(2)};
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getMoneyMade: " + e.getMessage());
+        }
+        return new double[]{0, 0};
+    }
+
+    /** Different players who've had a counted fight in each arena (arena -> count), and in any arena (key ""). */
+    public java.util.Map<String, Integer> getPlayerCounts() {
+        final java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
+        try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+            try (ResultSet rs = s.executeQuery("SELECT arena, COUNT(DISTINCT uuid) FROM arena_stats WHERE server_id=" + sid + " GROUP BY arena ORDER BY arena")) {
+                while (rs.next())
+                    counts.put(rs.getString(1), rs.getInt(2));
+            }
+            try (ResultSet rs = s.executeQuery("SELECT COUNT(DISTINCT uuid) FROM arena_stats WHERE server_id=" + sid)) {
+                counts.put("", rs.next() ? rs.getInt(1) : 0);
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getPlayerCounts: " + e.getMessage());
+        }
+        return counts;
+    }
+
     /** {count, total amount} of all payouts this player has received. */
     public double[] getPayoutTotals(UUID uuid) {
         try (Connection c = dataSource.getConnection();
@@ -795,6 +863,7 @@ public class StatsManager {
             case "wins" -> "wins_at";
             case "win_streak" -> "streak_at";
             case "best_win_streak" -> "best_at";
+            case "elo" -> "elo_at";
             default -> null;
         };
     }
@@ -1034,6 +1103,58 @@ public class StatsManager {
         return getField(uuid, arena, "win_streak");
     }
 
+    public static final int START_ELO = 1000;
+    private static final int ELO_K = 32;
+
+    /** Their Elo rating in this arena (START_ELO if they've never had a counted fight there). */
+    public int getElo(UUID uuid, String arena) {
+        final String sql = "SELECT elo FROM arena_stats WHERE server_id=" + sid + " AND uuid=? AND arena=?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next())
+                    return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getElo: " + e.getMessage());
+        }
+        return START_ELO;
+    }
+
+    /**
+     * Updates everyone's Elo after a counted fight and returns each player's change. Each is rated against the
+     * other side's average (so 2v2 works like 1v1): beating someone rated higher gains more, at most ELO_K.
+     */
+    public java.util.Map<UUID, int[]> recordElo(final List<Player> winners, final List<Player> losers, final String arena) {
+        final java.util.Map<UUID, Integer> before = new java.util.HashMap<>();
+        for (final Player p : winners) before.put(p.getUniqueId(), getElo(p.getUniqueId(), arena));
+        for (final Player p : losers) before.put(p.getUniqueId(), getElo(p.getUniqueId(), arena));
+        final double winnersAvg = winners.stream().mapToInt(p -> before.get(p.getUniqueId())).average().orElse(START_ELO);
+        final double losersAvg = losers.stream().mapToInt(p -> before.get(p.getUniqueId())).average().orElse(START_ELO);
+
+        final java.util.Map<UUID, int[]> result = new java.util.LinkedHashMap<>(); // uuid -> {new rating, change}
+        for (final Player p : winners) {
+            final int r = before.get(p.getUniqueId());
+            final int change = Math.max(1, (int) Math.round(ELO_K * (1 - expected(r, losersAvg))));
+            result.put(p.getUniqueId(), new int[]{r + change, change});
+        }
+        for (final Player p : losers) {
+            final int r = before.get(p.getUniqueId());
+            final int change = -Math.min(r, Math.max(1, (int) Math.round(ELO_K * expected(r, winnersAvg))));
+            result.put(p.getUniqueId(), new int[]{r + change, change});
+        }
+        for (final java.util.Map.Entry<UUID, int[]> e : result.entrySet())
+            setField(e.getKey(), arena, "elo", e.getValue()[0]);
+        return result;
+    }
+
+    /** Chance (0..1) a player rated {@code rating} beats one rated {@code opponent}. */
+    private static double expected(final double rating, final double opponent) {
+        return 1 / (1 + Math.pow(10, (opponent - rating) / 400));
+    }
+
     public int getBestWinStreak(UUID uuid, String arena) {
         return getField(uuid, arena, "best_win_streak");
     }
@@ -1084,9 +1205,44 @@ public class StatsManager {
         return getWinStreak(player.getUniqueId(), arena);
     }
 
+    /** Ends their streak, keeping what it was (if they had one) as their last lost streak. */
     public void recordLoss(Player player, String arena) {
         ensure(player.getUniqueId(), arena);
-        setField(player.getUniqueId(), arena, "win_streak", 0);
+        // The streak is read before it's zeroed: lost_streak and lost_at come first (MySQL applies SETs in order)
+        final String sql = "UPDATE arena_stats SET lost_streak = CASE WHEN win_streak > 0 THEN win_streak ELSE lost_streak END, "
+                + "lost_at = CASE WHEN win_streak > 0 THEN ? ELSE lost_at END, win_streak = 0, streak_at = ? "
+                + "WHERE server_id=" + sid + " AND uuid=? AND arena=?";
+        final long now = System.currentTimeMillis();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setLong(1, now);
+            ps.setLong(2, now);
+            ps.setString(3, player.getUniqueId().toString());
+            ps.setString(4, arena.toLowerCase());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] recordLoss: " + e.getMessage());
+        }
+        invalidateLeaderboards();
+    }
+
+    /** The streak they had when they last lost one (streak 0 if they never have), and when. */
+    public record LostStreak(int streak, long at) {}
+
+    public LostStreak getLostStreak(UUID uuid, String arena) {
+        final String sql = "SELECT lost_streak, lost_at FROM arena_stats WHERE server_id=" + sid + " AND uuid=? AND arena=?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next())
+                    return new LostStreak(rs.getInt("lost_streak"), rs.getLong("lost_at"));
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getLostStreak: " + e.getMessage());
+        }
+        return new LostStreak(0, 0);
     }
 
     /** Upserts a single stat field. */
@@ -1134,6 +1290,63 @@ public class StatsManager {
 
     public void invalidateLeaderboards() {
         topCache.clear();
+        // Kept (so nobody sees a blank), just refreshed on their next look
+        standingCache.replaceAll((key, cached) -> new CachedStanding(0, cached.standing()));
+    }
+
+    /** A player's place on a leaderboard (in the board's own order) and their value; rank 0 = not on it at all. */
+    public record Standing(int rank, int value) {}
+    private record CachedStanding(long fetchedAt, Standing standing) {}
+    private final java.util.Map<String, CachedStanding> standingCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Set<String> standingLoading = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * Never queries the database on the calling thread (holograms resolve this for every viewer): returns what's
+     * cached, null the very first time, and refreshes it in the background once it's as old as the leaderboards.
+     */
+    public Standing getStandingCached(final UUID uuid, final String arena, final String field) {
+        final String key = uuid + ":" + arena.toLowerCase() + ":" + field;
+        final CachedStanding cached = standingCache.get(key);
+        if ((cached == null || System.currentTimeMillis() - cached.fetchedAt() >= TOP_CACHE_MILLIS) && standingLoading.add(key)) {
+            Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> {
+                try {
+                    final Standing fresh = fetchStanding(uuid, arena, field);
+                    if (fresh != null)
+                        standingCache.put(key, new CachedStanding(System.currentTimeMillis(), fresh));
+                } finally {
+                    standingLoading.remove(key);
+                }
+            });
+        }
+        return cached == null ? null : cached.standing();
+    }
+
+    /** Drops a player's cached leaderboard places (when they leave), so the cache doesn't grow forever. */
+    public void forgetStandings(final UUID uuid) {
+        final String prefix = uuid + ":";
+        standingCache.keySet().removeIf(key -> key.startsWith(prefix));
+    }
+
+    /** Counts everyone the board puts ahead of them: higher value, or the same value reached earlier (then by uuid). */
+    private Standing fetchStanding(final UUID uuid, final String arena, final String field) {
+        final String reachedAt = reachedAtColumn(field);
+        if (reachedAt == null)
+            return null;
+        final String sql = "SELECT s." + field + " AS v, (SELECT COUNT(*) FROM arena_stats o WHERE o.server_id=" + sid
+                + " AND o.arena=s.arena AND (o." + field + " > s." + field + " OR (o." + field + " = s." + field
+                + " AND (o." + reachedAt + " < s." + reachedAt + " OR (o." + reachedAt + " = s." + reachedAt
+                + " AND o.uuid < s.uuid))))) AS ahead FROM arena_stats s WHERE s.server_id=" + sid + " AND s.arena=? AND s.uuid=?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, arena.toLowerCase());
+            ps.setString(2, uuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? new Standing(rs.getInt("ahead") + 1, rs.getInt("v")) : new Standing(0, 0);
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getStanding: " + e.getMessage());
+            return null;
+        }
     }
 
     /** Inserts a default row if none exists. */
@@ -1221,16 +1434,19 @@ public class StatsManager {
         props.setProperty("user", "sa");
         props.setProperty("password", "");
 
-        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at) " +
-                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak), " +
-                "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at)";
+                "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at), " +
+                "lost_streak = VALUES(lost_streak), lost_at = VALUES(lost_at), elo = VALUES(elo), elo_at = VALUES(elo_at)";
 
         int copied = 0;
         try (Connection h2 = new org.h2.Driver().connect(h2FileUrl() + ";IFEXISTS=TRUE", props);
              Statement read = h2.createStatement();
              ResultSet rs = read.executeQuery("SELECT uuid, arena, wins, win_streak, best_win_streak"
                      + reachedAtSelect(h2, "streak_at") + reachedAtSelect(h2, "wins_at") + reachedAtSelect(h2, "best_at")
+                     + reachedAtSelect(h2, "lost_streak") + reachedAtSelect(h2, "lost_at")
+                     + (hasColumn(h2, "arena_stats", "elo") ? ", elo" : ", " + START_ELO + " AS elo") + reachedAtSelect(h2, "elo_at")
                      + " FROM arena_stats");
              Connection target = dataSource.getConnection()) {
 
@@ -1245,6 +1461,10 @@ public class StatsManager {
                     ps.setLong(6, rs.getLong("streak_at"));
                     ps.setLong(7, rs.getLong("wins_at"));
                     ps.setLong(8, rs.getLong("best_at"));
+                    ps.setInt(9, rs.getInt("lost_streak"));
+                    ps.setLong(10, rs.getLong("lost_at"));
+                    ps.setInt(11, rs.getInt("elo"));
+                    ps.setLong(12, rs.getLong("elo_at"));
                     ps.addBatch();
                     if (++copied % 500 == 0)
                         ps.executeBatch();
@@ -1252,6 +1472,7 @@ public class StatsManager {
                 ps.executeBatch();
                 copyRewardCooldowns(h2, target, sid);
                 copyPayoutLog(h2, target, sid);
+                copyBetBonuses(h2, target, sid);
                 copyAuditLog(h2, target, sid);
                 copyOwedItems(h2, target, sid);
                 target.commit();
@@ -1270,6 +1491,26 @@ public class StatsManager {
     /** H2 files from older versions may lack a "reached at" column; read those as 0. */
     private static String reachedAtSelect(final Connection h2, final String column) throws SQLException {
         return hasColumn(h2, "arena_stats", column) ? ", " + column : ", 0 AS " + column;
+    }
+
+    /** Appends the H2 bet bonus log to MySQL's (like the payout log). */
+    private static void copyBetBonuses(final Connection h2, final Connection target, final String sid) throws SQLException {
+        try (ResultSet tables = h2.getMetaData().getTables(null, null, "ARENA_BET_BONUSES", null)) {
+            if (!tables.next())
+                return;
+        }
+        try (Statement read = h2.createStatement();
+             ResultSet rs = read.executeQuery("SELECT uuid, arena, amount, paid_at FROM arena_bet_bonuses ORDER BY id");
+             PreparedStatement ps = target.prepareStatement("INSERT INTO arena_bet_bonuses (server_id, uuid, arena, amount, paid_at) VALUES (" + sid + ", ?, ?, ?, ?)")) {
+            while (rs.next()) {
+                ps.setString(1, rs.getString("uuid"));
+                ps.setString(2, rs.getString("arena"));
+                ps.setDouble(3, rs.getDouble("amount"));
+                ps.setLong(4, rs.getLong("paid_at"));
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
     }
 
     /** Appends the H2 payout log to MySQL's (running the migration twice would copy it twice). */

@@ -57,9 +57,9 @@ public final class SettingsConfig {
             "network. Without the bridge (or with this off), they're announced in this server's chat as usual."})
     public boolean proxyBroadcast = true;
 
-    @Comment({"Most a player can bet with /arenabet. A bet only applies to a fight where their win reward is ready",
-            "(so at most once per reward cooldown), never to duels. 0 turns betting off."})
-    public double betMax = 50000;
+    @Comment({"Most a player can bet with /arenabet. One bet at a time, only for their next fight: it's cancelled if that",
+            "fight can't pay out (their win reward there isn't ready) or is a duel. 0 turns betting off."})
+    public double betMax = 75000;
 
     @Comment({"What winning a bet pays on top of getting it back, as a percentage of the bet (50 = bet 50k, win 25k extra).",
             "Losing loses the bet. The bonus counts toward dailyRewardCap."})

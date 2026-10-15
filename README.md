@@ -1,6 +1,6 @@
 # SpawnArena
 
-An arena plugin at the spawn, originally developed for the VIVSMP Minecraft server. Updated for LeafMC/Paper 1.21.11.
+An arena plugin at the spawn, originally developed for the VIVSMP Minecraft server. Updated for LeafMC/Paper 1.21.11, and runs on Folia (see below for what differs there).
 
 # How to build the jar
 
@@ -17,6 +17,23 @@ Don't add `shade:shade` to the command: shading already runs during `package`, a
 
 # Server requirements
 
-- Java 21+, Paper/LeafMC 1.21.11
+- Java 21+, Paper/LeafMC 1.21.11 (or Folia 1.21.11)
 - WorldGuard, plus WorldEdit **or** FastAsyncWorldEdit (detected automatically)
-- Optional: PlaceholderAPI (stats placeholders), FancyHolograms (leaderboard holograms)
+- Optional: Vault + an economy plugin (win rewards and `/arenabet`), PlaceholderAPI (stats placeholders), FancyHolograms (leaderboard and reward holograms)
+
+# Velocity bridge
+
+`velocity/` is a separate plugin for a Velocity proxy: with it, arena win announcements go to every server on the network (`proxyBroadcast` in `settings.yml`). Build it with `mvn clean package` in that folder.
+
+# Running on Folia
+
+Everything works on Folia, with these differences:
+
+- **No teleport events.** Folia never fires `PlayerTeleportEvent`, so these do nothing there:
+  - teleporting while queued doesn't take you out of the queue;
+  - a command or plugin teleport out of the arena mid-fight doesn't count as a loss (leaving the arena on foot or by pearl is still stopped);
+  - an anticheat setback into or over lava (or a sumo arena's water) isn't redirected back to where the player was, and touching it shortly after such a setback isn't forgiven.
+- **No FastAsyncWorldEdit.** FAWE doesn't support Folia, so arenas are pasted with plain WorldEdit on the arena's own region thread. A crystal arena's reset after each fight then takes a few seconds, during which that part of the world is busy.
+- **No `/reload`.** Restart the server to update the plugin.
+
+LeafMC isn't Folia: it fires teleport events and runs FAWE, so none of the above applies there.

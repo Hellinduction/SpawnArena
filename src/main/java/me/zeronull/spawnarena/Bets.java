@@ -13,11 +13,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Betting against the server: a player sets a bet with /arenabet, and it's placed on their next counted
- * fight where their win reward is ready. Win and they get it back plus a bonus (a percentage of it, not
+ * Betting against the server: a player sets a bet with /arenabet, and it's placed on their next fight if
+ * that fight can pay out. Win and they get it back plus a bonus (a percentage of it, not
  * double); lose and it's gone. Kept hard to abuse:
  * <ul>
- *   <li>only when the reward is ready (so at most once per reward cooldown), never in duels;</li>
+ *   <li>one at a time, only for the next fight, and cancelled if that fight can't pay out or is a duel;</li>
  *   <li>capped (betMax), and the bonus counts toward the daily reward cap;</li>
  *   <li>a win that doesn't pay out (alts, same opponent too often, daily cap) refunds the bet instead;</li>
  *   <li>held bets are recorded in the database, so a crash or shutdown mid-fight refunds them.</li>
@@ -40,6 +40,12 @@ public final class Bets {
 
     public static boolean clearPending(final Player player) {
         return PENDING.remove(player.getUniqueId()) != null;
+    }
+
+    /** What the player has right now, or 0 if the economy isn't there. */
+    public static double balance(final Player player) {
+        final Economy economy = WinRewards.economy();
+        return economy == null ? 0 : economy.getBalance(player);
     }
 
     public static double maxBet() {
@@ -66,23 +72,27 @@ public final class Bets {
         return false;
     }
 
-    /** At the start of a counted fight, on the player's thread: takes their bet if their reward is ready. */
+    /**
+     * At the start of every fight, on the player's thread. A bet is only ever for the fight right after it's set:
+     * it's taken here if this fight can pay out, and cancelled otherwise (never saved for a later fight).
+     */
     public static void placeIfReady(final Player player, final Fight fight) {
-        final Double amount = PENDING.get(player.getUniqueId());
-        if (amount == null || fight.isDuel() || maxBet() <= 0)
+        final Double amount = PENDING.remove(player.getUniqueId());
+        if (amount == null || maxBet() <= 0)
             return;
 
         final Economy economy = WinRewards.economy();
-        if (economy == null)
-            return;
-        if (!rewardReady(player, fight.getArena())) {
+        final String why = economy == null ? "betting isn't available right now"
+                : fight.isDuel() ? "duels don't take bets"
+                : !rewardReady(player, fight.getArena()) ? "your win reward isn't ready in this arena" : null;
+        if (why != null) {
             player.sendMessage(MiniMessage.miniMessage().deserialize(
-                    "<gray>Your <gold><bet></gold> bet is saved for your next fight where your reward is ready.",
-                    Placeholder.unparsed("bet", StatsManager.formatMoney(amount))));
+                    "<gray>Your <gold><bet></gold> bet was cancelled: <why>. Bets only count for the fight right after you set them.",
+                    Placeholder.unparsed("bet", StatsManager.formatMoney(amount)),
+                    Placeholder.unparsed("why", why)));
             return;
         }
 
-        PENDING.remove(player.getUniqueId());
         if (!economy.has(player, amount)) {
             player.sendMessage(MiniMessage.miniMessage().deserialize(
                     "<red>You don't have <bet> any more, so your bet was cancelled.",
@@ -132,8 +142,10 @@ public final class Bets {
                 continue;
             }
             stats.releaseBet(winner.getUniqueId());
-            if (bonus > 0)
+            if (bonus > 0) {
                 stats.addEarnedToday(winner.getUniqueId(), bonus);
+                stats.logBetBonus(winner.getUniqueId(), fight.getArena().getArenaName(), bonus);
+            }
             winner.sendMessage(MiniMessage.miniMessage().deserialize(
                     bonus > 0
                             ? "<green>+<bonus> bet bonus!</green> <gray>(your <bet> bet is back too)"

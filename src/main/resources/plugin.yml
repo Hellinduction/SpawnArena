@@ -49,12 +49,12 @@ commands:
     permission: spawnarena.restore
     permission-message: "§cYou don't have permission!"
   arenastats:
-    description: View or edit arena stats for a player
+    description: View or edit a player's arena stats (wins, streaks, Elo, money made), or count players per arena
     permission: spawnarena.arenastats
     permission-message: "§cYou don't have permission!"
   arenaleaderboard:
     description: View the arena leaderboard, or spawn/remove/list leaderboard holograms
-    usage: "/arenaleaderboard [arena] [stat] [limit] | spawn <arena> <stat|reward> [limit] | remove <name> | list | reload | update"
+    usage: "/arenaleaderboard [arena] [stat] [limit] | spawn <arena> <stat|reward> [limit] | remove <name> | list | tp <name> | reload | update"
     permission: spawnarena.arenaleaderboard
     permission-message: "§cYou don't have permission!"
 
@@ -94,7 +94,7 @@ commands:
     permission: spawnarena.arenasetup
     permission-message: "§cYou don't have permission!"
   arenabet:
-    description: Bet on your next fight where your win reward is ready (win it back plus a bonus, lose it)
+    description: Bet on your next fight (win it back plus a bonus, lose it); cancelled if that fight can't pay out
     usage: "/arenabet <amount|off>"
     permission: spawnarena.arenabet
     permission-message: "§cYou don't have permission!"

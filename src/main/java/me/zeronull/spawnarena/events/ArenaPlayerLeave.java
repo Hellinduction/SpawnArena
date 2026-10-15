@@ -14,6 +14,8 @@ public class ArenaPlayerLeave implements Listener {
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        if (SpawnArena.statsManager != null)
+            SpawnArena.statsManager.forgetStandings(player.getUniqueId());
 
         if (!SpawnArena.arenas.hasActiveFight()) {
             return;

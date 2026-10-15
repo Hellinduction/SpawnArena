@@ -36,6 +36,16 @@ public abstract class ArenaOptions {
         this.leaderRewardCooldownMinutes = cooldownMinutes;
     }
 
+    private int egapCooldownSeconds;
+
+    public int getEgapCooldownSeconds() {
+        return this.egapCooldownSeconds;
+    }
+
+    public void setEgapCooldownSeconds(final int seconds) {
+        this.egapCooldownSeconds = Math.max(0, seconds);
+    }
+
     public void setWinReward(final double amount, final int cooldownMinutes) {
         this.winReward = amount;
         this.winRewardCooldownMinutes = cooldownMinutes;

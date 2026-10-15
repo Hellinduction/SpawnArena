@@ -56,10 +56,83 @@ public final class CrystalPvp {
         final Map<BlockKey, BlockData> original = java.util.Collections.synchronizedMap(new LinkedHashMap<>());
         final Set<UUID> crystals = java.util.concurrent.ConcurrentHashMap.newKeySet();
         final Set<UUID> items = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        /** The arena's region as it was when the fight started (null until taken) */
+        volatile Snapshot snapshot;
 
         Track(final Fight fight) {
             this.fight = fight;
         }
+    }
+
+    /** Every block in the box around an arena's region, as it was when a fight started. */
+    static final class Snapshot {
+        final UUID world;
+        final int minX, minY, minZ, sizeX, sizeY, sizeZ;
+        final BlockData[] data;
+
+        Snapshot(final World world, final int minX, final int minY, final int minZ, final int maxX, final int maxY, final int maxZ) {
+            this.world = world.getUID();
+            this.minX = minX;
+            this.minY = minY;
+            this.minZ = minZ;
+            this.sizeX = maxX - minX + 1;
+            this.sizeY = maxY - minY + 1;
+            this.sizeZ = maxZ - minZ + 1;
+            this.data = new BlockData[this.sizeX * this.sizeY * this.sizeZ];
+            for (int x = 0; x < this.sizeX; x++)
+                for (int y = 0; y < this.sizeY; y++)
+                    for (int z = 0; z < this.sizeZ; z++)
+                        this.data[this.index(x, y, z)] = world.getBlockAt(minX + x, minY + y, minZ + z).getBlockData();
+        }
+
+        private int index(final int x, final int y, final int z) {
+            return (y * this.sizeZ + z) * this.sizeX + x;
+        }
+
+        /** What was at this spot when the fight started, or null if it's outside the snapshot. */
+        BlockData at(final Block block) {
+            if (!block.getWorld().getUID().equals(this.world))
+                return null;
+            final int x = block.getX() - this.minX, y = block.getY() - this.minY, z = block.getZ() - this.minZ;
+            if (x < 0 || y < 0 || z < 0 || x >= this.sizeX || y >= this.sizeY || z >= this.sizeZ)
+                return null;
+            return this.data[this.index(x, y, z)];
+        }
+    }
+
+    /**
+     * Takes the snapshot when a crystal fight starts (on the arena's own thread). Until it's there, every block
+     * counts as part of the arena, so nothing can be broken by accident.
+     */
+    public static void takeSnapshot(final Fight fight) {
+        final Arena arena = fight.getArena();
+        final Location anchor = arena.spawnPoint1;
+        if (anchor == null || anchor.getWorld() == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
+            return;
+        final int[] box = Regions.bounds(arena, anchor.getWorld());
+        if (box == null)
+            return;
+        final Track track = trackFor(fight);
+        markDirty(); // so a crash mid-fight is known about (see restoreLeftovers)
+        final Location centre = new Location(anchor.getWorld(), (box[0] + box[3]) / 2.0, (box[1] + box[4]) / 2.0, (box[2] + box[5]) / 2.0);
+        Threads.location(centre, () -> track.snapshot = new Snapshot(anchor.getWorld(), box[0], box[1], box[2], box[3], box[4], box[5]));
+    }
+
+    /**
+     * Whether this block is part of the arena itself and must not be broken, blown up or built over: anything
+     * that wasn't empty when the fight started (walls, floor, bedrock), and anything outside the region.
+     * Spots that were empty are fair game whatever is there now: placed blocks, water and wherever it flowed,
+     * generated cobble, fire...
+     */
+    public static boolean isOriginal(final Arena arena, final Block block) {
+        if (!arena.equals(arenaAt(block)))
+            return true;
+        final Track track = TRACKS.get(arena);
+        final Snapshot snapshot = track == null ? null : track.snapshot;
+        if (snapshot == null)
+            return true;
+        final BlockData before = snapshot.at(block);
+        return before == null || !isEmptySpace(before.getMaterial());
     }
 
     private static final Map<Arena, Track> TRACKS = new java.util.concurrent.ConcurrentHashMap<>();
@@ -101,6 +174,18 @@ public final class CrystalPvp {
      * {@link Arena.ArenaUtils#WORLD_EDIT_SUPPORT}.
      */
     private static final class Regions {
+        /** {minX, minY, minZ, maxX, maxY, maxZ} of the arena's region in that world, or null. */
+        static int[] bounds(final Arena arena, final World world) {
+            final com.sk89q.worldguard.protection.managers.RegionManager manager =
+                    Arena.ArenaUtils.REGION_CONTAINER.get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(world));
+            final com.sk89q.worldguard.protection.regions.ProtectedRegion region =
+                    manager == null ? null : manager.getRegion(arena.getArenaName());
+            if (region == null)
+                return null;
+            final com.sk89q.worldedit.math.BlockVector3 min = region.getMinimumPoint(), max = region.getMaximumPoint();
+            return new int[]{min.x(), min.y(), min.z(), max.x(), max.y(), max.z()};
+        }
+
         /** Whether loc is inside the arena's region, or within {@code margin} blocks of its bounding box. */
         static boolean contains(final Arena arena, final Location loc, final int margin) {
             final com.sk89q.worldguard.protection.managers.RegionManager manager =
@@ -187,13 +272,13 @@ public final class CrystalPvp {
      * blocks that were there before the fight.
      */
     public static boolean isBanned(final Material type, final World world) {
-        if (type.hasGravity())
-            return true;
+        // Everything else is fine: whatever it does, it can only change spots that were empty, and those are
+        // put back from the snapshot when the fight ends
         if (org.bukkit.Tag.BEDS.isTagged(type))
-            return world.getEnvironment() == World.Environment.NORMAL; // only bed bombs where beds explode
+            return world.getEnvironment() == World.Environment.NORMAL; // they'd set spawn points; bed bombs only elsewhere
         return switch (type) {
-            case TNT, PISTON, STICKY_PISTON, ICE, FROSTED_ICE, SPONGE, WET_SPONGE, SCAFFOLDING,
-                 POINTED_DRIPSTONE, FIRE, SOUL_FIRE, LAVA, WATER, POWDER_SNOW -> true;
+            case PISTON, STICKY_PISTON -> true; // could push the arena's own blocks
+            case TNT -> true;                   // can't be lit in a fight anyway (fire is blocked)
             default -> false;
         };
     }
@@ -261,6 +346,32 @@ public final class CrystalPvp {
             final BlockData data = entries.get(i).getValue();
             if (block != null)
                 Threads.location(block.getLocation(), () -> putBack(arena, block, data));
+        }
+
+        // Everything else that changed, however it changed (water flowing, cobble forming, things falling...)
+        final Snapshot snapshot = track.snapshot;
+        final World world = snapshot == null ? null : Bukkit.getWorld(snapshot.world);
+        if (world != null) {
+            final Location centre = new Location(world, snapshot.minX + snapshot.sizeX / 2.0, snapshot.minY + snapshot.sizeY / 2.0,
+                    snapshot.minZ + snapshot.sizeZ / 2.0);
+            Threads.location(centre, () -> {
+                CLEANING.set(true);
+                try {
+                    // Top down, so things resting on others (and liquids) are dealt with first
+                    for (int y = snapshot.sizeY - 1; y >= 0; y--)
+                        for (int x = 0; x < snapshot.sizeX; x++)
+                            for (int z = 0; z < snapshot.sizeZ; z++) {
+                                final Block block = world.getBlockAt(snapshot.minX + x, snapshot.minY + y, snapshot.minZ + z);
+                                final BlockData before = snapshot.data[snapshot.index(x, y, z)];
+                                if (!block.getBlockData().equals(before))
+                                    block.setBlockData(before, false);
+                            }
+                } catch (final Exception e) {
+                    SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't fully put back crystal arena " + arena.getArenaName(), e);
+                } finally {
+                    CLEANING.set(false);
+                }
+            });
         }
         saveNow();
     }
@@ -333,6 +444,7 @@ public final class CrystalPvp {
             }
             for (final UUID id : track.crystals)
                 out.append("E ").append(id).append('\n');
+            out.append("F ").append(track.fight.getArena().getArenaName()).append('\n');
         }
         for (final UUID id : LEFTOVER_CRYSTALS)
             out.append("E ").append(id).append('\n');
@@ -371,9 +483,12 @@ public final class CrystalPvp {
         }
 
         final List<String[]> blocks = new ArrayList<>();
+        final List<String> interrupted = new ArrayList<>();
         for (final String line : lines) {
             final String[] parts = line.split(" ", 6);
-            if (parts.length == 6 && parts[0].equals("B"))
+            if (parts.length == 2 && parts[0].equals("F"))
+                interrupted.add(parts[1]);
+            else if (parts.length == 6 && parts[0].equals("B"))
                 blocks.add(parts);
             else if (parts.length == 2 && parts[0].equals("E")) {
                 try { LEFTOVER_CRYSTALS.add(UUID.fromString(parts[1])); } catch (final IllegalArgumentException ignored) {}
@@ -404,6 +519,19 @@ public final class CrystalPvp {
         }
         if (restored > 0 || !LEFTOVER_CRYSTALS.isEmpty())
             SpawnArena.INSTANCE.getLogger().info("Cleaned up " + restored + " block(s) left in crystal arenas by an unfinished fight.");
+
+        // Anything else those fights changed (water, cobble...) wasn't recorded: paste their schematic back
+        for (final String name : interrupted) {
+            final Arena arena = SpawnArena.arenas.of(name);
+            if (arena instanceof SavableArena savable) {
+                try {
+                    savable.resetArena();
+                    SpawnArena.INSTANCE.getLogger().info("Re-pasting crystal arena " + name + " after a fight there never finished.");
+                } catch (final Exception e) {
+                    SpawnArena.INSTANCE.getLogger().warning("Couldn't re-paste crystal arena " + name + ": " + e.getMessage());
+                }
+            }
+        }
 
         // Match items left by a crash: on Paper search the worlds now; on Folia (no whole-world searches)
         // they're removed as their chunks load (onEntitiesLoad)

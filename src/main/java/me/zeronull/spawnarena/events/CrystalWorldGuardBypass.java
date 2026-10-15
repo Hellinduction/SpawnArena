@@ -94,7 +94,7 @@ public final class CrystalWorldGuardBypass implements Listener {
             if (at == null || (arena != null && !arena.equals(at)))
                 return null;
             arena = at;
-            if (placedOnly && !CrystalPvp.isPlaced(at, block))
+            if (placedOnly && CrystalPvp.isOriginal(at, block))
                 return null;
         }
         return CrystalPvp.isActiveFighter(arena, player) ? player : null;

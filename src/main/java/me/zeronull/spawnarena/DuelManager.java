@@ -206,6 +206,8 @@ public final class DuelManager {
             return "The arenas are closed right now.";
         if (!player.getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
             return self ? "You must be at spawn to duel." : name + " isn't at spawn.";
+        if (player.getGameMode() == org.bukkit.GameMode.SPECTATOR)
+            return self ? "You can't duel while in spectator mode." : name + " is in spectator mode.";
         if (SpawnArena.arenas.hasFighter(player)) {
             final Arena current = SpawnArena.arenas.of(player);
             final Fight fight = current == null ? null : current.getFight(player);

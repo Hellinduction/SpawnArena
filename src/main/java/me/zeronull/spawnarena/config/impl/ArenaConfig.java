@@ -46,6 +46,11 @@ public final class ArenaConfig {
     @Comment("Minutes between win rewards for the #1 current win streak holder")
     public int leaderRewardCooldownMinutes = 10;
 
+    @Comment({"Seconds a fighter has to wait after eating an enchanted golden apple before eating another (shown on",
+            "the item, like an ender pearl's). Only while fighting in this arena: it's cleared when they're out of the",
+            "fight, and never touches golden apples anywhere else. 0 = no cooldown."})
+    public int egapCooldownSeconds = 0;
+
     @Comment({"Crystal PvP: fighters can place blocks and end crystals inside the arena's region, but can only",
             "break or blow up blocks placed during the fight. Everything placed is removed when the fight ends.",
             "The plugin lets fighters past WorldGuard itself, so the region's flags can stay as they are (build denied).",

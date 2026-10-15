@@ -13,6 +13,7 @@ import java.util.UUID;
  *   %spawnarena_wins_<arena>%
  *   %spawnarena_streak_<arena>%
  *   %spawnarena_best_streak_<arena>%
+ *   %spawnarena_elo_<arena>%
  *   %spawnarena_top_player_<arena>_wins_<rank>%
  *   %spawnarena_top_player_<arena>_streak_<rank>%
  *   %spawnarena_top_player_<arena>_best_streak_<rank>%
@@ -28,12 +29,34 @@ import java.util.UUID;
  *   %spawnarena_reward_status_<arena>%     "Ready!", countdown, "Beat someone new to earn again", "Daily limit reached · resets in 5h 12m" or "Resetting the arena..."
  *   %spawnarena_reward_last_<arena>%       last win's result, e.g. "+$50k" or "Not paid: on cooldown"
  *   %spawnarena_reward_today% / %spawnarena_reward_dailycap% / %spawnarena_reward_dailyleft%
+ *   %spawnarena_reward_dailyreset%      " · resets in 5h 12m" (empty with no daily cap)
  *   %spawnarena_queue_<1v1|2v2|total>_<arena>%    players waiting
  *   %spawnarena_matches_<1v1|2v2|total>_<arena>%  matches in progress
  */
 public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
     private static final int TOP_CACHE_SIZE = me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT;
+    /** my_rank_<arena>_<stat> ("#14", or "unranked") and my_value_<arena>_<stat>, for the viewer. */
+    private static String standing(final Player player, final String params) {
+        if (player == null)
+            return "";
+        final boolean rank = params.startsWith("my_rank_");
+        final String rest = params.substring(rank ? "my_rank_".length() : "my_value_".length());
+        String stat = null;
+        for (final String s : new String[]{"best_streak", "streak", "wins", "elo"})
+            if (rest.endsWith("_" + s)) { stat = s; break; }
+        if (stat == null)
+            return null;
+        final String field = statToField(stat);
+        final String arena = rest.substring(0, rest.length() - stat.length() - 1);
+        final StatsManager.Standing standing = SpawnArena.statsManager.getStandingCached(player.getUniqueId(), arena, field);
+        if (standing == null)
+            return "...";
+        if (rank)
+            return standing.rank() > 0 ? "#" + standing.rank() : "unranked";
+        return String.valueOf(standing.value());
+    }
+
     private List<StatsManager.LeaderboardEntry> cachedTop(String arena, String field) {
         return SpawnArena.statsManager.getTopPlayersCached(arena, field, TOP_CACHE_SIZE);
     }
@@ -54,6 +77,8 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
     public @Nullable String onPlaceholderRequest(Player player, @NotNull String params) {
         if (params.startsWith("reward_"))
             return reward(player, params.substring("reward_".length()));
+        if (params.startsWith("my_rank_") || params.startsWith("my_value_"))
+            return standing(player, params);
         if (params.startsWith("queue_") || params.startsWith("matches_"))
             return queue(params);
 
@@ -63,13 +88,14 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             final String type = parts[0];
 
             // Personal stats: wins_<arena>, streak_<arena>, best_streak_<arena>
-            if (player != null && (type.equals("wins") || type.equals("streak") || type.equals("best"))) {
+            if (player != null && (type.equals("wins") || type.equals("streak") || type.equals("best") || type.equals("elo"))) {
                 final String arena = String.join("_", java.util.Arrays.copyOfRange(parts, type.equals("best") ? 2 : 1, parts.length));
                 final UUID uuid = player.getUniqueId();
                 return switch (type) {
                     case "wins" -> String.valueOf(SpawnArena.statsManager.getWins(uuid, arena));
                     case "streak" -> String.valueOf(SpawnArena.statsManager.getWinStreak(uuid, arena));
                     case "best" -> String.valueOf(SpawnArena.statsManager.getBestWinStreak(uuid, arena));
+                    case "elo" -> String.valueOf(SpawnArena.statsManager.getElo(uuid, arena));
                     default -> null;
                 };
             }
@@ -138,6 +164,10 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         switch (rest) {
             case "today" -> { return player == null ? "" : formatAmount(stats.getEarnedToday(player.getUniqueId())); }
             case "dailycap" -> { return stats.dailyCap() > 0 ? formatAmount(stats.dailyCap()) : "No limit"; }
+            // " · resets in 5h 12m", or nothing when there's no daily cap
+            case "dailyreset" -> {
+                return stats.dailyCap() > 0 ? " · resets in " + StatsManager.formatMinutes(StatsManager.minutesUntilDailyReset()) : "";
+            }
             // Payouts in a row allowed against the same opponent
             case "samelimit" -> {
                 final int limit = SpawnArena.settings == null ? 0 : SpawnArena.settings.sameOpponentLimit;
@@ -206,6 +236,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             case "wins" -> "wins";
             case "streak" -> "win_streak";
             case "best_streak", "best" -> "best_win_streak";
+            case "elo" -> "elo";
             default -> null;
         };
     }

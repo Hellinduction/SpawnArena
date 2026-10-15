@@ -90,13 +90,22 @@ public final class LeaderboardHolograms {
             lines.add(String.format("<light_purple>%d. <yellow>%%spawnarena_top_player_%s_%s_%d%%<gray>: %%spawnarena_top_value_%s_%s_%d%%",
                     rank, arena, stat, rank, arena, stat, rank));
         }
+        // Each viewer sees their own place here
+        lines.add(SEPARATOR);
+        lines.add(String.format("<gray>You: <light_purple>%%spawnarena_my_rank_%s_%s%% <dark_gray>· <yellow>%%spawnarena_my_value_%s_%s%%",
+                arena, stat, arena, stat));
         return lines;
     }
+
+    private static final String SEPARATOR = "<dark_gray><strikethrough>                              </strikethrough>";
+    /** Lines a leaderboard has besides its rows: the title, the separator and the viewer's own line. */
+    public static final int EXTRA_LINES = 3;
 
     private static String statLabel(final String stat) {
         return switch (stat) {
             case "streak" -> "Win Streak";
             case "best_streak" -> "Best Win Streak";
+            case "elo" -> "Elo";
             default -> "Wins";
         };
     }
@@ -107,7 +116,7 @@ public final class LeaderboardHolograms {
 
     private static final String REWARD_TAG = "_reward_";
     private static final int REWARD_UPDATE_INTERVAL_MS = 1_000;
-    public static final int REWARD_LINES = 10;
+    public static final int REWARD_LINES = 8;
 
     /** A per-viewer live countdown to that viewer's next win reward in this arena. */
     public static String spawnReward(final String arena, final Location loc) {
@@ -131,16 +140,14 @@ public final class LeaderboardHolograms {
     private static List<String> rewardLines(final String arena) {
         return new ArrayList<>(List.of(
                 "<gradient:#FFD700:#FF8C00><bold>✦ " + displayName(arena) + " Rewards ✦</bold></gradient>",
-                "<gray>Win a fight to earn <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55>",
+                "<gray>Win: <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55> <dark_gray>·</dark_gray> <gray>once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
+                "<gold>★ <yellow>#1 streak: <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
+                        + "%</bold></#55FF55> <dark_gray>·</dark_gray> <yellow>once every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
                 "<dark_gray><strikethrough>                              </strikethrough>",
-                "<gray>Your next reward",
-                "<#FFE066><bold>%spawnarena_reward_status_" + arena + "%</bold></#FFE066>",
+                "<gray>Next reward: <#FFE066><bold>%spawnarena_reward_status_" + arena + "%</bold></#FFE066>",
                 "<gray>Last win: <white>%spawnarena_reward_last_" + arena + "%</white>",
-                "<gray>Earned today: <white>%spawnarena_reward_today%</white> <dark_gray>/</dark_gray> <white>%spawnarena_reward_dailycap%</white>",
-                "<white>Wins pay out at most once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
-                "<gold>★ <yellow>#1 win streak: <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
-                        + "%</bold></#55FF55> <yellow>per win, max once every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
-                "<dark_gray>Alts don't count · max %spawnarena_reward_samelimit% payouts in a row vs the same player"
+                "<gray>Today: <white>%spawnarena_reward_today%</white> <dark_gray>/</dark_gray> <white>%spawnarena_reward_dailycap%</white><gray>%spawnarena_reward_dailyreset%",
+                "<dark_gray>Alts don't pay · max %spawnarena_reward_samelimit% paid wins in a row vs one player"
         ));
     }
 
@@ -230,12 +237,12 @@ public final class LeaderboardHolograms {
                 interval = REWARD_UPDATE_INTERVAL_MS;
             } else {
                 String stat = null;
-                for (final String s : new String[]{"best_streak", "streak", "wins"}) {
+                for (final String s : new String[]{"best_streak", "streak", "wins", "elo"}) {
                     if (rest.endsWith("_" + s)) { stat = s; break; }
                 }
                 final String arena = stat == null ? null : resolveArena(rest.substring(0, rest.length() - stat.length() - 1));
                 if (arena == null) { skipped.add(name); continue; }
-                final int rows = Math.max(1, Math.min(text.getText().size() - 1,
+                final int rows = Math.max(1, Math.min((int) text.getText().stream().filter(l -> l.contains("spawnarena_top_player_")).count(),
                         me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT));
                 lines = leaderboardLines(arena, stat, rows);
                 interval = UPDATE_INTERVAL_MS;
@@ -291,13 +298,55 @@ public final class LeaderboardHolograms {
         for (final String name : list()) {
             // spawnarena_lb_<arena>_<stat|reward>_<4 digits>
             final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
-            for (final String kind : new String[]{"best_streak", "streak", "wins", "reward"})
+            for (final String kind : new String[]{"best_streak", "streak", "wins", "elo", "reward"})
                 if (rest.equalsIgnoreCase(arena + "_" + kind) && remove(name)) {
                     removed++;
                     break;
                 }
         }
         return removed;
+    }
+
+    /** Where a SpawnArena hologram is, or null if there's none by that name. */
+    public static Location locationOf(final String name) {
+        if (!name.startsWith(NAME_PREFIX))
+            return null;
+        return FancyHologramsPlugin.get().getHologramManager().getHologram(name)
+                .map(h -> h.getData().getLocation().clone()).orElse(null);
+    }
+
+    /**
+     * Clear ground to look at a hologram from: a few blocks away on whichever side is open, facing it. Null if
+     * there's nowhere to stand nearby (it floats over nothing). Call on the thread that owns the hologram's chunk.
+     */
+    public static Location viewingSpot(final Location holo) {
+        final org.bukkit.World world = holo.getWorld();
+        final int[][] sides = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+        for (final int distance : new int[]{3, 2, 4, 5, 6}) {
+            for (final int[] side : sides) {
+                final int x = holo.getBlockX() + side[0] * distance;
+                final int z = holo.getBlockZ() + side[1] * distance;
+                for (final int dy : new int[]{0, -1, 1, -2, 2, -3, -4, 3}) {
+                    final int y = holo.getBlockY() + dy;
+                    final org.bukkit.block.Block feet = world.getBlockAt(x, y, z);
+                    if (feet.isPassable() && !feet.isLiquid() && feet.getRelative(org.bukkit.block.BlockFace.UP).isPassable()
+                            && feet.getRelative(org.bukkit.block.BlockFace.DOWN).getType().isSolid())
+                        return facing(new Location(world, x + 0.5, y, z + 0.5), holo);
+                }
+            }
+        }
+        return null;
+    }
+
+    /** In the air 3 blocks from it (for someone who can fly, when there's no ground near it). */
+    public static Location airSpot(final Location holo) {
+        return facing(holo.clone().add(0.5, 0, 3.5), holo);
+    }
+
+    /** Turned to look at the middle of the hologram's text. */
+    private static Location facing(final Location spot, final Location holo) {
+        spot.setDirection(holo.clone().add(0.5, 1.5, 0.5).toVector().subtract(spot.clone().add(0, 1.62, 0).toVector()));
+        return spot;
     }
 
     public static List<String> list() {

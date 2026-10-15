@@ -112,7 +112,7 @@ public final class CrystalArenaListener implements Listener {
                 break;
             if (!arena.equals(CrystalPvp.arenaAt(state.getLocation())))
                 problem = "You can only build inside the arena.";
-            else if (!CrystalPvp.isEmptySpace(state.getType()) && !CrystalPvp.isPlaced(arena, state.getBlock()))
+            else if (CrystalPvp.isOriginal(arena, state.getBlock()))
                 problem = "You can only build in empty space.";
         }
 
@@ -132,17 +132,27 @@ public final class CrystalArenaListener implements Listener {
     public void onBreak(final BlockBreakEvent e) {
         final Block block = e.getBlock();
         final Arena arena = CrystalPvp.arenaAt(block);
+        final Player player = e.getPlayer();
+
+        // A crystal fighter can't break anything outside their arena's region either (most of the walls are
+        // just outside it), whatever WorldGuard would allow them (ops get past WorldGuard)
+        final Arena own = SpawnArena.arenas.of(player);
+        if (own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, player) && CrystalPvp.isOriginal(own, block)) {
+            e.setCancelled(true);
+            this.tell(player, "You can only break blocks placed during the fight.");
+            return;
+        }
+
         if (arena == null)
             return;
 
-        final Player player = e.getPlayer();
         if (!CrystalPvp.isActiveFighter(arena, player)) {
             if (isOutsider(arena, player))
                 e.setCancelled(true);
             return;
         }
 
-        if (!CrystalPvp.isPlaced(arena, block)) {
+        if (CrystalPvp.isOriginal(arena, block)) {
             e.setCancelled(true);
             this.tell(player, "You can only break blocks placed during the fight.");
             return;
@@ -168,7 +178,7 @@ public final class CrystalArenaListener implements Listener {
 
         // Anchors and beds: only ones placed during the fight, and remember who set them off
         if (type == Material.RESPAWN_ANCHOR || Tag.BEDS.isTagged(type)) {
-            if (!fighter || !CrystalPvp.isPlaced(arena, clicked)) {
+            if (!fighter || CrystalPvp.isOriginal(arena, clicked)) {
                 if (fighter || isOutsider(arena, player))
                     e.setCancelled(true);
                 return;
@@ -197,8 +207,12 @@ public final class CrystalArenaListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onEntityPlace(final EntityPlaceEvent e) {
         final Arena arena = CrystalPvp.arenaAt(e.getEntity().getLocation());
-        if (arena == null)
+        if (arena == null) {
+            // Crystal fighters can't place things outside their arena either
+            if (e.getPlayer() != null && isCrystalFighter(e.getPlayer()))
+                e.setCancelled(true);
             return;
+        }
 
         final Player player = e.getPlayer();
         final boolean fighter = player != null && CrystalPvp.isActiveFighter(arena, player);
@@ -222,24 +236,38 @@ public final class CrystalArenaListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onHangingPlace(final HangingPlaceEvent e) {
         final Arena arena = CrystalPvp.arenaAt(e.getEntity().getLocation());
-        if (arena != null && (e.getPlayer() == null || CrystalPvp.isActiveFighter(arena, e.getPlayer())
-                || isOutsider(arena, e.getPlayer())))
+        if ((arena != null && (e.getPlayer() == null || CrystalPvp.isActiveFighter(arena, e.getPlayer())
+                || isOutsider(arena, e.getPlayer()))) || (e.getPlayer() != null && isCrystalFighter(e.getPlayer())))
             e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBucketEmpty(final PlayerBucketEmptyEvent e) {
+        final Player player = e.getPlayer();
         final Arena arena = CrystalPvp.arenaAt(e.getBlock());
-        if (arena != null && (CrystalPvp.isActiveFighter(arena, e.getPlayer()) || isOutsider(arena, e.getPlayer()))) {
-            e.setCancelled(true);
-            this.tell(e.getPlayer(), "You can't use buckets in this arena.");
+        if (isCrystalFighter(player)) {
+            // Into a spot that was empty when the fight started: wherever it flows is put back afterwards
+            final Arena own = SpawnArena.arenas.of(player);
+            if (CrystalPvp.isOriginal(own, e.getBlock()))
+                e.setCancelled(true);
+            else
+                e.setCancelled(false);
+            return;
         }
+        if (arena != null && isOutsider(arena, player))
+            e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBucketFill(final PlayerBucketFillEvent e) {
+        final Player player = e.getPlayer();
         final Arena arena = CrystalPvp.arenaAt(e.getBlock());
-        if (arena != null && (CrystalPvp.isActiveFighter(arena, e.getPlayer()) || isOutsider(arena, e.getPlayer())))
+        if (isCrystalFighter(player)) {
+            final Arena own = SpawnArena.arenas.of(player);
+            e.setCancelled(CrystalPvp.isOriginal(own, e.getBlock()));
+            return;
+        }
+        if (arena != null && isOutsider(arena, player))
             e.setCancelled(true);
     }
 
@@ -261,8 +289,9 @@ public final class CrystalArenaListener implements Listener {
     public void onEntityExplode(final EntityExplodeEvent e) {
         final List<Block> before = this.explosionBlocks.remove(e);
         if (this.filterExplosion(e.getLocation(), before, e.blockList())) {
-            if (e.isCancelled() && !e.blockList().isEmpty())
-                e.setCancelled(false);
+            // Always let it go off (sound, particles, knockback): the list now only has blocks placed during
+            // the fight, so the arena itself is safe even where WorldGuard denies explosions
+            e.setCancelled(false);
         }
     }
 
@@ -270,8 +299,9 @@ public final class CrystalArenaListener implements Listener {
     public void onBlockExplode(final BlockExplodeEvent e) {
         final List<Block> before = this.explosionBlocks.remove(e);
         if (this.filterExplosion(e.getBlock().getLocation(), before, e.blockList())) {
-            if (e.isCancelled() && !e.blockList().isEmpty())
-                e.setCancelled(false);
+            // Always let it go off (sound, particles, knockback): the list now only has blocks placed during
+            // the fight, so the arena itself is safe even where WorldGuard denies explosions
+            e.setCancelled(false);
         }
     }
 
@@ -290,7 +320,7 @@ public final class CrystalArenaListener implements Listener {
         final List<Block> candidates = before != null ? before : new ArrayList<>(blocks);
         blocks.clear();
         for (final Block block : candidates)
-            if (originArena.equals(CrystalPvp.arenaAt(block)) && CrystalPvp.isPlaced(originArena, block))
+            if (!CrystalPvp.isOriginal(originArena, block))
                 blocks.add(block);
         return true;
     }
@@ -327,6 +357,9 @@ public final class CrystalArenaListener implements Listener {
             return;
 
         Location where = e.getDamageSource().getSourceLocation();
+        // Block explosions (respawn anchors, beds) report where they went off without a world
+        if (where != null && where.getWorld() == null)
+            where = new Location(victim.getWorld(), where.getX(), where.getY(), where.getZ());
         if (where == null && e instanceof EntityDamageByEntityEvent byEntity)
             where = byEntity.getDamager().getLocation();
         final Arena arena = CrystalPvp.arenaAt(where);
@@ -457,7 +490,7 @@ public final class CrystalArenaListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onChangeBlock(final EntityChangeBlockEvent e) {
         final Arena arena = CrystalPvp.arenaAt(e.getBlock());
-        if (arena != null && CrystalPvp.activeFight(arena) != null && !CrystalPvp.isPlaced(arena, e.getBlock()))
+        if (arena != null && CrystalPvp.activeFight(arena) != null && CrystalPvp.isOriginal(arena, e.getBlock()))
             e.setCancelled(true);
     }
 
@@ -504,6 +537,12 @@ public final class CrystalArenaListener implements Listener {
      * Someone who isn't fighting here and must be kept from changing the arena: everyone while a fight
      * is on, and everyone but staff (to edit the arena) otherwise.
      */
+    /** Whether this player is fighting right now in a crystal arena (wherever they're aiming). */
+    private static boolean isCrystalFighter(final Player player) {
+        final Arena own = SpawnArena.arenas.of(player);
+        return own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, player);
+    }
+
     private static boolean isOutsider(final Arena arena, final Player player) {
         return CrystalPvp.activeFight(arena) != null || !player.hasPermission(BUILD_BYPASS_PERMISSION);
     }

@@ -17,11 +17,14 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * /arenabet <amount>   — bet on your next fight where your win reward is ready (e.g. 50k)
+ * /arenabet <amount>   — bet on your next fight (e.g. 50k); cancelled if that fight can't pay out
  * /arenabet off        — cancel it
  * /arenabet            — show your bet and how it works
  */
 public final class ArenaBetCommand implements CommandExecutor, TabCompleter {
+    /** Setting or cancelling a bet: once per this many ms (stops chat spam). */
+    private static final long CHANGE_COOLDOWN_MS = 2000;
+    private static final java.util.Map<java.util.UUID, Long> LAST_CHANGE = new java.util.concurrent.ConcurrentHashMap<>();
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String label, String[] args) {
@@ -38,8 +41,8 @@ public final class ArenaBetCommand implements CommandExecutor, TabCompleter {
         if (args.length == 0) {
             final Double current = Bets.pending(player);
             player.sendMessage(MiniMessage.miniMessage().deserialize(current == null
-                            ? "<gray>No bet set. <gold>/arenabet <amount></gold> (up to <max>) bets on your next fight where your win reward is ready."
-                            : "<gray>Your bet: <gold><bet></gold> on your next fight where your win reward is ready. <gold>/arenabet off</gold> to cancel.",
+                            ? "<gray>No bet set. <gold>/arenabet <amount></gold> (up to <max>) bets on your next fight, if your win reward is ready."
+                            : "<gray>Your bet: <gold><bet></gold> on your next fight. <gold>/arenabet off</gold> to cancel.",
                     Placeholder.unparsed("max", max),
                     Placeholder.unparsed("bet", current == null ? "" : StatsManager.formatMoney(current))));
             player.sendMessage(MiniMessage.miniMessage().deserialize(
@@ -48,7 +51,27 @@ public final class ArenaBetCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        // In a fight (or its countdown): what's riding on it is settled when it ends, so nothing changes now
+        final me.zeronull.spawnarena.Arena in = SpawnArena.arenas.of(player);
+        final me.zeronull.spawnarena.Fight fight = in == null ? null : in.getFight(player);
+        if (fight != null) {
+            final Double riding = fight.bets().get(player.getUniqueId());
+            player.sendMessage(MiniMessage.miniMessage().deserialize(riding == null
+                            ? "<red>You're in a fight. Set a bet before your next one."
+                            : "<red>You're in a fight with <gold><bet></gold> riding on it. Set a bet before your next one.",
+                    Placeholder.unparsed("bet", riding == null ? "" : StatsManager.formatMoney(riding))));
+            return true;
+        }
+
+        final long now = System.currentTimeMillis();
+        final Long last = LAST_CHANGE.get(player.getUniqueId());
+        if (last != null && now - last < CHANGE_COOLDOWN_MS) {
+            player.sendMessage(MiniMessage.miniMessage().deserialize("<red>Slow down, wait a second before changing your bet."));
+            return true;
+        }
+
         if (args[0].equalsIgnoreCase("off") || args[0].equalsIgnoreCase("cancel")) {
+            remember(player, now);
             player.sendMessage(MiniMessage.miniMessage().deserialize(Bets.clearPending(player)
                     ? "<yellow>Bet cancelled." : "<gray>You don't have a bet set."));
             return true;
@@ -64,18 +87,43 @@ public final class ArenaBetCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
+        // One bet at a time: it has to be used in a fight or cancelled before another can be set
+        final Double current = Bets.pending(player);
+        if (current != null) {
+            player.sendMessage(MiniMessage.miniMessage().deserialize(
+                    "<red>You've already got a <gold><bet></gold> bet on your next fight. <gold>/arenabet off</gold> to cancel it first.",
+                    Placeholder.unparsed("bet", StatsManager.formatMoney(current))));
+            return true;
+        }
+        if (!Bets.rewardReadyAnywhere(player)) {
+            player.sendMessage(MiniMessage.miniMessage().deserialize(
+                    "<red>Your win reward isn't ready yet, so there's nothing to bet on. Try again once it is."));
+            return true;
+        }
+        final double balance = Bets.balance(player);
+        if (balance < amount) {
+            player.sendMessage(MiniMessage.miniMessage().deserialize("<red>You only have <balance>.",
+                    Placeholder.unparsed("balance", StatsManager.formatMoney(balance))));
+            return true;
+        }
+
+        remember(player, now);
         Bets.setPending(player, amount);
-        final String when = Bets.rewardReadyAnywhere(player) ? "your next fight" : "your next fight where your win reward is ready";
         player.sendMessage(MiniMessage.miniMessage().deserialize(
-                "<gold>Bet set: <bet></gold> <gray>on <when>. Win: <green>+<bonus></green> on top · lose: <red>-<bet></red>. Taken when the fight starts.",
+                "<gold>Bet set: <bet></gold> <gray>on your next fight. Win: <green>+<bonus></green> on top · lose: <red>-<bet></red>. Taken when it starts; only counts for that fight.",
                 Placeholder.unparsed("bet", StatsManager.formatMoney(amount)),
-                Placeholder.unparsed("bonus", StatsManager.formatMoney(Bets.bonusFor(amount))),
-                Placeholder.unparsed("when", when)));
+                Placeholder.unparsed("bonus", StatsManager.formatMoney(Bets.bonusFor(amount)))));
         return true;
     }
 
+    /** Records a bet change for the spam guard, dropping entries too old to matter. */
+    private static void remember(final org.bukkit.entity.Player player, final long now) {
+        LAST_CHANGE.values().removeIf(at -> now - at >= CHANGE_COOLDOWN_MS);
+        LAST_CHANGE.put(player.getUniqueId(), now);
+    }
+
     /** "50000", "50k", "1.5k", "1m" -> the number; -1 if it isn't one. */
-    static double parseAmount(final String raw) {
+    public static double parseAmount(final String raw) {
         String s = raw.trim().toLowerCase().replace(",", "").replace("$", "");
         double multiplier = 1;
         if (s.endsWith("k")) { multiplier = 1_000; s = s.substring(0, s.length() - 1); }
@@ -91,7 +139,7 @@ public final class ArenaBetCommand implements CommandExecutor, TabCompleter {
     @Override
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String label, String[] args) {
         if (args.length == 1)
-            return List.of("off", "10k", "25k", "50k").stream().filter(s -> s.startsWith(args[0].toLowerCase())).toList();
+            return List.of("off", "10k", "25k", "50k", "75k").stream().filter(s -> s.startsWith(args[0].toLowerCase())).toList();
         return Collections.emptyList();
     }
 }

@@ -42,6 +42,27 @@ public final class QueueDistanceListener implements Listener {
         fight.cancelBecause(player, player.getName() + " went too far from the arena, so the fight was cancelled.");
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSpectator(final org.bukkit.event.player.PlayerGameModeChangeEvent e) {
+        if (e.getNewGameMode() != org.bukkit.GameMode.SPECTATOR)
+            return;
+        final Player player = e.getPlayer();
+        final ArenaQueue queue = ArenaQueue.PLAYER_QUEUE_MAP.get(player);
+        if (queue != null && queue.playerInQueue(player)) {
+            queue.removePlayer(player);
+            player.sendMessage(ChatColor.RED + "You've been removed from the arena queue for going into spectator mode.");
+            return;
+        }
+        if (SpawnArena.arenas == null || !SpawnArena.arenas.hasFighter(player))
+            return;
+        final Arena arena = SpawnArena.arenas.of(player);
+        final Fight fight = arena == null ? null : arena.getFight(player);
+        if (fight == null || fight.getState() != FightState.COUNTDOWN)
+            return;
+        player.sendMessage(ChatColor.RED + "You were removed from the fight for going into spectator mode.");
+        fight.cancelBecause(player, player.getName() + " went into spectator mode, so the fight was cancelled.");
+    }
+
     private boolean tooFar(final Arena arena, final Location loc) {
         return arena != null && arena.distanceFrom(loc) > SpawnArena.settings.queueMaxDistance;
     }

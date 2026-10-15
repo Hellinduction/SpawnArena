@@ -296,6 +296,9 @@ public class Fight {
             this.arriving.addAll(this.getFighters());
         }
         Arena.ArenaUtils.kickOutLingeringPlayers(this.arena);
+        // Crystal arenas: remember how the arena looks before anyone can change it
+        if (this.arena.isCrystalPvp())
+            CrystalPvp.takeSnapshot(this);
 
         // Extra inventory backup through an inventory-saving plugin, if the server has one with /invsave.
         // Console commands belong on the global thread, which is where the countdown runs.
@@ -385,8 +388,8 @@ public class Fight {
         data.addExtraItems(didntFit);
         this.preFightData.put(fighter.getUniqueId(), data);
 
-        // Their /arenabet bet, if their reward is ready (taken after the inventory snapshot, it's money not items)
-        if (!this.duel && Bukkit.getPluginManager().isPluginEnabled("Vault"))
+        // Their /arenabet bet: taken if this fight can pay out, otherwise cancelled (duels included)
+        if (Bukkit.getPluginManager().isPluginEnabled("Vault"))
             Bets.placeIfReady(fighter, this);
 
         fighter.setGameMode(GameMode.SURVIVAL);
@@ -601,10 +604,20 @@ public class Fight {
         this.arena.queue.tryStartFight();
     }
 
+    /** Hands this item back with their own inventory once the fight's over (saved, so a crash doesn't lose it). */
+    public void returnAfterFight(final Player player, final org.bukkit.inventory.ItemStack item) {
+        final PlayerPreFightData data = this.preFightData.get(player.getUniqueId());
+        if (data != null)
+            data.keepForAfter(item);
+        else
+            player.getInventory().addItem(item);
+    }
+
     /** Restores a member's pre-fight state once; a failure is logged and never leaves the match stuck. */
     private void restore(final Player player) {
         try {
             FightGlow.remove(player);
+            me.zeronull.spawnarena.events.EgapCooldown.clear(player);
             if (!this.restored.add(player.getUniqueId()))
                 return;
             final PlayerPreFightData data = this.preFightData.get(player.getUniqueId());
@@ -667,6 +680,15 @@ public class Fight {
             }
             for (final Player winner : winners)
                 winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName));
+
+            final Map<UUID, int[]> elo = SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
+            for (final Player p : this.getMembers()) {
+                final int[] change = elo.get(p.getUniqueId());
+                if (change != null && p.isOnline())
+                    p.sendMessage(MiniMessage.miniMessage().deserialize("<gray>Elo: <white><elo></white> (<change>)",
+                            Placeholder.unparsed("elo", String.valueOf(change[0])),
+                            Placeholder.parsed("change", change[1] >= 0 ? "<green>+" + change[1] + "</green>" : "<red>" + change[1] + "</red>")));
+            }
         }
 
         if (endedStreaks.isEmpty()) {
@@ -719,8 +741,50 @@ public class Fight {
         broadcast(message, winners, losers);
 
         final Location where = this.eliminatedAt.getOrDefault(loser.getUniqueId(), loser.getLocation());
-        if (where != null && where.getWorld() != null)
-            Threads.location(where, () -> where.getWorld().strikeLightningEffect(where));
+        if (where == null || where.getWorld() == null)
+            return;
+        // The other matches in a MULTI arena are hidden from this one, so its lightning is hidden from them too
+        final List<Player> otherMatches = this.arena.getArenaMode() == ArenaMode.MULTI
+                ? this.arena.getOtherPlayersInArena(this) : List.of();
+        Threads.location(where, () -> {
+            if (otherMatches.isEmpty())
+                where.getWorld().strikeLightningEffect(where);
+            else
+                strikeLightningHiddenFrom(where, otherMatches);
+        });
+    }
+
+    /**
+     * A harmless lightning bolt that some players never see (or hear: the thunder is played by each client from
+     * the bolt). It has to be hidden before it enters the world, as it's sent to everyone nearby right then, and
+     * the API's effect-only strike can't be: so it's spawned hidden and made effect-only through the server
+     * itself. If that ever fails, it falls back to an ordinary effect strike hidden straight afterwards.
+     */
+    private static void strikeLightningHiddenFrom(final Location where, final List<Player> hiddenFrom) {
+        final org.bukkit.entity.LightningStrike bolt;
+        try {
+            bolt = where.getWorld().spawn(where, org.bukkit.entity.LightningStrike.class, strike -> {
+                strike.setVisibleByDefault(false);
+                try {
+                    final Object handle = strike.getClass().getMethod("getHandle").invoke(strike);
+                    handle.getClass().getMethod("setVisualOnly", boolean.class).invoke(handle, true);
+                } catch (final ReflectiveOperationException e) {
+                    throw new IllegalStateException(e);
+                }
+            });
+        } catch (final RuntimeException e) {
+            final org.bukkit.entity.LightningStrike fallback = where.getWorld().strikeLightningEffect(where);
+            for (final Player other : hiddenFrom)
+                if (other.isOnline())
+                    Threads.entity(other, () -> other.hideEntity(SpawnArena.INSTANCE, fallback));
+            return;
+        }
+        final java.util.Set<java.util.UUID> hidden = new java.util.HashSet<>();
+        for (final Player p : hiddenFrom)
+            hidden.add(p.getUniqueId());
+        for (final Player viewer : where.getWorld().getPlayers())
+            if (!hidden.contains(viewer.getUniqueId()))
+                Threads.entity(viewer, () -> viewer.showEntity(SpawnArena.INSTANCE, bolt));
     }
 
     /**

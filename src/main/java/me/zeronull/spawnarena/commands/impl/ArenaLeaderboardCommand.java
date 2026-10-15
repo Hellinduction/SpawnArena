@@ -17,17 +17,18 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * /arenaleaderboard [arena] [wins|streak|best_streak] [limit]       — show in chat
- * /arenaleaderboard spawn <arena> <wins|streak|best_streak> [limit] — spawn a hologram where you stand
+ * /arenaleaderboard [arena] [wins|streak|best_streak|elo] [limit]       — show in chat
+ * /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo> [limit] — spawn a hologram where you stand
  * /arenaleaderboard spawn <arena> reward — per-player live countdown to their next win reward
  * /arenaleaderboard remove <hologram>
- * /arenaleaderboard list
+ * /arenaleaderboard list — one line each; click one to go there
+ * /arenaleaderboard tp <hologram> — go and look at it
  * /arenaleaderboard reload
  * /arenaleaderboard update — rebuild existing holograms with the current layout, in place
  */
 public final class ArenaLeaderboardCommand implements CommandExecutor, TabCompleter {
 
-    private static final List<String> STATS = List.of("wins", "streak", "best_streak");
+    private static final List<String> STATS = List.of("wins", "streak", "best_streak", "elo");
     private static final String SPAWN_PERMISSION = "spawnarena.arenaleaderboard.spawn";
     public static final int MAX_LIMIT = 25;
 
@@ -39,6 +40,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
                 case "spawn" -> { return spawn(sender, args); }
                 case "remove" -> { return remove(sender, args); }
                 case "list" -> { return list(sender); }
+                case "tp" -> { return tp(sender, args); }
                 case "reload" -> { return reload(sender); }
                 case "update" -> { return update(sender); }
             }
@@ -53,7 +55,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
 
         final String field = statToField(stat);
         if (field == null) {
-            sender.sendMessage("§cUnknown stat. Use: wins, streak, best_streak");
+            sender.sendMessage("§cUnknown stat. Use: wins, streak, best_streak, elo");
             return true;
         }
 
@@ -78,7 +80,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             return true;
         }
         if (args.length < 3) {
-            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak> [limit]");
+            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo> [limit]");
             return true;
         }
 
@@ -96,12 +98,12 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         }
 
         if (statToField(stat) == null) {
-            sender.sendMessage("§cUnknown type. Use: wins, streak, best_streak, reward");
+            sender.sendMessage("§cUnknown type. Use: wins, streak, best_streak, elo, reward");
             return true;
         }
         final int limit = args.length >= 4 ? parseLimit(args[3], 10) : 10;
 
-        final LeaderboardHolograms.Placement placement = LeaderboardHolograms.correctPlacement(p.getLocation(), limit + 1);
+        final LeaderboardHolograms.Placement placement = LeaderboardHolograms.correctPlacement(p.getLocation(), limit + LeaderboardHolograms.EXTRA_LINES);
         final String name = LeaderboardHolograms.spawn(arena, stat, limit, placement.location());
         sender.sendMessage(String.format("§aCreated %s leaderboard hologram for §e%s§a named §e%s§a.", statLabel(stat), arena, name));
 
@@ -130,7 +132,62 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
     private boolean list(CommandSender sender) {
         if (!canManageHolograms(sender)) return true;
         final List<String> names = LeaderboardHolograms.list();
-        sender.sendMessage(names.isEmpty() ? "§7No leaderboard holograms." : "§6Leaderboard holograms: §e" + String.join("§7, §e", names));
+        if (names.isEmpty()) {
+            sender.sendMessage("§7No leaderboard holograms.");
+            return true;
+        }
+        sender.sendMessage("§6Leaderboard holograms §7(click one to go there):");
+        for (final String name : names) {
+            // Built directly: placeholders aren't filled in inside MiniMessage click actions
+            sender.sendMessage(net.kyori.adventure.text.Component.text(" - ", net.kyori.adventure.text.format.NamedTextColor.GRAY)
+                    .append(net.kyori.adventure.text.Component.text(name, net.kyori.adventure.text.format.NamedTextColor.YELLOW)
+                            .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/arenaleaderboard tp " + name))
+                            .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(
+                                    net.kyori.adventure.text.Component.text("Teleport to it", net.kyori.adventure.text.format.NamedTextColor.GRAY))))
+                    .append(net.kyori.adventure.text.Component.space())
+                    .append(net.kyori.adventure.text.Component.text("[remove]", net.kyori.adventure.text.format.NamedTextColor.RED)
+                            .clickEvent(net.kyori.adventure.text.event.ClickEvent.suggestCommand("/arenaleaderboard remove " + name))
+                            .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(
+                                    net.kyori.adventure.text.Component.text("Remove it (fills in the command)", net.kyori.adventure.text.format.NamedTextColor.GRAY)))));
+        }
+        return true;
+    }
+
+    private boolean tp(CommandSender sender, String[] args) {
+        if (!canManageHolograms(sender)) return true;
+        if (!(sender instanceof Player p)) {
+            sender.sendMessage("§cYou must be a player to teleport.");
+            return true;
+        }
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /arenaleaderboard tp <hologram>");
+            return true;
+        }
+        final org.bukkit.Location holo = LeaderboardHolograms.locationOf(args[1]);
+        if (holo == null || holo.getWorld() == null) {
+            sender.sendMessage("§cNo hologram named §e" + args[1] + "§c.");
+            return true;
+        }
+        // The spot is worked out on the thread that owns the hologram's area (it can be anywhere on Folia)
+        final boolean canFly = p.getAllowFlight() || p.getGameMode() == org.bukkit.GameMode.CREATIVE
+                || p.getGameMode() == org.bukkit.GameMode.SPECTATOR;
+        me.zeronull.spawnarena.Threads.location(holo, () -> {
+            org.bukkit.Location spot = LeaderboardHolograms.viewingSpot(holo);
+            if (spot == null && !canFly) {
+                p.sendMessage("§cThere's nowhere safe to stand near §e" + args[1] + "§c. Fly there instead.");
+                return;
+            }
+            final boolean fly = spot == null;
+            if (fly)
+                spot = LeaderboardHolograms.airSpot(holo);
+            me.zeronull.spawnarena.Threads.teleport(p, spot).thenAccept(ok -> {
+                if (!Boolean.TRUE.equals(ok))
+                    return;
+                if (fly)
+                    me.zeronull.spawnarena.Threads.entity(p, () -> { p.setAllowFlight(true); p.setFlying(true); });
+                p.sendMessage("§aTeleported to §e" + args[1] + "§a.");
+            });
+        });
         return true;
     }
 
@@ -180,12 +237,12 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         final List<String> options = new ArrayList<>();
 
         if (args.length == 1) {
-            if (manage) options.addAll(List.of("spawn", "remove", "list", "reload", "update"));
+            if (manage) options.addAll(List.of("spawn", "remove", "list", "tp", "reload", "update"));
             options.addAll(arenaNames());
         } else if (args[0].equalsIgnoreCase("spawn") && manage) {
             if (args.length == 2) options.addAll(arenaNames());
             else if (args.length == 3) { options.addAll(STATS); options.add("reward"); }
-        } else if (args[0].equalsIgnoreCase("remove") && manage) {
+        } else if ((args[0].equalsIgnoreCase("remove") || args[0].equalsIgnoreCase("tp")) && manage) {
             if (args.length == 2 && Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
                 options.addAll(LeaderboardHolograms.list());
         } else if (args.length == 2) {
@@ -213,6 +270,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         return switch (stat) {
             case "streak" -> "Win Streak";
             case "best_streak" -> "Best Win Streak";
+            case "elo" -> "Elo";
             default -> "Wins";
         };
     }
@@ -222,6 +280,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             case "wins" -> "wins";
             case "streak" -> "win_streak";
             case "best_streak" -> "best_win_streak";
+            case "elo" -> "elo";
             default -> null;
         };
     }
