@@ -14,7 +14,7 @@ import java.util.List;
 
 public abstract class Arena extends ArenaOptions {
     /** Loaded from settings.yml on enable. */
-    public static String SPAWN_WORLD = "Spawn";
+    public static volatile String SPAWN_WORLD = "Spawn";
     public ArenaQueue queue;
     /** True while a crystal arena is being pasted back after a fight: no fight starts in it until that's done. */
     private volatile boolean resetting;
@@ -27,9 +27,10 @@ public abstract class Arena extends ArenaOptions {
         this.resetting = resetting;
     }
     protected String arenaName;
-    protected Location spawnPoint1;
-    protected Location spawnPoint2;
-    protected Location exitLocation;
+    // Changed by reloads and setup commands while every player's thread (on Folia) reads them
+    protected volatile Location spawnPoint1;
+    protected volatile Location spawnPoint2;
+    protected volatile Location exitLocation;
     /**
      * Whether a non-fighter at {@code loc} counts as being in this arena: inside its region, unless
      * they're standing in a non-full block such as a slab (e.g. on top of the walls, which the region covers).
@@ -282,7 +283,8 @@ public abstract class Arena extends ArenaOptions {
             return isVanished(p)
                     || p.getGameMode() == GameMode.SPECTATOR
                     || p.hasPermission("spawnarena.bypasskickout")
-                    || SpawnArena.arenas.hasFighter(p);
+                    || SpawnArena.arenas.hasFighter(p)
+                || FfaFight.isJoining(p);
         }
 
         /** Sends non-fighters out of this one arena only. */

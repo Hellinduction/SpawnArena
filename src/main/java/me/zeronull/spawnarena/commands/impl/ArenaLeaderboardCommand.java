@@ -17,8 +17,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * /arenaleaderboard [arena] [wins|streak|best_streak|elo] [limit]       — show in chat
- * /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo> [limit] — spawn a hologram where you stand
+ * /arenaleaderboard [arena] [wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak] [limit]       — show in chat
+ * /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak> [limit] — spawn a hologram where you stand
  * /arenaleaderboard spawn <arena> reward — per-player live countdown to their next win reward
  * /arenaleaderboard remove <hologram>
  * /arenaleaderboard list — one line each; click one to go there
@@ -28,7 +28,7 @@ import java.util.List;
  */
 public final class ArenaLeaderboardCommand implements CommandExecutor, TabCompleter {
 
-    private static final List<String> STATS = List.of("wins", "streak", "best_streak", "elo");
+    private static final List<String> STATS = List.of("wins", "streak", "best_streak", "elo", "ffa_kills", "ffa_deaths", "ffa_streak");
     private static final String SPAWN_PERMISSION = "spawnarena.arenaleaderboard.spawn";
     public static final int MAX_LIMIT = 25;
 
@@ -55,7 +55,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
 
         final String field = statToField(stat);
         if (field == null) {
-            sender.sendMessage("§cUnknown stat. Use: wins, streak, best_streak, elo");
+            sender.sendMessage("§cUnknown stat. Use: wins, streak, best_streak, elo, ffa_kills, ffa_deaths, ffa_streak");
             return true;
         }
 
@@ -80,7 +80,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             return true;
         }
         if (args.length < 3) {
-            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo> [limit]");
+            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak> [limit]");
             return true;
         }
 
@@ -98,7 +98,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         }
 
         if (statToField(stat) == null) {
-            sender.sendMessage("§cUnknown type. Use: wins, streak, best_streak, elo, reward");
+            sender.sendMessage("§cUnknown type. Use: wins, streak, best_streak, elo, ffa_kills, ffa_deaths, ffa_streak, reward");
             return true;
         }
         final int limit = args.length >= 4 ? parseLimit(args[3], 10) : 10;
@@ -272,6 +272,9 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             case "streak" -> "Win Streak";
             case "best_streak" -> "Best Win Streak";
             case "elo" -> "Elo";
+            case "ffa_kills" -> "FFA Kills";
+            case "ffa_deaths" -> "FFA Deaths";
+            case "ffa_streak" -> "Best FFA Kill Streak";
             default -> "Wins";
         };
     }
@@ -282,6 +285,9 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             case "streak" -> "win_streak";
             case "best_streak" -> "best_win_streak";
             case "elo" -> "elo";
+            case "ffa_kills" -> "ffa_kills";
+            case "ffa_deaths" -> "ffa_deaths";
+            case "ffa_streak" -> "ffa_best_streak";
             default -> null;
         };
     }

@@ -110,6 +110,9 @@ public final class LeaderboardHolograms {
             case "streak" -> "Win Streak";
             case "best_streak" -> "Best Win Streak";
             case "elo" -> "Elo";
+            case "ffa_kills" -> "FFA Kills";
+            case "ffa_deaths" -> "FFA Deaths";
+            case "ffa_streak" -> "Best FFA Kill Streak";
             default -> "Wins";
         };
     }
@@ -242,7 +245,7 @@ public final class LeaderboardHolograms {
                 interval = REWARD_UPDATE_INTERVAL_MS;
             } else {
                 String stat = null;
-                for (final String s : new String[]{"best_streak", "streak", "wins", "elo"}) {
+                for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo"}) {
                     if (rest.endsWith("_" + s)) { stat = s; break; }
                 }
                 final String arena = stat == null ? null : resolveArena(rest.substring(0, rest.length() - stat.length() - 1));
@@ -303,7 +306,7 @@ public final class LeaderboardHolograms {
         for (final String name : list()) {
             // spawnarena_lb_<arena>_<stat|reward>_<4 digits>
             final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
-            for (final String kind : new String[]{"best_streak", "streak", "wins", "elo", "reward"})
+            for (final String kind : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "reward"})
                 if (rest.equalsIgnoreCase(arena + "_" + kind) && remove(name)) {
                     removed++;
                     break;

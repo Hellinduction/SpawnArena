@@ -49,6 +49,7 @@ public final class ArenaLockCommand implements CommandExecutor, TabCompleter {
         int dequeued = 0;
         int cancelled = 0;
         int running = 0;
+        int ffaSentOut = 0;
 
         for (final Arena arena : SpawnArena.arenas) {
             for (final Player p : arena.queue.clear()) {
@@ -57,6 +58,10 @@ public final class ArenaLockCommand implements CommandExecutor, TabCompleter {
             }
 
             for (final Fight fight : new ArrayList<>(arena.getFights())) {
+                if (fight instanceof me.zeronull.spawnarena.FfaFight ffa) {
+                    ffaSentOut += ffa.closeAll("The arenas have been closed, so you were sent out of the free-for-all with your things.");
+                    continue;
+                }
                 final List<Player> members = fight.getFighters();
                 if (fight.cancelFight()) { // only fights still counting down
                     for (final Player p : members)
@@ -70,7 +75,8 @@ public final class ArenaLockCommand implements CommandExecutor, TabCompleter {
         }
 
         sender.sendMessage("§eArenas closed. Removed §6" + me.zeronull.spawnarena.Grammar.count(dequeued, "player")
-                + "§e from queues, cancelled §6" + me.zeronull.spawnarena.Grammar.count(cancelled, "countdown") + "§e.");
+                + "§e from queues, cancelled §6" + me.zeronull.spawnarena.Grammar.count(cancelled, "countdown") + "§e"
+                + (ffaSentOut > 0 ? ", sent §6" + me.zeronull.spawnarena.Grammar.count(ffaSentOut, "player") + "§e out of free-for-alls" : "") + ".");
         sender.sendMessage(running == 0
                 ? "§aNo fights are running — safe to reload."
                 : "§6" + me.zeronull.spawnarena.Grammar.count(running, "fight") + "§e still running; "

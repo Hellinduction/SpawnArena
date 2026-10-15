@@ -18,13 +18,24 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
 
     @Override
     public boolean onCommand(final CommandSender sender, final Command command, final String label, final String[] args) {
+        // Free-for-all on/off works from anywhere, the console included
+        if (args.length >= 2 && args[1].equalsIgnoreCase("ffa")) {
+            final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
+            if (!(found instanceof SavableArena savable)) {
+                sender.sendMessage(ChatColor.RED + "That arena was not found.");
+                return true;
+            }
+            toggleFfa(sender, savable);
+            return true;
+        }
+
         if (!(sender instanceof Player)) {
             sender.sendMessage("You must be a player to run this command!");
             return true;
         }
 
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name>"));
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa]"));
             return true;
         }
 
@@ -50,6 +61,12 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             return true;
         }
 
+        if (arena.isFfa()) {
+            sender.sendMessage(ChatColor.RED + "Free-for-all arenas always run one session (SINGLE). Turn it off with /togglearenamode "
+                    + arena.getArenaName() + " ffa.");
+            return true;
+        }
+
         if (arena.isCrystalPvp()) {
             sender.sendMessage(ChatColor.RED + "Crystal PvP arenas always run one fight at a time (SINGLE).");
             return true;
@@ -68,5 +85,58 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
         player.sendMessage(ChatColor.GREEN + String.format("Set arena mode to '%s'.", next.name()));
 
         return true;
+    }
+
+    /**
+     * Switches free-for-all on or off, only while nothing at all is going on in the arena: no match counting down
+     * or running, nobody in (or on their way into) a free-for-all, and no reset. Done under the arena's lock, which
+     * joining also takes, so nobody can get in between the check and the change.
+     */
+    private static void toggleFfa(final CommandSender player, final SavableArena arena) {
+        final boolean nowFfa;
+        synchronized (arena) {
+            final String busy = whyBusy(arena);
+            if (busy != null) {
+                player.sendMessage(ChatColor.RED + busy + " Try again once it's empty.");
+                return;
+            }
+            nowFfa = !arena.isFfa();
+            arena.setFfa(nowFfa);
+            arena.save(config -> config.ffa = nowFfa);
+        }
+        if (nowFfa) {
+            // Anyone waiting for a normal match here can't get one any more
+            for (final Player p : arena.queue.clear())
+                p.sendMessage(ChatColor.RED + "The " + arena.getArenaName() + " arena is now a free-for-all, so you were taken out of its queue. "
+                        + "Run /joinarenaqueue " + arena.getArenaName() + " to go in.");
+            player.sendMessage(ChatColor.GREEN + "Free-for-all is on for " + arena.getArenaName() + ": /joinarenaqueue "
+                    + arena.getArenaName() + " now sends players straight in. Kills, deaths and kill streaks are counted apart; "
+                    + "no wins, rewards or bets there.");
+        } else {
+            player.sendMessage(ChatColor.GREEN + "Free-for-all is off for " + arena.getArenaName() + ": it's back to normal queued matches.");
+        }
+    }
+
+    @Override
+    public java.util.List<String> onTabComplete(final org.bukkit.command.CommandSender sender, final org.bukkit.command.Command command,
+                                                final String label, final String[] args) {
+        if (args.length == 2)
+            return "ffa".startsWith(args[1].toLowerCase()) ? java.util.List.of("ffa") : java.util.List.of();
+        return super.onTabComplete(sender, command, label, args);
+    }
+
+    private static String whyBusy(final SavableArena arena) {
+        if (arena.isResetting())
+            return "That arena is being reset.";
+        for (final me.zeronull.spawnarena.Fight fight : arena.getFights()) {
+            if (fight instanceof me.zeronull.spawnarena.FfaFight ffa) {
+                final int in = ffa.getMembers().size();
+                return in > 0 ? me.zeronull.spawnarena.Grammar.count(in, "player") + " " + (in == 1 ? "is" : "are")
+                        + " in that arena's free-for-all right now." : "That arena's free-for-all is still ending.";
+            }
+            return fight.getState() == me.zeronull.spawnarena.FightState.COUNTDOWN
+                    ? "A match in that arena is counting down." : "A match is going on in that arena.";
+        }
+        return null;
     }
 }

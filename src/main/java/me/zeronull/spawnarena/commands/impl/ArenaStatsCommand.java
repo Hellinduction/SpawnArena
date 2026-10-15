@@ -116,6 +116,14 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(String.format("§6Stats for §e%s §6in §e%s§6: wins=§e%d §6losses=§e%d §6games=§e%d §6streak=§e%d §6best=§e%d §6elo=§e%d",
                         target.getName(), arena, wins, losses, wins + losses, streak, best, SpawnArena.statsManager.getElo(uuid, arena)));
                 sendLossesNote(sender);
+                // Free-for-all, counted apart: shown for free-for-all arenas, or anywhere they've played one
+                final int ffaKills = SpawnArena.statsManager.getField(uuid, arena, "ffa_kills");
+                final int ffaDeaths = SpawnArena.statsManager.getField(uuid, arena, "ffa_deaths");
+                final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(arena);
+                if (ffaKills > 0 || ffaDeaths > 0 || (found != null && found.isFfa()))
+                    sender.sendMessage(String.format("§6Free-for-all: kills=§e%d §6deaths=§e%d §6best kill streak=§e%d §6K/D=§e%s",
+                            ffaKills, ffaDeaths, SpawnArena.statsManager.getField(uuid, arena, "ffa_best_streak"),
+                            ffaDeaths == 0 ? String.valueOf(ffaKills) : String.format("%.2f", ffaKills / (double) ffaDeaths)));
                 final double[] made = SpawnArena.statsManager.getMoneyMade(uuid, arena);
                 sender.sendMessage(String.format("§6Money made: §e%s §6here · §e%s §6in all arenas",
                         me.zeronull.spawnarena.StatsManager.formatMoney(made[0]), me.zeronull.spawnarena.StatsManager.formatMoney(made[1])));

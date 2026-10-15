@@ -120,6 +120,7 @@ public class ConfigHandler {
             arena.setGiveKnockBackStick(config.giveKnockBackStick);
             arena.setArenaMode(config.arenaMode);
             arena.setCrystalPvp(config.crystalPvp);
+            arena.setFfa(config.ffa);
             arena.setWinReward(config.winReward, config.winRewardCooldownMinutes);
             arena.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
             arena.setEgapCooldownSeconds(config.egapCooldownSeconds);

@@ -9,6 +9,7 @@ import org.bukkit.event.player.PlayerJoinEvent;
 public final class ArenaPlayerJoinEvent implements Listener {
     @EventHandler
     public void onPlayerJoin(final PlayerJoinEvent e) {
+        me.zeronull.spawnarena.FfaFight.clearLeftoverProtection(e.getPlayer());
         Arena.ArenaUtils.kickOutLingeringPlayer(e.getPlayer());
 
         // Undo any fight hiding left over from a fight that ended while they (or the other person) were

@@ -29,7 +29,8 @@ commands:
     permission: spawnarena.createarena
     permission-message: "§cYou don't have permission!"
   togglearenamode:
-    description: Alter the arena mode
+    description: Switch an arena between SINGLE and MULTI, or free-for-all on and off with "ffa" (only while it's empty)
+    usage: "/togglearenamode <arena> [ffa]"
     permission: spawnarena.togglearenamode
     permission-message: "§cYou don't have permission!"
   setupfight:
@@ -104,6 +105,12 @@ commands:
     permission: spawnarena.arenawins
     permission-message: "§cYou don't have permission!"
 
+  leavearena:
+    description: Leave a free-for-all arena (only out of combat)
+    usage: "/leavearena"
+    permission: spawnarena.leavearena
+    permission-message: "§cYou don't have permission!"
+
 permissions:
   spawnarena.arenastats.rollback:
     description: Roll back stat changes made by a staff member (/arenastats rollback)
@@ -153,4 +160,6 @@ permissions:
   spawnarena.arenabet:
     default: true
   spawnarena.arenawins:
+    default: true
+  spawnarena.leavearena:
     default: true

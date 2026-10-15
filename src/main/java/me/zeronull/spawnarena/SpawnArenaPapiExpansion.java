@@ -43,7 +43,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         final boolean rank = params.startsWith("my_rank_");
         final String rest = params.substring(rank ? "my_rank_".length() : "my_value_".length());
         String stat = null;
-        for (final String s : new String[]{"best_streak", "streak", "wins", "elo"})
+        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo"})
             if (rest.endsWith("_" + s)) { stat = s; break; }
         if (stat == null)
             return null;
@@ -87,6 +87,15 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         if (parts.length >= 2) {
             final String type = parts[0];
 
+            // Free-for-all: ffa_kills_<arena>, ffa_deaths_<arena>, ffa_streak_<arena> (best kill streak)
+            if (player != null && type.equals("ffa") && parts.length >= 3) {
+                final String field = statToField("ffa_" + parts[1]);
+                if (field == null)
+                    return null;
+                final String arena = String.join("_", java.util.Arrays.copyOfRange(parts, 2, parts.length));
+                return String.valueOf(SpawnArena.statsManager.getField(player.getUniqueId(), arena, field));
+            }
+
             // Personal stats: wins_<arena>, streak_<arena>, best_streak_<arena>
             if (player != null && (type.equals("wins") || type.equals("streak") || type.equals("best") || type.equals("elo"))) {
                 final String arena = String.join("_", java.util.Arrays.copyOfRange(parts, type.equals("best") ? 2 : 1, parts.length));
@@ -112,11 +121,13 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
                 }
                 if (rank < 1 || rank > TOP_CACHE_SIZE) return null;
 
-                // stat is the segment(s) before the rank; best_streak spans two segments
+                // stat is the segment(s) before the rank; best_streak and the ffa_ stats span two segments
                 final boolean bestStreak = parts.length >= 6
                         && parts[parts.length - 3].equals("best") && parts[parts.length - 2].equals("streak");
-                final String stat = bestStreak ? "best_streak" : parts[parts.length - 2];
-                final int arenaEnd = parts.length - (bestStreak ? 3 : 2);
+                final boolean ffaStat = !bestStreak && parts.length >= 6 && parts[parts.length - 3].equals("ffa")
+                        && statToField("ffa_" + parts[parts.length - 2]) != null;
+                final String stat = bestStreak ? "best_streak" : ffaStat ? "ffa_" + parts[parts.length - 2] : parts[parts.length - 2];
+                final int arenaEnd = parts.length - (bestStreak || ffaStat ? 3 : 2);
                 final String arena = String.join("_", java.util.Arrays.copyOfRange(parts, 2, arenaEnd));
 
                 final String dbField = statToField(stat);
@@ -237,6 +248,9 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             case "streak" -> "win_streak";
             case "best_streak", "best" -> "best_win_streak";
             case "elo" -> "elo";
+            case "ffa_kills" -> "ffa_kills";
+            case "ffa_deaths" -> "ffa_deaths";
+            case "ffa_streak" -> "ffa_best_streak";
             default -> null;
         };
     }

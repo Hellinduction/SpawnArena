@@ -51,7 +51,7 @@ public final class DuelManager {
         Arena best = null;
         double bestDistance = Double.MAX_VALUE;
         for (final Arena arena : SpawnArena.arenas) {
-            if (!arena.isSetUp())
+            if (!arena.isSetUp() || arena.isFfa())
                 continue;
             final double distance = arena.distanceFrom(loc);
             if (distance <= radius && distance < bestDistance) {
@@ -223,6 +223,8 @@ public final class DuelManager {
         final double maxDistance = SpawnArena.settings == null ? 0 : SpawnArena.settings.queueMaxDistance;
         if (maxDistance > 0 && arena.distanceFrom(player.getLocation()) > maxDistance)
             return self ? "You're too far from the arena." : name + " is too far from the arena.";
+        if (arena.isFfa())
+            return "That arena is a free-for-all, so there are no duels there.";
         if (arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty())
             return "There's already a fight in that arena.";
         if (arena.isResetting())

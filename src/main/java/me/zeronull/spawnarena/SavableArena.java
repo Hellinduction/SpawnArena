@@ -151,33 +151,51 @@ public final class SavableArena extends Arena {
     public boolean reloadFromDisk() {
         CrystalPvp.forgetSnapshot(this);
         final ArenaConfig config = getArenaConfig(this.getConfigFile());
+        final boolean becameFfa;
+        // Checked and applied under the arena's lock, which joining a free-for-all and starting a match also take,
+        // so nothing can start between "it's empty" and the new settings
         synchronized (this) {
             if (!this.getFights().isEmpty()) {
                 this.pendingReload = config;
                 return false;
             }
+            becameFfa = this.apply(config);
         }
-        this.apply(config);
+        if (becameFfa)
+            this.dropQueueForFfa();
         return true;
     }
 
     /** Called when a fight leaves this arena: applies a reload that was waiting for the arena to be free. */
     @Override
     public void removeFight(final Fight fight) {
-        super.removeFight(fight);
         final ArenaConfig pending;
+        final boolean becameFfa;
         synchronized (this) {
+            super.removeFight(fight);
             pending = this.getFights().isEmpty() ? this.pendingReload : null;
             if (pending != null)
                 this.pendingReload = null;
+            becameFfa = pending != null && this.apply(pending);
         }
-        if (pending != null) {
-            this.apply(pending);
+        if (pending != null)
             SpawnArena.INSTANCE.getLogger().info("Applied the reloaded settings for arena " + this.getArenaName() + " now that its fight is over.");
-        }
+        if (becameFfa)
+            this.dropQueueForFfa();
     }
 
-    private void apply(final ArenaConfig config) {
+    /** Anyone waiting for a normal match here can't get one now that it's a free-for-all. */
+    private void dropQueueForFfa() {
+        if (this.queue == null)
+            return;
+        for (final org.bukkit.entity.Player p : this.queue.clear())
+            p.sendMessage(org.bukkit.ChatColor.RED + "The " + this.getArenaName() + " arena is now a free-for-all, so you were taken out of its queue. "
+                    + "Run /joinarenaqueue " + this.getArenaName() + " to go in.");
+    }
+
+    /** Returns true if this switched free-for-all on. Call holding the arena's lock. */
+    private boolean apply(final ArenaConfig config) {
+        final boolean wasFfa = this.isFfa();
         super.setSpawnPoint1(config.spawnPoint1);
         super.setSpawnPoint2(config.spawnPoint2);
         this.exitLocation = config.exitLocation;
@@ -189,9 +207,11 @@ public final class SavableArena extends Arena {
         super.setGiveKnockBackStick(config.giveKnockBackStick);
         super.setArenaMode(config.arenaMode);
         super.setCrystalPvp(config.crystalPvp);
+        super.setFfa(config.ffa);
         this.setWinReward(config.winReward, config.winRewardCooldownMinutes);
         this.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
         this.setEgapCooldownSeconds(config.egapCooldownSeconds);
+        return config.ffa && !wasFfa;
     }
 
     public File getConfigFile() {

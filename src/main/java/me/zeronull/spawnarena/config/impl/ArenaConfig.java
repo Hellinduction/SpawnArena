@@ -57,6 +57,12 @@ public final class ArenaConfig {
             "Always runs as SINGLE."})
     public boolean crystalPvp = false;
 
+    @Comment({"Free-for-all: /joinarenaqueue sends players straight in (no queue, no countdown) and everyone fights",
+            "everyone until they die or /leavearena (only out of combat). Players keep their own things, which are given",
+            "back as they were when they leave or die. Kills, deaths and kill streaks are counted separately; no wins,",
+            "streaks, Elo, rewards or bets. Always runs as SINGLE."})
+    public boolean ffa = false;
+
     @Comment("Mode of the arena: SINGLE, MULTI")
     public String arenaMode = ArenaMode.SINGLE.toString();
 

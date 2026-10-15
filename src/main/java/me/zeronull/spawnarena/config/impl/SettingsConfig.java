@@ -22,7 +22,7 @@ public final class SettingsConfig {
 
     @Comment({"Whether players can join arenas and new fights can start. Fights already running always finish.",
             "Toggle in game with /arenalock (e.g. close before reloading the plugin)"})
-    public boolean arenasOpen = true;
+    public volatile boolean arenasOpen = true;
 
     @Comment({"Currency symbol for short reward amounts like \"$5k\". Leave empty to copy it from the",
             "economy plugin's own formatting (falls back to \"$\" if there's no economy)."})
@@ -88,4 +88,17 @@ public final class SettingsConfig {
     @Comment({"Outline everyone in a running fight with a glow in that fight's own colour, so spectators can tell",
             "matches apart. Fighters see it too (it shows through walls)."})
     public boolean fightGlow = true;
+
+    @Comment({"Free-for-all arenas: seconds after hitting or being hit by another player that someone counts as in combat.",
+            "They can't /leavearena until it runs out, logging out or teleporting away in combat counts as dying, and",
+            "everyone who hit a player in this window gets the kill."})
+    public int ffaCombatSeconds = 10;
+
+    @Comment({"Free-for-all arenas: seconds a player can't be hurt after joining, so they can't be killed as they appear.",
+            "Ends early if they attack someone. 0 turns it off."})
+    public int ffaSpawnProtectionSeconds = 3;
+
+    @Comment({"Free-for-all arenas: a kill streak of every this many kills (5, 10, 15...) is announced to the server,",
+            "and so is someone ending a streak at least this long. 0 keeps every free-for-all message inside the arena."})
+    public int ffaStreakAnnounce = 5;
 }

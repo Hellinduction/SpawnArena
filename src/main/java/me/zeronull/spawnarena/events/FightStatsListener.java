@@ -66,6 +66,7 @@ public final class FightStatsListener implements Listener {
         // Only damage from the other side counts as dealt (not your own crystal, not a teammate)
         if (attacker != null && !fight.areOpponents(attacker, victim))
             attacker = null;
+        fight.onHurt(attacker, victim);
         fight.stats().damage(attacker, victim, amount, hit, crit);
     }
 

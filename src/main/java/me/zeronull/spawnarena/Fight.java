@@ -33,13 +33,13 @@ public class Fight {
     private final List<Player> teamA = new ArrayList<>();
     private final List<Player> teamB = new ArrayList<>();
     /** Where each fighter actually spawns (2v2 teammates stand side by side), set when the fight starts */
-    private final Map<UUID, Location> spawnSpots = new java.util.concurrent.ConcurrentHashMap<>();
+    protected final Map<UUID, Location> spawnSpots = new java.util.concurrent.ConcurrentHashMap<>();
     /** Coin flip per match for which team gets which spawn, so join order doesn't decide sides */
     private final boolean swapSides = java.util.concurrent.ThreadLocalRandom.current().nextBoolean();
     /** Players still in the match; eliminated players are restored and leave this set. */
-    private final Set<Player> alive = Collections.synchronizedSet(new LinkedHashSet<>());
-    private final Map<UUID, PlayerPreFightData> preFightData = new java.util.concurrent.ConcurrentHashMap<>();
-    private final Set<UUID> restored = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    protected final Set<Player> alive = Collections.synchronizedSet(new LinkedHashSet<>());
+    protected final Map<UUID, PlayerPreFightData> preFightData = new java.util.concurrent.ConcurrentHashMap<>();
+    protected final Set<UUID> restored = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** Where each player was when they went out (before being restored and teleported away). */
     private final Map<UUID, Location> eliminatedAt = new java.util.concurrent.ConcurrentHashMap<>();
     /** Fighters still getting ready and moving into the arena; the fight goes live when this empties. */
@@ -57,11 +57,11 @@ public class Fight {
     private volatile long firstTickNanos, lastTickNanos;
     private volatile int ticksCounted;
     /** Fighters who quit (as opposed to their connection dropping): a lost bet doesn't come back for them. */
-    private final Set<UUID> quitters = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    protected final Set<UUID> quitters = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private final FightStats stats = new FightStats();
     /** Crystal arenas: the snapshot, taken during the countdown; nobody is sent in until it's ready. */
-    private volatile java.util.concurrent.CompletableFuture<Boolean> arenaReady = java.util.concurrent.CompletableFuture.completedFuture(true);
+    protected volatile java.util.concurrent.CompletableFuture<Boolean> arenaReady = java.util.concurrent.CompletableFuture.completedFuture(true);
 
     public FightStats stats() {
         return this.stats;
@@ -107,6 +107,23 @@ public class Fight {
 
     public boolean isDuel() {
         return this.duel;
+    }
+
+    /** A free-for-all session (see FfaFight): one per arena, players come and go, everyone fights everyone. */
+    public boolean isFfa() {
+        return false;
+    }
+
+    /**
+     * {@code victim} was hurt by {@code attacker} (null: nobody, e.g. a fall), already checked to be opponents.
+     * FFA sessions use it for kill credit and the combat timer.
+     */
+    public void onHurt(final Player attacker, final Player victim) {
+    }
+
+    /** A fighter teleported out of the arena themselves (a command or plugin): out, like any other way of losing. */
+    public void leftArena(final Player player) {
+        this.eliminate(player);
     }
 
     public Fight asDuel() {
@@ -359,9 +376,21 @@ public class Fight {
         this.leaveParkour(fighter);
         fighter.closeInventory();
 
-        // Tridents thrown before the match (still flying or stuck somewhere) go back into the inventory
-        // before it's saved; otherwise a loyalty trident returns into the fight inventory and is lost
-        // when that inventory is replaced at the end. Each trident is taken on its own thread.
+        final java.util.concurrent.CompletableFuture<List<ItemStack>> recalled = recallTridents(fighter);
+        if (recalled.isDone()) {
+            this.prepareAndSend(fighter, recalled.join());
+            return;
+        }
+        recalled.whenComplete((items, error) -> Threads.entity(fighter, () -> this.prepareAndSend(fighter, items == null ? List.of() : items)));
+    }
+
+    /**
+     * Tridents thrown before the match (still flying or stuck somewhere) go back into the inventory before it's
+     * saved; otherwise a loyalty trident returns into the fight inventory and is lost when that inventory is
+     * replaced at the end. Each trident is taken on its own thread. Completes with the tridents' items (at most
+     * 2 seconds later: a trident whose thread never runs the task, e.g. it unloaded, mustn't stall anything).
+     */
+    protected static java.util.concurrent.CompletableFuture<List<ItemStack>> recallTridents(final Player fighter) {
         final List<java.util.concurrent.CompletableFuture<ItemStack>> recalled = new ArrayList<>();
         for (final org.bukkit.entity.Trident trident : me.zeronull.spawnarena.events.ThrownTridents.take(fighter)) {
             final java.util.concurrent.CompletableFuture<ItemStack> item = new java.util.concurrent.CompletableFuture<>();
@@ -376,22 +405,19 @@ public class Fight {
                 item.complete(stack);
             });
         }
+        if (recalled.isEmpty())
+            return java.util.concurrent.CompletableFuture.completedFuture(List.of());
 
-        if (recalled.isEmpty()) {
-            this.prepareAndSend(fighter, List.of());
-            return;
-        }
-        // Safety net: a trident whose thread never runs the task (e.g. it unloaded) mustn't stall the start
-        final java.util.concurrent.CompletableFuture<Void> all = java.util.concurrent.CompletableFuture
+        return java.util.concurrent.CompletableFuture
                 .allOf(recalled.toArray(new java.util.concurrent.CompletableFuture[0]))
-                .completeOnTimeout(null, 2, java.util.concurrent.TimeUnit.SECONDS);
-        all.whenComplete((ignored, error) -> {
-            final List<ItemStack> items = new ArrayList<>();
-            for (final java.util.concurrent.CompletableFuture<ItemStack> f : recalled)
-                if (f.isDone() && !f.isCompletedExceptionally() && f.join() != null)
-                    items.add(f.join());
-            Threads.entity(fighter, () -> this.prepareAndSend(fighter, items));
-        });
+                .completeOnTimeout(null, 2, java.util.concurrent.TimeUnit.SECONDS)
+                .handle((ignored, error) -> {
+                    final List<ItemStack> items = new ArrayList<>();
+                    for (final java.util.concurrent.CompletableFuture<ItemStack> f : recalled)
+                        if (f.isDone() && !f.isCompletedExceptionally() && f.join() != null)
+                            items.add(f.join());
+                    return items;
+                });
     }
 
     private void prepareAndSend(final Player fighter, final List<ItemStack> recalledTridents) {
@@ -640,7 +666,7 @@ public class Fight {
     }
 
     /** Restores a member's pre-fight state once; a failure is logged and never leaves the match stuck. */
-    private void restore(final Player player) {
+    protected void restore(final Player player) {
         // Died for real: put back once they've respawned (a dead player can't be teleported or given items)
         if (player.isOnline() && player.isDead()) {
             Threads.globalLater(() -> Threads.entity(player, () -> this.restore(player)), 5L);
@@ -772,8 +798,8 @@ public class Fight {
     private void announceStreakEnded(final Player loser, final int streak, final List<Player> winners, final List<Player> losers,
                                      final net.kyori.adventure.text.event.HoverEvent<Component> statsHover, final boolean selfOut) {
         final Component message = MiniMessage.miniMessage().deserialize(selfOut
-                        ? "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><loser></gold> <red>ended their own "
-                                + "<white><bold><streak></bold></white>-win streak in <arena>!"
+                        ? "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><loser></gold> <red>took themselves out, losing their "
+                                + "<white><bold><streak></bold></white>-win streak in <arena>. <gold><winner></gold> wins!"
                         : "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><winner></gold> <red>ended <loser><possessive> "
                                 + "<white><bold><streak></bold></white>-win streak in <arena>!",
                 Placeholder.component("loser", loser.displayName()),
@@ -858,7 +884,7 @@ public class Fight {
      * Fighters always see their own result; everyone else only if broadcasting is on and they haven't
      * opted out (/arenawins). Returns the players who received it.
      */
-    private static List<Player> broadcast(final Component message, final List<Player> winners, final List<Player> losers) {
+    static List<Player> broadcast(final Component message, final List<Player> winners, final List<Player> losers) {
         final Set<Player> fighters = new HashSet<>(winners);
         fighters.addAll(losers);
         final List<Player> received = new ArrayList<>();
@@ -987,7 +1013,7 @@ public class Fight {
         }
     }
 
-    private void leaveParkour(final Player player) {
+    protected void leaveParkour(final Player player) {
         if (!Bukkit.getPluginManager().isPluginEnabled("Parkour"))
             return;
 

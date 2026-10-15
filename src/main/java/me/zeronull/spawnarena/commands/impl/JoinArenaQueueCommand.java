@@ -57,6 +57,13 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return true;
         }
 
+        // Free-for-all: straight in, whatever mode was asked for (the setting is checked again, under the
+        // arena's lock, when they're let in)
+        if (arena.isFfa()) {
+            me.zeronull.spawnarena.FfaFight.join(player, arena);
+            return true;
+        }
+
         if (args.length >= 2 && args[1].equalsIgnoreCase("menu")) {
             // Already queued here: the menu shows which queue they're in and lets them leave or switch
             final String problem = arena.queue.playerInQueue(player) ? null : cantJoin(player, arena);
@@ -108,8 +115,12 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         return null;
     }
 
-    /** Validates and joins (or switches to) the given mode's queue. */
+    /** Validates and joins (or switches to) the given mode's queue. A free-for-all arena is joined straight away. */
     public static void join(final Player player, final Arena arena, final FightMode mode) {
+        if (arena.isFfa()) {
+            me.zeronull.spawnarena.FfaFight.join(player, arena);
+            return;
+        }
         if (arena.queue.modeOf(player) == mode) {
             player.sendMessage(ChatColor.YELLOW + "You're already in the " + arena.getArenaName() + " " + mode.label()
                     + " queue. Run /joinarenaqueue " + arena.getArenaName() + " to leave.");
@@ -128,8 +139,15 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
     }
 
     public static void addToQueue(final Arena arena, final Player player, final FightMode mode) {
-        me.zeronull.spawnarena.DuelManager.cancelSentRequests(player, "joined a queue");
-        arena.queue.addPlayerToQueue(player, mode);
+        // Checked against the arena under its lock: it can't become a free-for-all between the checks and this
+        synchronized (arena) {
+            if (arena.isFfa()) {
+                player.sendMessage(ChatColor.RED + "That arena just became a free-for-all. Run /joinarenaqueue " + arena.getArenaName() + " again to go in.");
+                return;
+            }
+            me.zeronull.spawnarena.DuelManager.cancelSentRequests(player, "joined a queue");
+            arena.queue.addPlayerToQueue(player, mode);
+        }
 
         // Joining can immediately start a match, which takes players back out of the queue
         if (arena.queue.playerInQueue(player)) {

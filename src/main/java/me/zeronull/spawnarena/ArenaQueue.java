@@ -147,6 +147,10 @@ public class ArenaQueue {
     }
 
     private boolean canStart() {
-        return !this.arena.isResetting() && (this.arena.getFights().isEmpty() || this.arena.getArenaMode() == ArenaMode.MULTI);
+        // Under the arena's lock: the free-for-all setting can't be switched on part-way through
+        synchronized (this.arena) {
+            return !this.arena.isFfa() && !this.arena.isResetting()
+                    && (this.arena.getFights().isEmpty() || this.arena.getArenaMode() == ArenaMode.MULTI);
+        }
     }
 }

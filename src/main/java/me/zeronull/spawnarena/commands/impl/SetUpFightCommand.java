@@ -56,6 +56,10 @@ public final class SetUpFightCommand extends ArenaTabComplete implements Command
             sender.sendMessage(ChatColor.RED + "That arena has not been fully setup!");
             return true;
         }
+        if (arena.isFfa()) {
+            sender.sendMessage(ChatColor.RED + "That arena is a free-for-all: players join it with /joinarenaqueue " + arena.getArenaName() + ".");
+            return true;
+        }
 
         final List<Player> players = new ArrayList<>();
         for (int i = 1; i < args.length; i++) {

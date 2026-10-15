@@ -151,6 +151,10 @@ public class StatsManager {
                     "PRIMARY KEY (server_id, meta_key))");
             if (!hasColumn(c, "arena_stats", "losses"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN losses INT NOT NULL DEFAULT 0");
+            // Free-for-all arenas: counted apart from everything above
+            for (final String column : FFA_COLUMNS)
+                if (!hasColumn(c, "arena_stats", column))
+                    s.execute("ALTER TABLE arena_stats ADD COLUMN " + column + (column.endsWith("_at") ? " BIGINT" : " INT") + " NOT NULL DEFAULT 0");
             // Elo rating (display only): everyone starts at START_ELO
             if (!hasColumn(c, "arena_stats", "elo"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN elo INT NOT NULL DEFAULT " + START_ELO);
@@ -880,6 +884,8 @@ public class StatsManager {
             case "win_streak" -> "streak_at";
             case "best_win_streak" -> "best_at";
             case "elo" -> "elo_at";
+            case "ffa_kills" -> "ffa_kills_at";
+            case "ffa_best_streak" -> "ffa_best_at";
             default -> null;
         };
     }
@@ -1277,6 +1283,47 @@ public class StatsManager {
         invalidateLeaderboards();
     }
 
+    // ── Free-for-all ────────────────────────────────────────────────────────
+
+    static final String[] FFA_COLUMNS = {"ffa_kills", "ffa_deaths", "ffa_best_streak", "ffa_kills_at", "ffa_best_at"};
+
+    /** A free-for-all kill; {@code streak} is their kill streak now, counting this one. Call off the main thread. */
+    public void recordFfaKill(final UUID uuid, final String arena, final int streak) {
+        ensure(uuid, arena);
+        // The best streak (and when it was reached) is read before it's raised: MySQL applies SETs in order
+        final String sql = "UPDATE arena_stats SET ffa_best_at = CASE WHEN ? > ffa_best_streak THEN ? ELSE ffa_best_at END, "
+                + "ffa_best_streak = GREATEST(ffa_best_streak, ?), ffa_kills = ffa_kills + 1, ffa_kills_at = ? "
+                + "WHERE server_id=" + sid + " AND uuid=? AND arena=?";
+        final long now = System.currentTimeMillis();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setInt(1, streak);
+            ps.setLong(2, now);
+            ps.setInt(3, streak);
+            ps.setLong(4, now);
+            ps.setString(5, uuid.toString());
+            ps.setString(6, arena.toLowerCase());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] recordFfaKill: " + e.getMessage());
+        }
+        invalidateLeaderboards();
+    }
+
+    /** A free-for-all death. Call off the main thread. */
+    public void recordFfaDeath(final UUID uuid, final String arena) {
+        ensure(uuid, arena);
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("UPDATE arena_stats SET ffa_deaths = ffa_deaths + 1 WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] recordFfaDeath: " + e.getMessage());
+        }
+        invalidateLeaderboards();
+    }
+
     /** The streak they had when they last lost one (streak 0 if they never have), and when. */
     public record LostStreak(int streak, long at) {}
 
@@ -1428,8 +1475,9 @@ public class StatsManager {
         // Ties: whoever reached that value first ranks higher, so there's always exactly one #1
         final String reachedAt = reachedAtColumn(field);
         final String tieBreak = reachedAt != null ? ", " + reachedAt + " ASC" : "";
+        final String played = field.startsWith("ffa_") ? " AND (ffa_kills > 0 OR ffa_deaths > 0)" : "";
         final String sql = "SELECT uuid, " + field + " FROM arena_stats " +
-                "WHERE server_id=" + sid + " AND arena=? ORDER BY " + field + " DESC" + tieBreak + ", uuid ASC LIMIT ?";
+                "WHERE server_id=" + sid + " AND arena=?" + played + " ORDER BY " + field + " DESC" + tieBreak + ", uuid ASC LIMIT ?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, arena.toLowerCase());
@@ -1485,11 +1533,13 @@ public class StatsManager {
         props.setProperty("user", "sa");
         props.setProperty("password", "");
 
-        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses) " +
-                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses, ffa_kills, ffa_deaths, ffa_best_streak, ffa_kills_at, ffa_best_at) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak), " +
                 "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at), " +
-                "lost_streak = VALUES(lost_streak), lost_at = VALUES(lost_at), elo = VALUES(elo), elo_at = VALUES(elo_at), losses = VALUES(losses)";
+                "lost_streak = VALUES(lost_streak), lost_at = VALUES(lost_at), elo = VALUES(elo), elo_at = VALUES(elo_at), losses = VALUES(losses), " +
+                "ffa_kills = VALUES(ffa_kills), ffa_deaths = VALUES(ffa_deaths), ffa_best_streak = VALUES(ffa_best_streak), " +
+                "ffa_kills_at = VALUES(ffa_kills_at), ffa_best_at = VALUES(ffa_best_at)";
 
         int copied = 0;
         try (Connection h2 = new org.h2.Driver().connect(h2FileUrl() + ";IFEXISTS=TRUE", props);
@@ -1498,6 +1548,8 @@ public class StatsManager {
                      + reachedAtSelect(h2, "streak_at") + reachedAtSelect(h2, "wins_at") + reachedAtSelect(h2, "best_at")
                      + reachedAtSelect(h2, "lost_streak") + reachedAtSelect(h2, "lost_at")
                      + (hasColumn(h2, "arena_stats", "elo") ? ", elo" : ", " + START_ELO + " AS elo") + reachedAtSelect(h2, "elo_at") + reachedAtSelect(h2, "losses")
+                     + reachedAtSelect(h2, "ffa_kills") + reachedAtSelect(h2, "ffa_deaths") + reachedAtSelect(h2, "ffa_best_streak")
+                     + reachedAtSelect(h2, "ffa_kills_at") + reachedAtSelect(h2, "ffa_best_at")
                      + " FROM arena_stats");
              Connection target = dataSource.getConnection()) {
 
@@ -1517,6 +1569,11 @@ public class StatsManager {
                     ps.setInt(11, rs.getInt("elo"));
                     ps.setLong(12, rs.getLong("elo_at"));
                     ps.setInt(13, rs.getInt("losses"));
+                    ps.setInt(14, rs.getInt("ffa_kills"));
+                    ps.setInt(15, rs.getInt("ffa_deaths"));
+                    ps.setInt(16, rs.getInt("ffa_best_streak"));
+                    ps.setLong(17, rs.getLong("ffa_kills_at"));
+                    ps.setLong(18, rs.getLong("ffa_best_at"));
                     ps.addBatch();
                     if (++copied % 500 == 0)
                         ps.executeBatch();

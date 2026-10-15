@@ -69,7 +69,7 @@ public final class ArenaWizard {
         int minY, maxY;
         Location spawn1, spawn2, exit;
         boolean exitChosen;
-        boolean crystalPvp, waterDeath, knockbackFish, plateWin, clearItems, multi, resetAfterFight = true;
+        boolean crystalPvp, waterDeath, knockbackFish, plateWin, clearItems, multi, ffa, resetAfterFight = true;
         // Starts at the plugin's default for new arenas
         double winReward = new me.zeronull.spawnarena.config.impl.ArenaConfig().winReward;
         /** What the −/+ buttons change it by: a fifth of the default (50k -> 10k, 50m -> 10m) */
@@ -365,9 +365,16 @@ public final class ArenaWizard {
                             }
                             case "water" -> s.waterDeath = !s.waterDeath;
                             case "fish" -> s.knockbackFish = !s.knockbackFish;
-                            case "plate" -> s.plateWin = !s.plateWin;
+                            case "plate" -> s.plateWin = !s.plateWin && !s.ffa;
                             case "clear" -> s.clearItems = !s.clearItems;
-                            case "multi" -> s.multi = !s.multi && !s.crystalPvp;
+                            case "multi" -> s.multi = !s.multi && !s.crystalPvp && !s.ffa;
+                            case "ffa" -> {
+                                s.ffa = !s.ffa;
+                                if (s.ffa) {
+                                    s.multi = false; // one session that everyone joins
+                                    s.plateWin = false; // nobody "wins" a free-for-all
+                                }
+                            }
                             case "reset" -> s.resetAfterFight = !s.resetAfterFight;
                             default -> { }
                         }
@@ -709,6 +716,7 @@ public final class ArenaWizard {
             c.winOnStepStonePressurePlate = s.plateWin;
             c.shouldClearItems = s.clearItems;
             c.arenaMode = s.multi ? ArenaMode.MULTI.toString() : ArenaMode.SINGLE.toString();
+            c.ffa = s.ffa;
             c.winReward = s.winReward;
             if (reset) {
                 c.pasteLocation = s.pasteAt;
@@ -725,8 +733,11 @@ public final class ArenaWizard {
 
         deleteBackup(s); // the paste stays: it's the arena now
         end(s);
-        tell(player, "<green><bold>Arena " + s.name + " is ready!</bold></green> <gray>Players join with <gold>/joinarenaqueue " + s.name
-                + "</gold> (or <gold>/joinarenaqueue " + s.name + " menu</gold>).");
+        tell(player, s.ffa
+                ? "<green><bold>Arena " + s.name + " is ready!</bold></green> <gray>It's a free-for-all: players jump straight in with <gold>/joinarenaqueue "
+                        + s.name + "</gold> and leave with <gold>/leavearena</gold> (out of combat)."
+                : "<green><bold>Arena " + s.name + " is ready!</bold></green> <gray>Players join with <gold>/joinarenaqueue " + s.name
+                        + "</gold> (or <gold>/joinarenaqueue " + s.name + " menu</gold>).");
     }
 
     // ── Deleting an arena ───────────────────────────────────────────────────
@@ -890,30 +901,36 @@ public final class ArenaWizard {
                     m.append(" ").append(button("✔ Looks good", "/arenasetup ok" + tag, "Use this exit", "green"));
             }
             case OPTIONS -> m.append("<gray>Click to switch an option:\n")
+                    .append(toggle("Free-for-all", s.ffa, "ffa", tag,
+                            "Players jump straight in (no queue) and everyone fights everyone; /leavearena out of combat. "
+                                    + "Kills and deaths are counted apart; no wins, rewards or bets")).append("  ")
                     .append(toggle("Crystal PvP", s.crystalPvp, "crystal", tag, "Players can build and use end crystals")).append("  ")
                     .append(toggle("Water = out", s.waterDeath, "water", tag, "Touching water loses (sumo)")).append("  ")
                     .append(toggle("Slap Fish", s.knockbackFish, "fish", tag, "Give everyone a knockback fish")).append("\n")
-                    .append(toggle("Pressure plate wins", s.plateWin, "plate", tag, "Stepping on a stone pressure plate wins")).append("  ")
+                    .append(s.ffa ? "<dark_gray>[No pressure plate wins (free-for-all)]</dark_gray>"
+                            : toggle("Pressure plate wins", s.plateWin, "plate", tag, "Stepping on a stone pressure plate wins")).append("  ")
                     .append(toggle("Clear inventory", s.clearItems, "clear", tag, "Fight with an empty inventory (it's given back after)")).append("  ")
-                    .append(s.crystalPvp ? "<dark_gray>[One fight at a time (crystal PvP)]</dark_gray>"
+                    .append(s.ffa ? "<dark_gray>[One session everyone joins (free-for-all)]</dark_gray>"
+                            : s.crystalPvp ? "<dark_gray>[One fight at a time (crystal PvP)]</dark_gray>"
                             : toggle("Several fights at once", s.multi, "multi", tag, "MULTI mode: more than one fight at a time")).append("\n")
                     .append(s.schematic == null
                             ? toggle("Reset after each fight", s.resetAfterFight, "reset", tag,
                                     "Saves the arena as it is now as a schematic at Finish, and pastes it back after every fight")
                             : toggle("Reset after each fight", s.resetAfterFight, "reset", tag, "Paste the schematic again after every fight"))
-                    .append("\n<gray>Win reward: <white>").append(StatsManager.formatMoney(s.winReward)).append("</white> ")
-                    .append(button("−" + StatsManager.formatMoney(s.rewardStep), "/arenasetup reward down" + tag, "Lower the win reward", "red")).append(" ")
-                    .append(button("+" + StatsManager.formatMoney(s.rewardStep), "/arenasetup reward up" + tag, "Raise the win reward", "green")).append(" ")
-                    .append("<click:suggest_command:'/arenasetup reward set" + tag + " '><hover:show_text:'<gray>Type any amount (75000, 75k, 1m); 0 = no reward'>"
-                            + "<yellow>[Type amount]</yellow></hover></click>").append("\n")
+                    .append(s.ffa ? "\n<dark_gray>Win reward: none in a free-for-all</dark_gray>\n"
+                            : "\n<gray>Win reward: <white>" + StatsManager.formatMoney(s.winReward) + "</white> "
+                            + button("−" + StatsManager.formatMoney(s.rewardStep), "/arenasetup reward down" + tag, "Lower the win reward", "red") + " "
+                            + button("+" + StatsManager.formatMoney(s.rewardStep), "/arenasetup reward up" + tag, "Raise the win reward", "green") + " "
+                            + "<click:suggest_command:'/arenasetup reward set" + tag + " '><hover:show_text:'<gray>Type any amount (75000, 75k, 1m); 0 = no reward'>"
+                            + "<yellow>[Type amount]</yellow></hover></click>\n")
                     .append(button("✔ Done", "/arenasetup ok" + tag, "On to the summary", "green"));
             case SUMMARY -> {
-                m.append("<gray>Type: <white>").append(s.type).append("</white>  Schematic: <white>")
+                m.append("<gray>Type: <white>").append(s.type).append(s.ffa ? " (free-for-all)" : "").append("</white>  Schematic: <white>")
                         .append(s.schematic == null ? "none" : escape(s.schematic.getName())).append("</white>\n")
                         .append("<gray>Region: <white>").append(span(s, true)).append("×").append(span(s, false)).append(", y ")
                         .append(s.minY).append("–").append(s.maxY).append("</white>  Spawns: <white>").append(where(s.spawn1)).append(" / ")
                         .append(where(s.spawn2)).append("</white>\n<gray>Exit: <white>").append(s.exit == null ? "world spawn" : where(s.exit))
-                        .append("</white>  Reward: <white>").append(StatsManager.formatMoney(s.winReward)).append("</white>  Reset after fights: <white>")
+                        .append("</white>  Reward: <white>").append(s.ffa ? "none" : StatsManager.formatMoney(s.winReward)).append("</white>  Reset after fights: <white>")
                         .append(!s.resetAfterFight ? "no" : s.schematic == null ? "yes (saves it as " + s.name + ".schem)" : "yes")
                         .append("</white>\n")
                         .append(button("✔ Finish", "/arenasetup finish" + tag, "Create the region and the arena", "green"));

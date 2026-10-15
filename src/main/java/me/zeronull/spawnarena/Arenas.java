@@ -16,7 +16,9 @@ public final class Arenas implements Iterable<Arena> {
     private final List<Arena> arenas;
 
     private Arenas(final List<Arena> arenas) {
-        this.arenas = arenas;
+        // Read from every player's thread on Folia while the setup wizard adds and deletes arenas: iterating
+        // works on a snapshot, so a change mid-loop can't throw
+        this.arenas = new java.util.concurrent.CopyOnWriteArrayList<>(arenas);
     }
 
     public static Arenas fromList(final List<Arena> arenas) {
@@ -175,7 +177,7 @@ public final class Arenas implements Iterable<Arena> {
 
     @Override
     public Iterator<Arena> iterator() {
-        return new ArenasIterator(this.arenas);
+        return this.arenas.iterator();
     }
 
     public final class ArenasIterator implements Iterator<Arena> {

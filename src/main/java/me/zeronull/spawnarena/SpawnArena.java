@@ -14,9 +14,10 @@ import java.util.logging.Level;
 
 public class SpawnArena extends JavaPlugin {
     public static SpawnArena INSTANCE;
-    public static Arenas arenas;
-    public static StatsManager statsManager;
-    public static me.zeronull.spawnarena.config.impl.SettingsConfig settings;
+    // Replaced on enable/reload and read from every thread
+    public static volatile Arenas arenas;
+    public static volatile StatsManager statsManager;
+    public static volatile me.zeronull.spawnarena.config.impl.SettingsConfig settings;
 
     public SpawnArena() {
         INSTANCE = this;
@@ -140,6 +141,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("setarenaexit", new SetArenaExitCommand());
         this.registerCommand("arenaduel", new ArenaDuelCommand());
         this.registerCommand("arenawins", new ArenaWinsCommand());
+        this.registerCommand("leavearena", new me.zeronull.spawnarena.commands.impl.LeaveArenaCommand());
         this.registerCommand("arenabet", new me.zeronull.spawnarena.commands.impl.ArenaBetCommand());
         this.registerCommand("arenasetup", new me.zeronull.spawnarena.commands.impl.ArenaSetupCommand());
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {

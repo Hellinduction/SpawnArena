@@ -36,7 +36,9 @@ public class ArenaPlayerLeave implements Listener {
         }
 
         // Their connection dropped (rather than them leaving): no loss, while they have lag-outs left today
-        final boolean laggedOut = me.zeronull.spawnarena.LagOuts.looksLikeLagOut(event)
+        // (Not in a free-for-all: there, logging out is only a death if they were in combat)
+        final boolean laggedOut = !fight.isFfa()
+                && me.zeronull.spawnarena.LagOuts.looksLikeLagOut(event)
                 && fight.isFighter(player)
                 && me.zeronull.spawnarena.LagOuts.takeAllowance(player, fight);
 

@@ -1,16 +1,17 @@
 package me.zeronull.spawnarena;
 
 public abstract class ArenaOptions {
-    private boolean shouldClearItems;
-    private boolean allowDamage;
-    private boolean allowPvp;
-    private boolean deathOnTouchLiquid;
-    private boolean winOnStepStonePressurePlate;
-    private boolean giveKnockBackStick;
-    private ArenaMode arenaMode;
-    private boolean crystalPvp;
-    private double winReward;
-    private int winRewardCooldownMinutes;
+    private volatile boolean shouldClearItems;
+    private volatile boolean allowDamage;
+    private volatile boolean allowPvp;
+    private volatile boolean deathOnTouchLiquid;
+    private volatile boolean winOnStepStonePressurePlate;
+    private volatile boolean giveKnockBackStick;
+    private volatile ArenaMode arenaMode;
+    private volatile boolean crystalPvp;
+    private volatile boolean ffa;
+    private volatile double winReward;
+    private volatile int winRewardCooldownMinutes;
 
     public double getWinReward() {
         return this.winReward;
@@ -20,8 +21,8 @@ public abstract class ArenaOptions {
         return this.winRewardCooldownMinutes;
     }
 
-    private double leaderRewardMultiplier;
-    private int leaderRewardCooldownMinutes;
+    private volatile double leaderRewardMultiplier;
+    private volatile int leaderRewardCooldownMinutes;
 
     public double getLeaderRewardMultiplier() {
         return this.leaderRewardMultiplier;
@@ -36,7 +37,7 @@ public abstract class ArenaOptions {
         this.leaderRewardCooldownMinutes = cooldownMinutes;
     }
 
-    private int egapCooldownSeconds;
+    private volatile int egapCooldownSeconds;
 
     public int getEgapCooldownSeconds() {
         return this.egapCooldownSeconds;
@@ -105,9 +106,21 @@ public abstract class ArenaOptions {
         return this;
     }
 
-    /** Crystal PvP arenas always run one fight at a time: blocks placed in one fight would show up in the other. */
+    /**
+     * Crystal PvP arenas always run one fight at a time: blocks placed in one fight would show up in the other.
+     * Free-for-all arenas have one session that everyone joins.
+     */
     public ArenaMode getArenaMode() {
-        return this.crystalPvp ? ArenaMode.SINGLE : this.arenaMode;
+        return this.crystalPvp || this.ffa ? ArenaMode.SINGLE : this.arenaMode;
+    }
+
+    public boolean isFfa() {
+        return this.ffa;
+    }
+
+    public ArenaOptions setFfa(final boolean value) {
+        this.ffa = value;
+        return this;
     }
 
     public boolean isCrystalPvp() {
