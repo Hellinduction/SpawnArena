@@ -481,6 +481,14 @@ public final class CrystalArenaListener implements Listener {
             e.setCancelled(true);
     }
 
+    /** Water and lava poured in a fight stay in spots that were empty when it started (those are put back). */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onFlow(final org.bukkit.event.block.BlockFromToEvent e) {
+        final Arena arena = CrystalPvp.arenaAt(e.getBlock());
+        if (arena != null && CrystalPvp.activeFight(arena) != null && CrystalPvp.isOriginal(arena, e.getToBlock()))
+            e.setCancelled(true);
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onSpread(final BlockSpreadEvent e) {
         if (this.duringFight(e.getBlock().getLocation()))
@@ -490,7 +498,13 @@ public final class CrystalArenaListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onChangeBlock(final EntityChangeBlockEvent e) {
         final Arena arena = CrystalPvp.arenaAt(e.getBlock());
-        if (arena != null && CrystalPvp.activeFight(arena) != null && CrystalPvp.isOriginal(arena, e.getBlock()))
+        if (arena != null && CrystalPvp.activeFight(arena) != null && CrystalPvp.isOriginal(arena, e.getBlock())) {
+            e.setCancelled(true);
+            return;
+        }
+        // A crystal fighter's arrows and tridents can't break things outside their arena either (pots, chorus...)
+        if (arena == null && e.getEntity() instanceof org.bukkit.entity.Projectile projectile
+                && projectile.getShooter() instanceof Player shooter && isCrystalFighter(shooter))
             e.setCancelled(true);
     }
 
@@ -506,15 +520,85 @@ public final class CrystalArenaListener implements Listener {
             e.setCancelled(true);
     }
 
+    /** No pistons in the arena, and none outside it moving the arena's blocks (or anything into it). */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPistonExtend(final BlockPistonExtendEvent e) {
-        if (this.duringFight(e.getBlock().getLocation()))
+        if (this.pistonTouchesFight(e.getBlock(), e.getBlocks(), e.getDirection()))
             e.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPistonRetract(final BlockPistonRetractEvent e) {
+        if (this.pistonTouchesFight(e.getBlock(), e.getBlocks(), e.getDirection()))
+            e.setCancelled(true);
+    }
+
+    private boolean pistonTouchesFight(final Block piston, final List<Block> moved, final org.bukkit.block.BlockFace direction) {
+        if (this.duringFight(piston.getLocation()) || this.duringFight(piston.getRelative(direction).getLocation()))
+            return true;
+        for (final Block block : moved)
+            if (this.duringFight(block.getLocation()) || this.duringFight(block.getRelative(direction).getLocation()))
+                return true;
+        return false;
+    }
+
+    /** Nothing dispenses in an arena during a fight (TNT, armor stands, boats...). */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onDispense(final org.bukkit.event.block.BlockDispenseEvent e) {
         if (this.duringFight(e.getBlock().getLocation()))
+            e.setCancelled(true);
+    }
+
+    /** A sponge placed in a fight only soaks up water that wasn't there when it started (that's put back anyway). */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onSponge(final org.bukkit.event.block.SpongeAbsorbEvent e) {
+        final Arena arena = CrystalPvp.arenaAt(e.getBlock());
+        if (arena == null || CrystalPvp.activeFight(arena) == null)
+            return;
+        e.getBlocks().removeIf(state -> CrystalPvp.isOriginal(arena, state.getBlock()));
+    }
+
+    /** No primed TNT in an arena during a fight, however it got there. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onEntitySpawn(final org.bukkit.event.entity.EntitySpawnEvent e) {
+        if (e.getEntity() instanceof org.bukkit.entity.TNTPrimed && this.duringFight(e.getLocation()))
+            e.setCancelled(true);
+    }
+
+    /** The arena's own item frames, paintings and armor stands stay as they are during a fight. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onHangingHit(final org.bukkit.event.hanging.HangingBreakByEntityEvent e) {
+        if (this.duringFight(e.getEntity().getLocation()))
+            e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onEntityUse(final org.bukkit.event.player.PlayerInteractEntityEvent e) {
+        final org.bukkit.entity.Entity clicked = e.getRightClicked();
+        if ((clicked instanceof org.bukkit.entity.Hanging || clicked instanceof org.bukkit.entity.ArmorStand)
+                && this.duringFight(clicked.getLocation()))
+            e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onArmorStand(final org.bukkit.event.player.PlayerArmorStandManipulateEvent e) {
+        if (this.duringFight(e.getRightClicked().getLocation()))
+            e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onFrameOrStandHit(final EntityDamageByEntityEvent e) {
+        final org.bukkit.entity.Entity hit = e.getEntity();
+        if ((hit instanceof org.bukkit.entity.ItemFrame || hit instanceof org.bukkit.entity.ArmorStand)
+                && this.duringFight(hit.getLocation()))
+            e.setCancelled(true);
+    }
+
+    /** The arena's own signs can't be rewritten mid-fight (their text isn't part of what's put back). */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onSign(final org.bukkit.event.block.SignChangeEvent e) {
+        final Arena arena = CrystalPvp.arenaAt(e.getBlock());
+        if (arena != null && CrystalPvp.activeFight(arena) != null && CrystalPvp.isOriginal(arena, e.getBlock()))
             e.setCancelled(true);
     }
 
@@ -533,16 +617,16 @@ public final class CrystalArenaListener implements Listener {
 
     public static final String BUILD_BYPASS_PERMISSION = "spawnarena.crystalarena.build";
 
-    /**
-     * Someone who isn't fighting here and must be kept from changing the arena: everyone while a fight
-     * is on, and everyone but staff (to edit the arena) otherwise.
-     */
     /** Whether this player is fighting right now in a crystal arena (wherever they're aiming). */
     private static boolean isCrystalFighter(final Player player) {
         final Arena own = SpawnArena.arenas.of(player);
         return own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, player);
     }
 
+    /**
+     * Someone who isn't fighting here and must be kept from changing the arena: everyone while a fight
+     * is on, and everyone but staff (to edit the arena) otherwise.
+     */
     private static boolean isOutsider(final Arena arena, final Player player) {
         return CrystalPvp.activeFight(arena) != null || !player.hasPermission(BUILD_BYPASS_PERMISSION);
     }

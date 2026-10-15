@@ -58,7 +58,7 @@ public final class ArenaTeleportGrace implements Listener {
         org.bukkit.block.Block block = loc.getBlock();
         final int bottom = loc.getWorld().getMinHeight();
         for (int i = 0; i < 64 && block.getY() >= bottom; i++, block = block.getRelative(org.bukkit.block.BlockFace.DOWN)) {
-            if (block.getType() == org.bukkit.Material.LAVA || (arena.isDeathOnTouchLiquid() && block.isLiquid()))
+            if (block.getType() == org.bukkit.Material.LAVA || (arena.isDeathOnTouchLiquid() && LiquidListener.inLiquid(block)))
                 return true;
             if (!block.isPassable())
                 return false; // they'd land on this
@@ -106,7 +106,7 @@ public final class ArenaTeleportGrace implements Listener {
 
     /** Where they were before the teleport; none (so no rescue) if that's in liquid too or outside the arena. */
     private static Location safeSpot(final Fight fight, final Player player, final Location from) {
-        if (from != null && !from.getBlock().isLiquid() && fight.getArena().equals(SpawnArena.arenas.of(from)))
+        if (from != null && !LiquidListener.inLiquid(from.getBlock()) && fight.getArena().equals(SpawnArena.arenas.of(from)))
             return from.clone();
         return null;
     }

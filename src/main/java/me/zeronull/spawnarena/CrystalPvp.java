@@ -79,10 +79,28 @@ public final class CrystalPvp {
             this.sizeY = maxY - minY + 1;
             this.sizeZ = maxZ - minZ + 1;
             this.data = new BlockData[this.sizeX * this.sizeY * this.sizeZ];
-            for (int x = 0; x < this.sizeX; x++)
-                for (int y = 0; y < this.sizeY; y++)
-                    for (int z = 0; z < this.sizeZ; z++)
-                        this.data[this.index(x, y, z)] = world.getBlockAt(minX + x, minY + y, minZ + z).getBlockData();
+        }
+
+        /** Records the columns from (x0, z0) to (x1, z1), world coordinates. Call on the thread that owns them. */
+        void fill(final World world, final int x0, final int x1, final int z0, final int z1) {
+            for (int x = x0; x <= x1; x++)
+                for (int z = z0; z <= z1; z++)
+                    for (int y = 0; y < this.sizeY; y++)
+                        this.data[this.index(x - this.minX, y, z - this.minZ)] = world.getBlockAt(x, this.minY + y, z).getBlockData();
+        }
+
+        /**
+         * The box split into chunk-sized pieces {x0, x1, z0, z1}: each is handled on the thread that owns it,
+         * since on Folia an arena can span more than one region.
+         */
+        List<int[]> chunkPieces() {
+            final List<int[]> pieces = new ArrayList<>();
+            final int maxX = this.minX + this.sizeX - 1, maxZ = this.minZ + this.sizeZ - 1;
+            for (int cx = this.minX >> 4; cx <= maxX >> 4; cx++)
+                for (int cz = this.minZ >> 4; cz <= maxZ >> 4; cz++)
+                    pieces.add(new int[]{Math.max(this.minX, cx << 4), Math.min(maxX, (cx << 4) + 15),
+                            Math.max(this.minZ, cz << 4), Math.min(maxZ, (cz << 4) + 15)});
+            return pieces;
         }
 
         private int index(final int x, final int y, final int z) {
@@ -114,8 +132,21 @@ public final class CrystalPvp {
             return;
         final Track track = trackFor(fight);
         markDirty(); // so a crash mid-fight is known about (see restoreLeftovers)
-        final Location centre = new Location(anchor.getWorld(), (box[0] + box[3]) / 2.0, (box[1] + box[4]) / 2.0, (box[2] + box[5]) / 2.0);
-        Threads.location(centre, () -> track.snapshot = new Snapshot(anchor.getWorld(), box[0], box[1], box[2], box[3], box[4], box[5]));
+        final World world = anchor.getWorld();
+        final Snapshot snapshot = new Snapshot(world, box[0], box[1], box[2], box[3], box[4], box[5]);
+        final List<int[]> pieces = snapshot.chunkPieces();
+        final java.util.concurrent.atomic.AtomicInteger left = new java.util.concurrent.atomic.AtomicInteger(pieces.size());
+        // Only used once every piece is in; if one fails it never is, and the whole arena stays unbreakable
+        for (final int[] p : pieces)
+            Threads.location(new Location(world, p[0], box[1], p[2]), () -> {
+                try {
+                    snapshot.fill(world, p[0], p[1], p[2], p[3]);
+                    if (left.decrementAndGet() == 0)
+                        track.snapshot = snapshot;
+                } catch (final Exception e) {
+                    SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't record crystal arena " + arena.getArenaName(), e);
+                }
+            });
     }
 
     /**
@@ -279,6 +310,8 @@ public final class CrystalPvp {
         return switch (type) {
             case PISTON, STICKY_PISTON -> true; // could push the arena's own blocks
             case TNT -> true;                   // can't be lit in a fight anyway (fire is blocked)
+            // Fire TNT, armor stands, boats... with a button; a hopper could empty the arena's own containers
+            case DISPENSER, DROPPER, CRAFTER, HOPPER -> true;
             default -> false;
         };
     }
@@ -352,26 +385,25 @@ public final class CrystalPvp {
         final Snapshot snapshot = track.snapshot;
         final World world = snapshot == null ? null : Bukkit.getWorld(snapshot.world);
         if (world != null) {
-            final Location centre = new Location(world, snapshot.minX + snapshot.sizeX / 2.0, snapshot.minY + snapshot.sizeY / 2.0,
-                    snapshot.minZ + snapshot.sizeZ / 2.0);
-            Threads.location(centre, () -> {
-                CLEANING.set(true);
-                try {
-                    // Top down, so things resting on others (and liquids) are dealt with first
-                    for (int y = snapshot.sizeY - 1; y >= 0; y--)
-                        for (int x = 0; x < snapshot.sizeX; x++)
-                            for (int z = 0; z < snapshot.sizeZ; z++) {
-                                final Block block = world.getBlockAt(snapshot.minX + x, snapshot.minY + y, snapshot.minZ + z);
-                                final BlockData before = snapshot.data[snapshot.index(x, y, z)];
-                                if (!block.getBlockData().equals(before))
-                                    block.setBlockData(before, false);
-                            }
-                } catch (final Exception e) {
-                    SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't fully put back crystal arena " + arena.getArenaName(), e);
-                } finally {
-                    CLEANING.set(false);
-                }
-            });
+            for (final int[] p : snapshot.chunkPieces())
+                Threads.location(new Location(world, p[0], snapshot.minY, p[2]), () -> {
+                    CLEANING.set(true);
+                    try {
+                        // Top down, so things resting on others (and liquids) are dealt with first
+                        for (int y = snapshot.sizeY - 1; y >= 0; y--)
+                            for (int x = p[0]; x <= p[1]; x++)
+                                for (int z = p[2]; z <= p[3]; z++) {
+                                    final Block block = world.getBlockAt(x, snapshot.minY + y, z);
+                                    final BlockData before = snapshot.data[snapshot.index(x - snapshot.minX, y, z - snapshot.minZ)];
+                                    if (!block.getBlockData().equals(before))
+                                        block.setBlockData(before, false);
+                                }
+                    } catch (final Exception e) {
+                        SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't fully put back crystal arena " + arena.getArenaName(), e);
+                    } finally {
+                        CLEANING.set(false);
+                    }
+                });
         }
         saveNow();
     }
@@ -525,7 +557,14 @@ public final class CrystalPvp {
             final Arena arena = SpawnArena.arenas.of(name);
             if (arena instanceof SavableArena savable) {
                 try {
-                    savable.resetArena();
+                    final java.util.concurrent.CompletableFuture<Void> reset = savable.resetArena();
+                    if (!reset.isDone()) {
+                        savable.setResetting(true);
+                        reset.orTimeout(2, java.util.concurrent.TimeUnit.MINUTES).whenComplete((ok, error) -> {
+                            savable.setResetting(false);
+                            Threads.global(() -> savable.queue.tryStartFight());
+                        });
+                    }
                     SpawnArena.INSTANCE.getLogger().info("Re-pasting crystal arena " + name + " after a fight there never finished.");
                 } catch (final Exception e) {
                     SpawnArena.INSTANCE.getLogger().warning("Couldn't re-paste crystal arena " + name + ": " + e.getMessage());

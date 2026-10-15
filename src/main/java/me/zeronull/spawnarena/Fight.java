@@ -230,8 +230,8 @@ public class Fight {
     /**
      * Cancels a match still in its countdown because {@code culprit} left, teleported or wandered off.
      * Everyone else goes straight back into the queue (front of the line) instead of losing their spot.
+     * Returns false if the match had already started or ended, in which case nothing happened.
      */
-    /** Returns false if the match had already started or ended, in which case nothing happened. */
     public boolean cancelBecause(final Player culprit, final String messageForOthers) {
         final List<Player> others = new ArrayList<>();
         for (final Player p : this.getMembers())
@@ -615,6 +615,11 @@ public class Fight {
 
     /** Restores a member's pre-fight state once; a failure is logged and never leaves the match stuck. */
     private void restore(final Player player) {
+        // Died for real: put back once they've respawned (a dead player can't be teleported or given items)
+        if (player.isOnline() && player.isDead()) {
+            Threads.globalLater(() -> Threads.entity(player, () -> this.restore(player)), 5L);
+            return;
+        }
         try {
             FightGlow.remove(player);
             me.zeronull.spawnarena.events.EgapCooldown.clear(player);

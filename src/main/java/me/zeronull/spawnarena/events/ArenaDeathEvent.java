@@ -12,12 +12,11 @@ import org.bukkit.event.entity.EntityDamageEvent;
 
 public class ArenaDeathEvent implements Listener {
     public static final Material BYPASS_ITEM = Material.TOTEM_OF_UNDYING;
-    /** Fighters who really died (something got past the death check), eliminated once they respawn */
-    private final java.util.Set<java.util.UUID> diedInFight = java.util.concurrent.ConcurrentHashMap.newKeySet();
-
     /**
-     * Safety net: a fighter who really dies keeps everything and drops nothing. Their inventory is
-     * restored after the fight anyway, so dropped items would be duplicates.
+     * Safety net: a fighter who really dies (something got past the death check) keeps everything and drops
+     * nothing, since their inventory is restored after the fight anyway. They're out straight away, and
+     * respawned for them so nobody waits on the death screen; their restore waits until they're alive again
+     * (see Fight#restore). Not done on respawn: Folia doesn't fire the respawn event.
      */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onRealDeath(final org.bukkit.event.entity.PlayerDeathEvent e) {
@@ -33,26 +32,11 @@ public class ArenaDeathEvent implements Listener {
         e.getDrops().clear();
         e.setKeepLevel(true);
         e.setDroppedExp(0);
-        this.diedInFight.add(player.getUniqueId());
-    }
-
-    @EventHandler
-    public void onRespawn(final org.bukkit.event.player.PlayerRespawnEvent e) {
-        final Player player = e.getPlayer();
-        if (!this.diedInFight.remove(player.getUniqueId()))
-            return;
-        // A tick later, once they're alive again, so restoring them works normally
         me.zeronull.spawnarena.Threads.entityLater(player, () -> {
-            final Arena arena = SpawnArena.arenas.of(player);
-            final Fight fight = arena == null ? null : arena.getFight(player);
-            if (fight != null && fight.isFighter(player))
-                fight.eliminate(player);
+            if (player.isOnline() && player.isDead())
+                player.spigot().respawn();
         }, 1L);
-    }
-
-    @EventHandler
-    public void onQuit(final org.bukkit.event.player.PlayerQuitEvent e) {
-        this.diedInFight.remove(e.getPlayer().getUniqueId());
+        fight.eliminate(player);
     }
 
     // Runs last (HIGHEST, and registered after the listeners that re-allow arena damage) and only for

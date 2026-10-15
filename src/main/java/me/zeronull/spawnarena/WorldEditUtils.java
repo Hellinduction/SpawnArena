@@ -80,7 +80,7 @@ public final class WorldEditUtils {
     }
 
     /**
-     * An edit session for pasting arenas. On plain WorldEdit (Folia, or Paper without FAWE) it skips neighbour
+     * An edit session for putting an arena back after a fight. On plain WorldEdit (Folia, or Paper without FAWE) it skips neighbour
      * updates, physics and block-state fixing: the schematic is put back exactly as saved, and those updates
      * are most of the time a paste takes. Lighting stays on so the arena isn't left dark. FAWE is left as is.
      */
@@ -120,7 +120,8 @@ public final class WorldEditUtils {
                     // What's there now, kept on disk: if the server stops before the setup is finished, it's put back
                     if (backup != null)
                         copyToFile(loc.getWorld(), min, max, loc, backup);
-                    final EditSession session = newSession(loc.getWorld());
+                    // Full block updates: an admin's own build being placed, not an exact copy being put back
+                    final EditSession session = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(loc.getWorld()));
                     try {
                         Operations.complete(new ClipboardHolder(clipboard).createPaste(session).to(to).ignoreAirBlocks(false).build());
                     } finally {

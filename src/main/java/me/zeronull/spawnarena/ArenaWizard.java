@@ -1021,16 +1021,8 @@ public final class ArenaWizard {
 
     /** "75000", "75k", "1.5m" -> the number; -1 if it isn't one. */
     private static double parseAmount(final String raw) {
-        String t = raw.trim().toLowerCase().replace(",", "").replace("$", "");
-        double multiplier = 1;
-        if (t.endsWith("k")) { multiplier = 1_000; t = t.substring(0, t.length() - 1); }
-        else if (t.endsWith("m")) { multiplier = 1_000_000; t = t.substring(0, t.length() - 1); }
-        try {
-            final double value = Double.parseDouble(t) * multiplier;
-            return Double.isFinite(value) && value >= 0 ? Math.floor(value) : -1;
-        } catch (final NumberFormatException e) {
-            return -1;
-        }
+        final double value = me.zeronull.spawnarena.commands.impl.ArenaBetCommand.parseAmount(raw);
+        return value >= 0 ? value : -1;
     }
 
     private static int parseInt(final String s, final int fallback) {

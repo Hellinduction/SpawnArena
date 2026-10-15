@@ -16,9 +16,21 @@ public final class LiquidListener implements Listener, Runnable {
         me.zeronull.spawnarena.Threads.globalTimer(task -> this.run(), 1L, 3 * 20L);
     }
 
+    /** In water or lava, counting water plants and bubble columns (which only exist in water). */
+    public static boolean inLiquid(final org.bukkit.block.Block block) {
+        if (block.isLiquid())
+            return true;
+        switch (block.getType()) {
+            case KELP, KELP_PLANT, SEAGRASS, TALL_SEAGRASS, BUBBLE_COLUMN -> { return true; }
+            default -> {}
+        }
+        // Not waterlogged blocks: a waterlogged slab or stair can be part of the floor people stand on
+        return false;
+    }
+
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPlayerMove(final PlayerMoveEvent e) {
-        if (e.getPlayer().getLocation().getBlock().isLiquid())
+        if (inLiquid(e.getPlayer().getLocation().getBlock()))
             SpawnArena.INSTANCE.getServer().getPluginManager().callEvent(new PlayerLiquidEnterEvent(e.getPlayer()));
     }
 
@@ -26,7 +38,7 @@ public final class LiquidListener implements Listener, Runnable {
     public void run() {
         for (final Player p : SpawnArena.INSTANCE.getServer().getOnlinePlayers()) {
             me.zeronull.spawnarena.Threads.entity(p, () -> {
-                if (p.getLocation().getBlock().isLiquid())
+                if (inLiquid(p.getLocation().getBlock()))
                     SpawnArena.INSTANCE.getServer().getPluginManager().callEvent(new PlayerLiquidEnterEvent(p));
             });
         }
