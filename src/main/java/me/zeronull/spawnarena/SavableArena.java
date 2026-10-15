@@ -149,6 +149,7 @@ public final class SavableArena extends Arena {
      * applied now, false if waiting.
      */
     public boolean reloadFromDisk() {
+        CrystalPvp.forgetSnapshot(this);
         final ArenaConfig config = getArenaConfig(this.getConfigFile());
         synchronized (this) {
             if (!this.getFights().isEmpty()) {

@@ -156,14 +156,5 @@ public class ConfigHandler {
         savePreFightConfig(conf);
     }
 
-//    public void setSpawnpoint(Location location, int spawnPointNumber) {
-//        GameConfig config = ConfigHandler.getInstance().getCustomConfig();
-//        if(spawnPointNumber == 1) {
-//            config.spawnPoint1 = location;
-//        } else if(spawnPointNumber == 2) {
-//            config.spawnPoint2 = location;
-//        }
-//        ConfigHandler.getInstance().saveCustomConfig(config);
-//    }
 
 }

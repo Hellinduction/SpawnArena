@@ -144,6 +144,13 @@ public class StatsManager {
                 s.execute("ALTER TABLE arena_stats ADD COLUMN lost_streak INT NOT NULL DEFAULT 0");
             if (!hasColumn(c, "arena_stats", "lost_at"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN lost_at BIGINT NOT NULL DEFAULT 0");
+            s.execute("CREATE TABLE IF NOT EXISTS arena_meta (" +
+                    "server_id VARCHAR(36) NOT NULL, " +
+                    "meta_key VARCHAR(64) NOT NULL, " +
+                    "meta_value VARCHAR(255) NOT NULL, " +
+                    "PRIMARY KEY (server_id, meta_key))");
+            if (!hasColumn(c, "arena_stats", "losses"))
+                s.execute("ALTER TABLE arena_stats ADD COLUMN losses INT NOT NULL DEFAULT 0");
             // Elo rating (display only): everyone starts at START_ELO
             if (!hasColumn(c, "arena_stats", "elo"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN elo INT NOT NULL DEFAULT " + START_ELO);
@@ -233,6 +240,15 @@ public class StatsManager {
             scopeToServer(c, s, "arena_payouts");
             scopeToServer(c, s, "owed_items");
             scopeToServer(c, s, "stat_audit");
+
+            // Losses weren't stored before: if this server already had stats then, remember when counting began
+            if (getMeta(c, "losses_checked") == null) {
+                try (ResultSet rs = s.executeQuery("SELECT 1 FROM arena_stats WHERE server_id=" + sid + " LIMIT 1")) {
+                    if (rs.next())
+                        setMeta(c, "losses_since", String.valueOf(System.currentTimeMillis()));
+                }
+                setMeta(c, "losses_checked", "1");
+            }
 
             // Get the tables onto disk now rather than whenever H2 next writes
             if (!this.mysql)
@@ -1103,6 +1119,41 @@ public class StatsManager {
         return getField(uuid, arena, "win_streak");
     }
 
+    public int getLosses(UUID uuid, String arena) {
+        return getField(uuid, arena, "losses");
+    }
+
+    /** When losses started being counted on this server, if there were stats from before then (else 0). */
+    public long getLossesSince() {
+        try (Connection c = dataSource.getConnection()) {
+            final String v = getMeta(c, "losses_since");
+            return v == null ? 0 : Long.parseLong(v);
+        } catch (SQLException | NumberFormatException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getLossesSince: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    private String getMeta(final Connection c, final String key) throws SQLException {
+        try (PreparedStatement ps = c.prepareStatement("SELECT meta_value FROM arena_meta WHERE server_id=" + sid + " AND meta_key=?")) {
+            ps.setString(1, key);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getString(1) : null;
+            }
+        }
+    }
+
+    /** Sets a value unless it's already there (works the same on H2 and MySQL). */
+    private void setMeta(final Connection c, final String key, final String value) throws SQLException {
+        if (getMeta(c, key) != null)
+            return;
+        try (PreparedStatement ps = c.prepareStatement("INSERT INTO arena_meta (server_id, meta_key, meta_value) VALUES (" + sid + ", ?, ?)")) {
+            ps.setString(1, key);
+            ps.setString(2, value);
+            ps.executeUpdate();
+        }
+    }
+
     public static final int START_ELO = 1000;
     private static final int ELO_K = 32;
 
@@ -1210,7 +1261,7 @@ public class StatsManager {
         ensure(player.getUniqueId(), arena);
         // The streak is read before it's zeroed: lost_streak and lost_at come first (MySQL applies SETs in order)
         final String sql = "UPDATE arena_stats SET lost_streak = CASE WHEN win_streak > 0 THEN win_streak ELSE lost_streak END, "
-                + "lost_at = CASE WHEN win_streak > 0 THEN ? ELSE lost_at END, win_streak = 0, streak_at = ? "
+                + "lost_at = CASE WHEN win_streak > 0 THEN ? ELSE lost_at END, win_streak = 0, streak_at = ?, losses = losses + 1 "
                 + "WHERE server_id=" + sid + " AND uuid=? AND arena=?";
         final long now = System.currentTimeMillis();
         try (Connection c = dataSource.getConnection();
@@ -1434,11 +1485,11 @@ public class StatsManager {
         props.setProperty("user", "sa");
         props.setProperty("password", "");
 
-        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at) " +
-                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak), " +
                 "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at), " +
-                "lost_streak = VALUES(lost_streak), lost_at = VALUES(lost_at), elo = VALUES(elo), elo_at = VALUES(elo_at)";
+                "lost_streak = VALUES(lost_streak), lost_at = VALUES(lost_at), elo = VALUES(elo), elo_at = VALUES(elo_at), losses = VALUES(losses)";
 
         int copied = 0;
         try (Connection h2 = new org.h2.Driver().connect(h2FileUrl() + ";IFEXISTS=TRUE", props);
@@ -1446,7 +1497,7 @@ public class StatsManager {
              ResultSet rs = read.executeQuery("SELECT uuid, arena, wins, win_streak, best_win_streak"
                      + reachedAtSelect(h2, "streak_at") + reachedAtSelect(h2, "wins_at") + reachedAtSelect(h2, "best_at")
                      + reachedAtSelect(h2, "lost_streak") + reachedAtSelect(h2, "lost_at")
-                     + (hasColumn(h2, "arena_stats", "elo") ? ", elo" : ", " + START_ELO + " AS elo") + reachedAtSelect(h2, "elo_at")
+                     + (hasColumn(h2, "arena_stats", "elo") ? ", elo" : ", " + START_ELO + " AS elo") + reachedAtSelect(h2, "elo_at") + reachedAtSelect(h2, "losses")
                      + " FROM arena_stats");
              Connection target = dataSource.getConnection()) {
 
@@ -1465,6 +1516,7 @@ public class StatsManager {
                     ps.setLong(10, rs.getLong("lost_at"));
                     ps.setInt(11, rs.getInt("elo"));
                     ps.setLong(12, rs.getLong("elo_at"));
+                    ps.setInt(13, rs.getInt("losses"));
                     ps.addBatch();
                     if (++copied % 500 == 0)
                         ps.executeBatch();
@@ -1475,6 +1527,8 @@ public class StatsManager {
                 copyBetBonuses(h2, target, sid);
                 copyAuditLog(h2, target, sid);
                 copyOwedItems(h2, target, sid);
+                if (copied > 0)
+                    copyLossesSince(h2, target);
                 target.commit();
                 rewardCache.clear();
             } catch (SQLException e) {
@@ -1486,6 +1540,33 @@ public class StatsManager {
         }
         invalidateLeaderboards();
         return copied;
+    }
+
+    /**
+     * The copied stats' losses were counted from whenever the H2 file started counting them: from its own
+     * "since" date, from now if it's older than losses (none were stored), or from the start (no note).
+     */
+    private void copyLossesSince(final Connection h2, final Connection target) throws SQLException {
+        String since = null;
+        if (!hasColumn(h2, "arena_stats", "losses"))
+            since = String.valueOf(System.currentTimeMillis());
+        else {
+            try (ResultSet tables = h2.getMetaData().getTables(null, null, "ARENA_META", null)) {
+                if (tables.next()) {
+                    try (Statement read = h2.createStatement();
+                         ResultSet rs = read.executeQuery("SELECT meta_value FROM arena_meta WHERE meta_key='losses_since'")) {
+                        if (rs.next())
+                            since = rs.getString(1);
+                    }
+                }
+            }
+        }
+        if (since == null)
+            return;
+        try (PreparedStatement del = target.prepareStatement("DELETE FROM arena_meta WHERE server_id=" + sid + " AND meta_key='losses_since'")) {
+            del.executeUpdate();
+        }
+        setMeta(target, "losses_since", since);
     }
 
     /** H2 files from older versions may lack a "reached at" column; read those as 0. */

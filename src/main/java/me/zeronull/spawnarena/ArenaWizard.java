@@ -768,6 +768,7 @@ public final class ArenaWizard {
     static String removeArena(final Arena arena, final boolean wipeStats) {
         if (!arena.getFights().isEmpty())
             return "a fight is going on there. Wait for it to end (or /arenalock on).";
+        CrystalPvp.forgetSnapshot(arena);
         final String name = arena.getArenaName();
 
         for (final Player p : arena.queue.clear())

@@ -19,9 +19,6 @@ public class ArenaWorldguardPvPEvent implements Listener {
         Player damager = event.getAttacker();
         Player defender = event.getDefender();
 
-//        System.out.println(!SpawnArena.arenas.hasActiveFight());
-//        System.out.println(!SpawnArena.arenas.hasFighter(damager));
-//        System.out.println(!SpawnArena.arenas.hasFighter(defender));
 
         if (!SpawnArena.arenas.hasActiveFight())
             return;
@@ -47,9 +44,6 @@ public class ArenaWorldguardPvPEvent implements Listener {
         if (damagerFight != null && !damagerFight.areOpponents(damager, defender))
             return;
 
-//        if(SpawnArena.arena.getFight().getState() == FightState.INITALIZING) {
-//            return;
-//        }
 
         event.setCancelled(true);
     }

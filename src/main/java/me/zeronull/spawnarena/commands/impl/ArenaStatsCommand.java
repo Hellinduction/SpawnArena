@@ -75,12 +75,15 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             sender.sendMessage("§6Stats for §e" + target.getName() + "§6:");
             for (final me.zeronull.spawnarena.Arena a : SpawnArena.arenas) {
                 final String name = a.getArenaName();
-                sender.sendMessage(String.format("§7- §e%s§7: wins=§e%d §7streak=§e%d §7best=§e%d §7elo=§e%d", name,
-                        SpawnArena.statsManager.getWins(uuid, name),
+                final int wins = SpawnArena.statsManager.getWins(uuid, name);
+                final int losses = SpawnArena.statsManager.getLosses(uuid, name);
+                sender.sendMessage(String.format("§7- §e%s§7: wins=§e%d §7losses=§e%d §7games=§e%d §7streak=§e%d §7best=§e%d §7elo=§e%d", name,
+                        wins, losses, wins + losses,
                         SpawnArena.statsManager.getWinStreak(uuid, name),
                         SpawnArena.statsManager.getBestWinStreak(uuid, name),
                         SpawnArena.statsManager.getElo(uuid, name)));
             }
+            sendLossesNote(sender);
             return true;
         }
 
@@ -109,8 +112,10 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 final int wins = SpawnArena.statsManager.getWins(uuid, arena);
                 final int streak = SpawnArena.statsManager.getWinStreak(uuid, arena);
                 final int best = SpawnArena.statsManager.getBestWinStreak(uuid, arena);
-                sender.sendMessage(String.format("§6Stats for §e%s §6in §e%s§6: wins=§e%d §6streak=§e%d §6best=§e%d §6elo=§e%d",
-                        target.getName(), arena, wins, streak, best, SpawnArena.statsManager.getElo(uuid, arena)));
+                final int losses = SpawnArena.statsManager.getLosses(uuid, arena);
+                sender.sendMessage(String.format("§6Stats for §e%s §6in §e%s§6: wins=§e%d §6losses=§e%d §6games=§e%d §6streak=§e%d §6best=§e%d §6elo=§e%d",
+                        target.getName(), arena, wins, losses, wins + losses, streak, best, SpawnArena.statsManager.getElo(uuid, arena)));
+                sendLossesNote(sender);
                 final double[] made = SpawnArena.statsManager.getMoneyMade(uuid, arena);
                 sender.sendMessage(String.format("§6Money made: §e%s §6here · §e%s §6in all arenas",
                         me.zeronull.spawnarena.StatsManager.formatMoney(made[0]), me.zeronull.spawnarena.StatsManager.formatMoney(made[1])));
@@ -151,7 +156,7 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                         stat, target.getName(), arena, value));
             }
             case "reset" -> {
-                for (final String field : new String[]{"wins", "win_streak", "best_win_streak"}) {
+                for (final String field : new String[]{"wins", "losses", "win_streak", "best_win_streak"}) {
                     final int old = SpawnArena.statsManager.getField(uuid, arena, field);
                     SpawnArena.statsManager.setField(uuid, arena, field, 0);
                     if (old != 0)
@@ -166,6 +171,13 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             default -> sender.sendMessage("§cUnknown subcommand. Use: get, set, reset");
         }
         return true;
+    }
+
+    /** Losses (and so games) only count from when this version first ran, if there were stats before that. */
+    private static void sendLossesNote(final CommandSender sender) {
+        final long since = SpawnArena.statsManager.getLossesSince();
+        if (since > 0)
+            sender.sendMessage("§7(losses and games counted since " + new java.text.SimpleDateFormat("d MMM yyyy").format(new java.util.Date(since)) + ")");
     }
 
     // ── Audit log and rollback ──────────────────────────────────────────────

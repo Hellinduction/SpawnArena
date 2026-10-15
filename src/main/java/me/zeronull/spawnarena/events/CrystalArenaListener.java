@@ -69,7 +69,7 @@ public final class CrystalArenaListener implements Listener {
 
     /** Respawn anchor / bed position -> who last used it, so its explosion counts as theirs. */
     private record Use(UUID player, long at) {}
-    private final Map<BlockKey, Use> explosiveBlockUses = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final Map<BlockKey, Use> explosiveBlockUses = new java.util.concurrent.ConcurrentHashMap<>();
     /** Explosion blocks as they were before other plugins (WorldGuard) filtered them. */
     private final Map<Event, List<Block>> explosionBlocks = java.util.Collections.synchronizedMap(new IdentityHashMap<>());
     private final Map<UUID, Long> lastMessage = new java.util.concurrent.ConcurrentHashMap<>();
@@ -162,6 +162,15 @@ public final class CrystalArenaListener implements Listener {
         e.setExpToDrop(0); // the block itself drops, as a match item (see onItemSpawn)
     }
 
+    /** A charged anchor blows up when used outside the nether, unless it's being charged further with glowstone. */
+    private static boolean anchorWillExplode(final Block anchor, final org.bukkit.inventory.ItemStack inHand) {
+        if (!(anchor.getBlockData() instanceof org.bukkit.block.data.type.RespawnAnchor data) || data.getCharges() == 0)
+            return false;
+        if (anchor.getWorld().getEnvironment() == org.bukkit.World.Environment.NETHER)
+            return false;
+        return !(inHand != null && inHand.getType() == Material.GLOWSTONE && data.getCharges() < data.getMaximumCharges());
+    }
+
     /** End crystals: WorldGuard checks them when the item is used, before any entity exists. */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onInteract(final PlayerInteractEvent e) {
@@ -183,9 +192,15 @@ public final class CrystalArenaListener implements Listener {
                     e.setCancelled(true);
                 return;
             }
-            this.explosiveBlockUses.put(BlockKey.of(clicked), new Use(player.getUniqueId(), System.currentTimeMillis()));
+            explosiveBlockUses.put(BlockKey.of(clicked), new Use(player.getUniqueId(), System.currentTimeMillis()));
+            // Fight stats: counted now, as the blast can end the fight before the explode event fires
+            if (type == Material.RESPAWN_ANCHOR && anchorWillExplode(clicked, e.getItem())) {
+                final Fight fight = arena.getFight(player);
+                if (fight != null)
+                    fight.stats().anchorSetOff(player);
+            }
             if (Tag.BEDS.isTagged(type))
-                this.explosiveBlockUses.put(BlockKey.of(otherBedHalf(clicked)), new Use(player.getUniqueId(), System.currentTimeMillis()));
+                explosiveBlockUses.put(BlockKey.of(otherBedHalf(clicked)), new Use(player.getUniqueId(), System.currentTimeMillis()));
             e.setUseInteractedBlock(Event.Result.ALLOW);
             e.setUseItemInHand(Event.Result.ALLOW);
             return;
@@ -231,6 +246,7 @@ public final class CrystalArenaListener implements Listener {
 
         e.setCancelled(false);
         CrystalPvp.recordCrystal(arena.getFight(player), e.getEntity());
+        arena.getFight(player).stats().crystalPlaced(player);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -385,14 +401,14 @@ public final class CrystalArenaListener implements Listener {
     }
 
     /** Who set off the explosion: whoever popped the crystal, or whoever last used the anchor/bed. */
-    private Player causeOf(final EntityDamageEvent e, final Location where) {
+    public static Player causeOf(final EntityDamageEvent e, final Location where) {
         final Entity causing = e.getDamageSource().getCausingEntity();
         if (causing != null)
             return playerBehind(causing);
 
         if (where == null)
             return null;
-        final Use use = this.explosiveBlockUses.get(BlockKey.of(where));
+        final Use use = explosiveBlockUses.get(BlockKey.of(where));
         if (use == null || System.currentTimeMillis() - use.at() > BLOCK_EXPLOSION_MEMORY_MILLIS)
             return null;
         return Bukkit.getPlayer(use.player());
@@ -518,6 +534,22 @@ public final class CrystalArenaListener implements Listener {
     public void onGrow(final StructureGrowEvent e) {
         if (this.duringFight(e.getLocation()))
             e.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEditPlace(final BlockPlaceEvent e) {
+        this.forgetIfEdited(e.getBlock());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEditBreak(final BlockBreakEvent e) {
+        this.forgetIfEdited(e.getBlock());
+    }
+
+    private void forgetIfEdited(final Block block) {
+        final Arena arena = CrystalPvp.arenaAt(block);
+        if (arena != null && CrystalPvp.activeFight(arena) == null)
+            CrystalPvp.forgetSnapshot(arena);
     }
 
     /** No pistons in the arena, and none outside it moving the arena's blocks (or anything into it). */
@@ -655,7 +687,7 @@ public final class CrystalArenaListener implements Listener {
     /** Drops old anchor/bed uses and message cooldowns. */
     private void forget() {
         final long now = System.currentTimeMillis();
-        this.explosiveBlockUses.values().removeIf(use -> now - use.at() > BLOCK_EXPLOSION_MEMORY_MILLIS);
+        explosiveBlockUses.values().removeIf(use -> now - use.at() > BLOCK_EXPLOSION_MEMORY_MILLIS);
         this.lastMessage.values().removeIf(at -> now - at > MESSAGE_COOLDOWN_MILLIS);
     }
 }

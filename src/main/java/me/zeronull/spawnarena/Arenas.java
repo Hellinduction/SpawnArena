@@ -41,7 +41,6 @@ public final class Arenas implements Iterable<Arena> {
 
     public boolean hasActiveFight() {
         return this.arenas.stream().anyMatch(arena -> !arena.getFights().isEmpty());
-//        return this.arenas.stream().anyMatch(arena -> arena.getFight().orElse(null) != null);
     }
 
     /**
@@ -52,7 +51,6 @@ public final class Arenas implements Iterable<Arena> {
      */
     public boolean hasFighter(final Player fighter) {
         return this.of(fighter) != null;
-//        return this.arenas.stream().anyMatch(arena -> arena.getFight() != null && arena.getFight().isFighter(fighter));
     }
 
     public boolean hasFighter(final Player fighter, final Arena exclusion) {
@@ -81,7 +79,6 @@ public final class Arenas implements Iterable<Arena> {
             if (arena.getFights().isEmpty())
                 continue;
 
-//            if (!arena.getFight().orElse(null).isFighter(fighter))
             if (!arena.getFights().stream().anyMatch(fight -> fight.isFighter(fighter)))
                 continue;
 
@@ -123,13 +120,10 @@ public final class Arenas implements Iterable<Arena> {
         final RegionQuery query = Arena.ArenaUtils.REGION_CONTAINER.createQuery();
         final ApplicableRegionSet regionSet = query.getApplicableRegions(BukkitAdapter.adapt(loc));
 
-//        System.out.println(String.format("Region set size: %s", regionSet.size()));
 
         for (final Arena arena : this) {
-//            System.out.println(arena.getArenaName());
 
             for (final ProtectedRegion region : regionSet) {
-//                System.out.println(region.getId() + " : " + arena.getArenaName());
                 // WorldGuard stores region IDs in lower case
                 if (!region.getId().equalsIgnoreCase(arena.getArenaName()))
                     continue;

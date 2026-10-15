@@ -19,12 +19,14 @@ public final class LeaderboardHolograms {
     private static final double LINE_HEIGHT = 0.25;
     private static final double PADDING = 0.1;
     private static final int MAX_SCAN = 16;
+    /** How far above the floor it goes when there's room, so the bottom line is clear of the ground. */
+    public static final double LIFT = 0.5;
 
     private LeaderboardHolograms() {}
 
     public record Placement(Location location, boolean fits) {}
 
-    /** Nudges the hologram out of the floor, then down from any ceiling its top would clip into. */
+    /** Nudges the hologram out of the floor and a bit above it, then down from any ceiling its top would clip into. */
     public static Placement correctPlacement(final Location requested, final int lineCount) {
         final Location loc = requested.clone();
         final double height = lineCount * LINE_HEIGHT + PADDING;
@@ -37,16 +39,17 @@ public final class LeaderboardHolograms {
             loc.setY(Math.max(top, block.getY() + 1e-3) + PADDING);
         }
         final double floor = loc.getY();
+        loc.setY(floor + LIFT);
 
         // Find the lowest solid block the hologram's column would intersect
         Double ceiling = null;
-        final int startY = loc.getBlockY();
+        final int startY = (int) Math.floor(floor);
         final int endY = (int) Math.floor(loc.getY() + height);
         for (int y = startY; y <= endY; y++) {
             final org.bukkit.block.Block block = loc.getWorld().getBlockAt(loc.getBlockX(), y, loc.getBlockZ());
             if (block.isPassable()) continue;
             final double bottom = block.getBoundingBox().getMinY();
-            if (bottom > loc.getY()) {
+            if (bottom > floor) {
                 ceiling = bottom;
                 break;
             }
@@ -80,6 +83,7 @@ public final class LeaderboardHolograms {
 
         final Hologram hologram = manager.create(data);
         manager.addHologram(hologram);
+        rememberCreated(name);
         return name;
     }
 
@@ -134,6 +138,7 @@ public final class LeaderboardHolograms {
 
         final Hologram hologram = manager.create(data);
         manager.addHologram(hologram);
+        rememberCreated(name);
         return name;
     }
 
@@ -349,6 +354,7 @@ public final class LeaderboardHolograms {
         return spot;
     }
 
+    /** Every leaderboard hologram, oldest first (ones made before the order was kept come first, by name). */
     public static List<String> list() {
         final List<String> names = new ArrayList<>();
         for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
@@ -356,6 +362,35 @@ public final class LeaderboardHolograms {
             if (n.startsWith(NAME_PREFIX))
                 names.add(n);
         }
+        final List<String> order = createdOrder();
+        // Unknown ones (indexOf -1) predate the kept order, so they're the oldest and come first
+        names.sort(java.util.Comparator.<String>comparingInt(order::indexOf).thenComparing(java.util.Comparator.naturalOrder()));
         return names;
+    }
+
+    // FancyHolograms doesn't keep the order holograms were made in, so it's kept here, one name per line
+    private static java.io.File orderFile() {
+        return new java.io.File(SpawnArena.INSTANCE.getDataFolder(), "leaderboard-order.txt");
+    }
+
+    private static synchronized List<String> createdOrder() {
+        try {
+            return orderFile().exists() ? java.nio.file.Files.readAllLines(orderFile().toPath()) : new ArrayList<>();
+        } catch (java.io.IOException e) {
+            return new ArrayList<>();
+        }
+    }
+
+    /** Adds a new hologram to the end, dropping names of ones that no longer exist. */
+    private static synchronized void rememberCreated(final String name) {
+        final HologramManager manager = FancyHologramsPlugin.get().getHologramManager();
+        final List<String> order = new ArrayList<>(createdOrder());
+        order.removeIf(n -> n.equals(name) || manager.getHologram(n).isEmpty());
+        order.add(name);
+        try {
+            java.nio.file.Files.write(orderFile().toPath(), order);
+        } catch (java.io.IOException e) {
+            org.bukkit.Bukkit.getLogger().warning("[SpawnArena] Couldn't save the leaderboard order: " + e.getMessage());
+        }
     }
 }

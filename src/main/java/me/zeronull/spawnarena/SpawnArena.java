@@ -79,6 +79,7 @@ public class SpawnArena extends JavaPlugin {
 
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaCommandEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.EgapCooldown(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.FightStatsListener(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaDropItemEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPreventCraftingSlot(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPlayerLeave(), this);

@@ -24,12 +24,12 @@ import java.util.UUID;
 import java.util.logging.Level;
 
 /**
- * Crystal PvP arenas: fighters can build inside the arena's region, but only blocks placed during the
- * current fight can be broken or blown up. Everything placed (blocks and end crystals) is put back the
- * way it was when the fight ends.
+ * Crystal PvP arenas: fighters can build inside the arena's region, but anything that was there when the fight
+ * started (its snapshot) can't be broken, blown up or built over; spots that were empty are fair game. When the
+ * fight ends, every block in the region is put back as the snapshot has it, and crystals and items are removed.
  *
- * <p>What's been placed is also written to crystal-cleanup.txt, so a crash mid-fight is cleaned up on
- * the next start.
+ * <p>What's been placed (and which fights were running) is also written to crystal-cleanup.txt, so a crash
+ * mid-fight is cleaned up on the next start.
  */
 public final class CrystalPvp {
     private CrystalPvp() {}
@@ -81,12 +81,12 @@ public final class CrystalPvp {
             this.data = new BlockData[this.sizeX * this.sizeY * this.sizeZ];
         }
 
-        /** Records the columns from (x0, z0) to (x1, z1), world coordinates. Call on the thread that owns them. */
-        void fill(final World world, final int x0, final int x1, final int z0, final int z1) {
+        /** Records the columns from (x0, z0) to (x1, z1) from that chunk's frozen copy. Any thread. */
+        void fill(final org.bukkit.ChunkSnapshot chunk, final int x0, final int x1, final int z0, final int z1) {
             for (int x = x0; x <= x1; x++)
                 for (int z = z0; z <= z1; z++)
                     for (int y = 0; y < this.sizeY; y++)
-                        this.data[this.index(x - this.minX, y, z - this.minZ)] = world.getBlockAt(x, this.minY + y, z).getBlockData();
+                        this.data[this.index(x - this.minX, y, z - this.minZ)] = chunk.getBlockData(x & 15, this.minY + y, z & 15);
         }
 
         /**
@@ -119,34 +119,81 @@ public final class CrystalPvp {
     }
 
     /**
-     * Takes the snapshot when a crystal fight starts (on the arena's own thread). Until it's there, every block
-     * counts as part of the arena, so nothing can be broken by accident.
+     * Each arena's last good snapshot, as a fallback if taking a new one fails. Thrown away when the arena may
+     * have changed since: someone built in it outside a fight, its settings were reloaded or it was set up
+     * again, or it's older than SNAPSHOT_FALLBACK_MILLIS (WorldEdit edits can't be seen any other way).
      */
-    public static void takeSnapshot(final Fight fight) {
+    private record LastSnapshot(Snapshot snapshot, long takenAt) {}
+    private static final Map<String, LastSnapshot> LAST_SNAPSHOTS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long SNAPSHOT_FALLBACK_MILLIS = 30 * 60 * 1000L;
+
+    /** Makes the next snapshot fail, once (only the test server sets this, to check the fallback works). */
+    public static volatile boolean failNextSnapshot;
+
+    /** The arena may have changed: its saved snapshot can't be used as a fallback any more. */
+    public static void forgetSnapshot(final Arena arena) {
+        LAST_SNAPSHOTS.remove(arena.getArenaName().toLowerCase());
+    }
+
+    /** Runs work off the server's threads (reading frozen chunk copies). */
+    private static final java.util.concurrent.Executor OFF_THREAD =
+            task -> Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, t -> task.run());
+
+    /**
+     * Takes the snapshot when a crystal fight starts: each chunk is copied (cheaply) on the thread that owns it,
+     * and the blocks are read out of those copies off the server's threads, so the server doesn't stall. The
+     * fight waits for this before anyone is sent in (see Fight#startFight): true once it's ready, false if it
+     * failed or took over 10 seconds (then the fight is called off). Until it's ready every block counts as part
+     * of the arena anyway, so nothing can be broken in the meantime.
+     */
+    public static java.util.concurrent.CompletableFuture<Boolean> takeSnapshot(final Fight fight) {
         final Arena arena = fight.getArena();
         final Location anchor = arena.spawnPoint1;
         if (anchor == null || anchor.getWorld() == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
-            return;
+            return java.util.concurrent.CompletableFuture.completedFuture(true);
         final int[] box = Regions.bounds(arena, anchor.getWorld());
         if (box == null)
-            return;
+            return java.util.concurrent.CompletableFuture.completedFuture(true);
         final Track track = trackFor(fight);
         markDirty(); // so a crash mid-fight is known about (see restoreLeftovers)
         final World world = anchor.getWorld();
         final Snapshot snapshot = new Snapshot(world, box[0], box[1], box[2], box[3], box[4], box[5]);
         final List<int[]> pieces = snapshot.chunkPieces();
-        final java.util.concurrent.atomic.AtomicInteger left = new java.util.concurrent.atomic.AtomicInteger(pieces.size());
-        // Only used once every piece is in; if one fails it never is, and the whole arena stays unbreakable
+        final List<java.util.concurrent.CompletableFuture<org.bukkit.ChunkSnapshot>> copies = new ArrayList<>();
         for (final int[] p : pieces)
-            Threads.location(new Location(world, p[0], box[1], p[2]), () -> {
-                try {
-                    snapshot.fill(world, p[0], p[1], p[2], p[3]);
-                    if (left.decrementAndGet() == 0)
-                        track.snapshot = snapshot;
-                } catch (final Exception e) {
+            copies.add(Threads.supplyAt(new Location(world, p[0], box[1], p[2]),
+                    () -> world.getChunkAt(p[0] >> 4, p[2] >> 4).getChunkSnapshot(false, false, false)));
+        return java.util.concurrent.CompletableFuture.allOf(copies.toArray(new java.util.concurrent.CompletableFuture[0]))
+                .thenApplyAsync(ignored -> {
+                    if (failNextSnapshot) {
+                        failNextSnapshot = false;
+                        throw new IllegalStateException("snapshot made to fail (test)");
+                    }
+                    for (int i = 0; i < pieces.size(); i++) {
+                        final int[] p = pieces.get(i);
+                        snapshot.fill(copies.get(i).join(), p[0], p[1], p[2], p[3]);
+                    }
+                    track.snapshot = snapshot;
+                    LAST_SNAPSHOTS.put(arena.getArenaName().toLowerCase(), new LastSnapshot(snapshot, System.currentTimeMillis()));
+                    return true;
+                }, OFF_THREAD)
+                .completeOnTimeout(false, 10, java.util.concurrent.TimeUnit.SECONDS)
+                .exceptionally(e -> {
                     SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't record crystal arena " + arena.getArenaName(), e);
-                }
-            });
+                    return false;
+                })
+                .thenApply(ok -> ok || useLastSnapshot(arena, track));
+    }
+
+    /** A fresh snapshot failed: falls back on the arena's last good one, if it can still be trusted. */
+    private static boolean useLastSnapshot(final Arena arena, final Track track) {
+        final LastSnapshot last = LAST_SNAPSHOTS.get(arena.getArenaName().toLowerCase());
+        if (last == null || System.currentTimeMillis() - last.takenAt() > SNAPSHOT_FALLBACK_MILLIS)
+            return false;
+        track.snapshot = last.snapshot();
+        SpawnArena.INSTANCE.getLogger().warning("Couldn't take a fresh snapshot of crystal arena " + arena.getArenaName()
+                + "; using the one from " + ((System.currentTimeMillis() - last.takenAt()) / 60000) + " minute(s) ago.");
+        return true;
     }
 
     /**
@@ -247,11 +294,6 @@ public final class CrystalPvp {
     public static boolean isActiveFighter(final Arena arena, final org.bukkit.entity.Player player) {
         final Fight fight = arena.getFight(player);
         return fight != null && fight.getState() == FightState.IN_FIGHT && fight.isFighter(player);
-    }
-
-    public static boolean isPlaced(final Arena arena, final Block block) {
-        final Track track = TRACKS.get(arena);
-        return track != null && track.original.containsKey(BlockKey.of(block));
     }
 
     public static boolean isPlacedCrystal(final Arena arena, final Entity entity) {
@@ -356,13 +398,14 @@ public final class CrystalPvp {
 
     /**
      * Puts this fight's arena back the way it was. Safe to call more than once, from any thread: each
-     * crystal, item and block is dealt with on the thread that owns it (immediately on Paper).
+     * crystal, item and block is dealt with on the thread that owns it (immediately on Paper). Done once the
+     * returned future completes (the re-paste waits for it).
      */
-    public static void cleanup(final Fight fight) {
+    public static java.util.concurrent.CompletableFuture<Void> cleanup(final Fight fight) {
         final Arena arena = fight.getArena();
         final Track track = take(fight);
         if (track == null)
-            return;
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
 
         for (final UUID id : track.crystals)
             removeEntity(id);
@@ -384,28 +427,58 @@ public final class CrystalPvp {
         // Everything else that changed, however it changed (water flowing, cobble forming, things falling...)
         final Snapshot snapshot = track.snapshot;
         final World world = snapshot == null ? null : Bukkit.getWorld(snapshot.world);
+        final List<java.util.concurrent.CompletableFuture<Void>> pieces = new ArrayList<>();
         if (world != null) {
-            for (final int[] p : snapshot.chunkPieces())
-                Threads.location(new Location(world, p[0], snapshot.minY, p[2]), () -> {
-                    CLEANING.set(true);
-                    try {
-                        // Top down, so things resting on others (and liquids) are dealt with first
-                        for (int y = snapshot.sizeY - 1; y >= 0; y--)
-                            for (int x = p[0]; x <= p[1]; x++)
-                                for (int z = p[2]; z <= p[3]; z++) {
-                                    final Block block = world.getBlockAt(x, snapshot.minY + y, z);
-                                    final BlockData before = snapshot.data[snapshot.index(x - snapshot.minX, y, z - snapshot.minZ)];
-                                    if (!block.getBlockData().equals(before))
-                                        block.setBlockData(before, false);
-                                }
-                    } catch (final Exception e) {
-                        SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't fully put back crystal arena " + arena.getArenaName(), e);
-                    } finally {
-                        CLEANING.set(false);
-                    }
-                });
+            for (final int[] p : snapshot.chunkPieces()) {
+                final Location at = new Location(world, p[0], snapshot.minY, p[2]);
+                if (!SpawnArena.INSTANCE.isEnabled()) {
+                    // Shutting down: no other threads to hand work to, so it's all done here and now
+                    Threads.location(at, () -> setChanged(arena, world, snapshot, p, changedIn(world.getChunkAt(p[0] >> 4, p[2] >> 4)
+                            .getChunkSnapshot(false, false, false), snapshot, p)));
+                    continue;
+                }
+                // Copy the chunk where it lives, find what changed off the server's threads, set only that back
+                pieces.add(Threads.supplyAt(at, () -> world.getChunkAt(p[0] >> 4, p[2] >> 4).getChunkSnapshot(false, false, false))
+                        .thenApplyAsync(copy -> changedIn(copy, snapshot, p), OFF_THREAD)
+                        .thenCompose(changed -> Threads.supplyAt(at, () -> {
+                            setChanged(arena, world, snapshot, p, changed);
+                            return (Void) null;
+                        }))
+                        .exceptionally(e -> {
+                            SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't fully put back crystal arena " + arena.getArenaName(), e);
+                            return null;
+                        }));
+            }
         }
         saveNow();
+        return java.util.concurrent.CompletableFuture.allOf(pieces.toArray(new java.util.concurrent.CompletableFuture[0]))
+                .orTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .exceptionally(e -> null); // the re-paste still follows
+    }
+
+    /** Spots in this piece that differ from the snapshot, top down: {x, y, z} with y relative to the snapshot. */
+    private static List<int[]> changedIn(final org.bukkit.ChunkSnapshot now, final Snapshot snapshot, final int[] p) {
+        final List<int[]> changed = new ArrayList<>();
+        for (int y = snapshot.sizeY - 1; y >= 0; y--)
+            for (int x = p[0]; x <= p[1]; x++)
+                for (int z = p[2]; z <= p[3]; z++)
+                    if (!now.getBlockData(x & 15, snapshot.minY + y, z & 15).equals(snapshot.data[snapshot.index(x - snapshot.minX, y, z - snapshot.minZ)]))
+                        changed.add(new int[]{x, y, z});
+        return changed;
+    }
+
+    /** Puts those spots back as the snapshot has them. On the thread that owns them. */
+    private static void setChanged(final Arena arena, final World world, final Snapshot snapshot, final int[] p, final List<int[]> changed) {
+        CLEANING.set(true);
+        try {
+            for (final int[] c : changed)
+                world.getBlockAt(c[0], snapshot.minY + c[1], c[2])
+                        .setBlockData(snapshot.data[snapshot.index(c[0] - snapshot.minX, c[1], c[2] - snapshot.minZ)], false);
+        } catch (final Exception e) {
+            SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't fully put back crystal arena " + arena.getArenaName(), e);
+        } finally {
+            CLEANING.set(false);
+        }
     }
 
     private static void putBack(final Arena arena, final Block block, final BlockData data) {

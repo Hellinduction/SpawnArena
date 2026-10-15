@@ -59,6 +59,14 @@ public class Fight {
     /** Fighters who quit (as opposed to their connection dropping): a lost bet doesn't come back for them. */
     private final Set<UUID> quitters = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    private final FightStats stats = new FightStats();
+    /** Crystal arenas: the snapshot, taken during the countdown; nobody is sent in until it's ready. */
+    private volatile java.util.concurrent.CompletableFuture<Boolean> arenaReady = java.util.concurrent.CompletableFuture.completedFuture(true);
+
+    public FightStats stats() {
+        return this.stats;
+    }
+
     public Map<UUID, Double> bets() {
         return this.bets;
     }
@@ -170,6 +178,10 @@ public class Fight {
         this.alive.addAll(teamA);
         this.alive.addAll(teamB);
         arena.addFight(this);
+        // Crystal arenas: the snapshot is taken while everyone waits for the countdown (nobody can be in the
+        // arena then: it's empty, and a new match only starts once the last one's reset is done)
+        if (arena.isCrystalPvp())
+            this.arenaReady = CrystalPvp.takeSnapshot(this);
 
         if (this.mode == FightMode.TWO_V_TWO)
             this.announceTeams();
@@ -296,9 +308,9 @@ public class Fight {
             this.arriving.addAll(this.getFighters());
         }
         Arena.ArenaUtils.kickOutLingeringPlayers(this.arena);
-        // Crystal arenas: remember how the arena looks before anyone can change it
-        if (this.arena.isCrystalPvp())
-            CrystalPvp.takeSnapshot(this);
+        // Crystal arenas: the snapshot started with the countdown and is almost always ready by now; if it isn't,
+        // the fighters are only sent in once it is (and the fight is called off if it failed)
+        final java.util.concurrent.CompletableFuture<Boolean> arenaReady = this.arenaReady;
 
         // Extra inventory backup through an inventory-saving plugin, if the server has one with /invsave.
         // Console commands belong on the global thread, which is where the countdown runs.
@@ -314,9 +326,20 @@ public class Fight {
                 : java.util.concurrent.CompletableFuture.completedFuture(null);
 
         // If a spawn's area doesn't answer in time, start anyway (teammates just share the spawn point)
-        spots.completeOnTimeout(null, 3, java.util.concurrent.TimeUnit.SECONDS).whenComplete((ignored, error) -> {
-            if (error != null)
-                SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.WARNING, "Couldn't place 2v2 teammates side by side", error);
+        final java.util.concurrent.CompletableFuture<Void> placed = spots.completeOnTimeout(null, 3, java.util.concurrent.TimeUnit.SECONDS)
+                .exceptionally(error -> {
+                    SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.WARNING, "Couldn't place 2v2 teammates side by side", error);
+                    return null;
+                });
+        placed.thenCombine(arenaReady, (ignored, ready) -> ready).whenComplete((ready, error) -> {
+            if (!Boolean.TRUE.equals(ready)) {
+                // No snapshot, no fight: nobody has been sent in or set up yet
+                for (final Player p : this.getMembers())
+                    if (p.isOnline())
+                        p.sendMessage(ChatColor.RED + "The arena couldn't be got ready, so the fight was called off. Try again in a moment.");
+                this.endFight();
+                return;
+            }
             for (final Player fighter : new ArrayList<>(this.arriving))
                 Threads.entity(fighter, () -> this.getReady(fighter));
         });
@@ -424,6 +447,7 @@ public class Fight {
                 return;
             this.fightState = FightState.IN_FIGHT;
         }
+        this.stats.start();
         if (this.mode == FightMode.TWO_V_TWO)
             Threads.async(() -> TeamPicker.remember(this.teamA, this.teamB));
         this.performHideLogic();
@@ -574,19 +598,21 @@ public class Fight {
         FightGlow.end(this);
         this.performShowLogic();
 
-        // Crystal arenas: take out everything placed during the fight
-        CrystalPvp.cleanup(this);
+        // Crystal arenas: everything put back as it was when the fight started
+        final java.util.concurrent.CompletableFuture<Void> cleaned = CrystalPvp.cleanup(this);
 
-        // Reset before the next match is started, so the paste isn't racing its countdown
+        // Reset before the next match is started, so the paste isn't racing its countdown (and after the
+        // crystal clean-up, so the two don't fight over the same blocks)
         if (this.getArena() instanceof SavableArena savableArena && this.getArena().getArenaMode() == ArenaMode.SINGLE) {
-            java.util.concurrent.CompletableFuture<Void> reset;
-            try {
-                reset = savableArena.resetArena();
-            } catch (final Exception e) {
-                SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE,
-                        "Couldn't reset arena " + savableArena.getArenaName(), e);
-                reset = java.util.concurrent.CompletableFuture.completedFuture(null);
-            }
+            final java.util.concurrent.CompletableFuture<Void> reset = cleaned.thenCompose(ignored -> {
+                try {
+                    return savableArena.resetArena();
+                } catch (final Exception e) {
+                    SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE,
+                            "Couldn't reset arena " + savableArena.getArenaName(), e);
+                    return java.util.concurrent.CompletableFuture.completedFuture(null);
+                }
+            });
             // A crystal arena is pasted back in full: nobody fights in it until that's done (its reward
             // hologram says it's resetting meanwhile)
             if (this.arena.isCrystalPvp() && !reset.isDone()) {
@@ -645,12 +671,21 @@ public class Fight {
     private void announceResult(final List<Player> winners, final List<Player> losers) {
         final String arenaPart = "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " ";
 
+        // Hovering over the result shows the fight's stats
+        final net.kyori.adventure.text.event.HoverEvent<Component> statsHover =
+                net.kyori.adventure.text.event.HoverEvent.showText(this.stats.card(this, winners, losers));
+        // The losers went out on their own (fell, drowned, their own blast...) without the winners ever touching
+        // them: said so instead of "beat". Not for quitting, which has its own meaning
+        final boolean selfOut = this.stats.untouched(losers) && losers.stream().noneMatch(this::hasQuit);
+
         if (this.duel) {
             // Duels don't count for anything, so only the duelists are told
-            final Component message = MiniMessage.miniMessage().deserialize("<dark_red><winner> beat <loser> in a duel in the <arena>arena!",
+            final Component message = MiniMessage.miniMessage().deserialize(selfOut
+                            ? "<dark_red><loser> took themselves out in a duel in the <arena>arena, <winner> wins!"
+                            : "<dark_red><winner> beat <loser> in a duel in the <arena>arena!",
                     Placeholder.component("winner", displayNames(winners)),
                     Placeholder.component("loser", displayNames(losers)),
-                    Placeholder.parsed("arena", arenaPart));
+                    Placeholder.parsed("arena", arenaPart)).hoverEvent(statsHover);
             for (final Player p : this.getMembers())
                 if (p.isOnline())
                     p.sendMessage(message);
@@ -697,16 +732,18 @@ public class Fight {
         }
 
         if (endedStreaks.isEmpty()) {
-            broadcast(MiniMessage.miniMessage().deserialize("<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
+            broadcast(MiniMessage.miniMessage().deserialize(selfOut
+                            ? "<dark_red><loser> took themselves out in the <arena>arena, <winner> wins<ws_str>!"
+                            : "<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
                     Placeholder.component("winner", displayNames(winners)),
                     Placeholder.component("loser", displayNames(losers)),
                     Placeholder.parsed("arena", arenaPart),
-                    Placeholder.parsed("ws_str", streakPart(winnerStreaks))),
+                    Placeholder.parsed("ws_str", streakPart(winnerStreaks))).hoverEvent(statsHover),
                     winners, losers);
         } else {
             // A long streak just ended: that replaces the usual result message
             for (final Map.Entry<Player, Integer> ended : endedStreaks.entrySet())
-                this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers);
+                this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut);
         }
 
         if (Bukkit.getPluginManager().isPluginEnabled("Vault")) {
@@ -732,16 +769,19 @@ public class Fight {
      * The dramatic announcement when a long win streak gets ended, with a (harmless) lightning strike where
      * that player went down. Its thunder is vanilla's, so only players near enough to see it hear it.
      */
-    private void announceStreakEnded(final Player loser, final int streak, final List<Player> winners, final List<Player> losers) {
-        final Component message = MiniMessage.miniMessage().deserialize(
-                "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><winner></gold> <red>ended <loser><possessive> "
-                        + "<white><bold><streak></bold></white>-win streak in <arena>!",
+    private void announceStreakEnded(final Player loser, final int streak, final List<Player> winners, final List<Player> losers,
+                                     final net.kyori.adventure.text.event.HoverEvent<Component> statsHover, final boolean selfOut) {
+        final Component message = MiniMessage.miniMessage().deserialize(selfOut
+                        ? "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><loser></gold> <red>ended their own "
+                                + "<white><bold><streak></bold></white>-win streak in <arena>!"
+                        : "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><winner></gold> <red>ended <loser><possessive> "
+                                + "<white><bold><streak></bold></white>-win streak in <arena>!",
                 Placeholder.component("loser", loser.displayName()),
                 // "Chris'" rather than "Chris's"
                 Placeholder.unparsed("possessive", Grammar.possessiveSuffix(loser.getName())),
                 Placeholder.component("winner", displayNames(winners)),
                 Placeholder.unparsed("streak", String.valueOf(streak)),
-                Placeholder.unparsed("arena", Arena.displayName(this.arena.getArenaName())));
+                Placeholder.unparsed("arena", Arena.displayName(this.arena.getArenaName()))).hoverEvent(statsHover);
 
         broadcast(message, winners, losers);
 

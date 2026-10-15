@@ -1,6 +1,6 @@
 # SpawnArena
 
-An arena plugin at the spawn, originally developed for the VIVSMP Minecraft server. Updated for LeafMC/Paper 1.21.11, and runs on Folia (see below for what differs there).
+An arena plugin at the spawn, made for the AquaMC Minecraft server. Built for LeafMC/Paper 1.21.11, and runs on Folia (see below for what differs there).
 
 # How to build the jar
 

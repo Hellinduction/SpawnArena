@@ -77,9 +77,11 @@ public class ArenaDeathEvent implements Listener {
             return;
         }
 
-        event.setCancelled(true);
-
         final Fight fight = arena.getFight(defender);
+        // Counted now, though it's cancelled: eliminating them can end the fight and send the stats card
+        if (fight != null && fight.getState() == me.zeronull.spawnarena.FightState.IN_FIGHT)
+            FightStatsListener.record(event, fight, defender);
+        event.setCancelled(true);
 
         if (fight == null)
             return;

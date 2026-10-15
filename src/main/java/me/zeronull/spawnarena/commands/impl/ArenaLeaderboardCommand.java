@@ -107,7 +107,8 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         final String name = LeaderboardHolograms.spawn(arena, stat, limit, placement.location());
         sender.sendMessage(String.format("§aCreated %s leaderboard hologram for §e%s§a named §e%s§a.", statLabel(stat), arena, name));
 
-        final double shift = placement.location().getY() - p.getLocation().getY();
+        // It always goes LIFT above the floor; only mention anything beyond that
+        final double shift = placement.location().getY() - p.getLocation().getY() - LeaderboardHolograms.LIFT;
         if (Math.abs(shift) > 0.01)
             sender.sendMessage(String.format("§7Moved %s by %.2f blocks to avoid clipping into the %s.",
                     shift > 0 ? "up" : "down", Math.abs(shift), shift > 0 ? "ground" : "ceiling"));

@@ -53,19 +53,5 @@ public final class ArenaEntityHideEvent implements Listener {
             me.zeronull.spawnarena.Threads.entity(player, () -> player.hideEntity(SpawnArena.INSTANCE, entity));
         }
 
-//        final PacketContainer packet = new PacketContainer(PacketType.Play.Server.ENTITY_DESTROY); // WTF WAS I SMOKING???
-//
-//        packet.getModifier().write(0, new IntArrayList(new int[] { entity.getEntityId() }));
-//
-//        for (final Player player : playersToHideEntityTo) {
-//            if (player == null || !player.isOnline())
-//                continue;
-//
-//            try {
-//                ProtocolLibrary.getProtocolManager().sendServerPacket(player, packet);
-//            } catch (final Exception exception) {
-//                exception.printStackTrace();
-//            }
-//        }
     }
 }

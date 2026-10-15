@@ -319,8 +319,6 @@ public abstract class Arena extends ArenaOptions {
         public static boolean isVanished(final Player player) {
             final List<MetadataValue> values = player.getMetadata("vanished");
 
-//        if (values.isEmpty())
-//            return SpigotCore.INSTANCE.getWs().getPlayerStateMap().get(player.getUniqueId()).isVanished();
 
             for (final MetadataValue meta : values)
                 if (meta.asBoolean())
