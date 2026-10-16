@@ -210,6 +210,8 @@ public final class SavableArena extends Arena {
         super.setFfa(config.ffa);
         this.setWinReward(config.winReward, config.winRewardCooldownMinutes);
         this.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
+        this.setPodiumRewards(config.secondRewardMultiplier, config.secondRewardCooldownMinutes,
+                config.thirdRewardMultiplier, config.thirdRewardCooldownMinutes);
         this.setEgapCooldownSeconds(config.egapCooldownSeconds);
         return config.ffa && !wasFfa;
     }

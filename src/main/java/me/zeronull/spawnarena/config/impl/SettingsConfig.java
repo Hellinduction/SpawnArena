@@ -44,6 +44,10 @@ public final class SettingsConfig {
             "towards wins, win streaks or the leaderboards."})
     public boolean blockSameIpStats = true;
 
+    @Comment({"Seconds of \"Starting in...\" after players are paired, before the fight starts. They can still back out",
+            "during it. 0 = straight in."})
+    public int countdownSeconds = 3;
+
     @Comment("Losing a win streak at least this long gets a dramatic announcement. 0 disables it.")
     public int streakEndAnnounceThreshold = 5;
 
@@ -65,8 +69,9 @@ public final class SettingsConfig {
             "Losing loses the bet. The bonus counts toward dailyRewardCap."})
     public int betWinBonusPercent = 50;
 
-    @Comment({"The #1 win streak only earns the leader bonus (an arena's leaderRewardMultiplier) once it's at least",
-            "this long, so the first winner in an empty arena doesn't get it straight away. 1 = any streak."})
+    @Comment({"A win streak only earns a podium bonus (an arena's leaderRewardMultiplier for #1, second/third... for",
+            "#2 and #3, and their shorter waits) once it's at least this long, so the first winners in an empty arena",
+            "don't get one straight away. 1 = any streak."})
     public int leaderBonusMinStreak = 3;
 
     @Comment({"If the arena's tick rate (TPS) averaged below this during a fight, the loser gets lagRefundPercent of their",

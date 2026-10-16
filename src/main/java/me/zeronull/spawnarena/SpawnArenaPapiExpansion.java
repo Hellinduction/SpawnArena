@@ -25,6 +25,7 @@ import java.util.UUID;
  *   %spawnarena_reward_amount_<arena>%     e.g. "$50k" (boosted for the #1 win streak holder)
  *   %spawnarena_reward_every_<arena>%      e.g. "2h" ("5m" for the #1 win streak holder)
  *   %spawnarena_reward_leaderamount_<arena>% / %spawnarena_reward_leaderevery_<arena>%  the #1 streak bonus
+ *   %spawnarena_reward_secondamount_<arena>% / _secondevery_ / _thirdamount_ / _thirdevery_  the #2 and #3 bonuses
  *   %spawnarena_reward_leader_<arena>%     true / false (per player)
  *   %spawnarena_reward_status_<arena>%     "Ready!", countdown, "Beat someone new to earn again", "Daily limit reached · resets in 5h 12m" or "Resetting the arena..."
  *   %spawnarena_reward_last_<arena>%       last win's result, e.g. "+$50k" or "Not paid: on cooldown"
@@ -211,6 +212,10 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
                     : SpawnArena.statsManager.rewardCooldownMinutesFor(player.getUniqueId(), arena));
             case "leaderamount" -> enabled ? formatAmount(arena.getWinReward() * arena.getLeaderRewardMultiplier()) : "-";
             case "leaderevery" -> StatsManager.formatMinutes(arena.getLeaderRewardCooldownMinutes());
+            case "secondamount" -> enabled ? formatAmount(arena.getWinReward() * arena.rewardMultiplierFor(2)) : "-";
+            case "secondevery" -> StatsManager.formatMinutes(arena.rewardCooldownMinutesFor(2));
+            case "thirdamount" -> enabled ? formatAmount(arena.getWinReward() * arena.rewardMultiplierFor(3)) : "-";
+            case "thirdevery" -> StatsManager.formatMinutes(arena.rewardCooldownMinutesFor(3));
             case "leader" -> String.valueOf(player != null
                     && SpawnArena.statsManager.isStreakLeader(player.getUniqueId(), arena.getArenaName()));
             case "cooldown" -> {

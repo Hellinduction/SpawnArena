@@ -183,6 +183,11 @@ public class Fight {
 
     // ── Lifecycle ───────────────────────────────────────────────────────────
 
+    /** Seconds of "Starting in..." between being paired and the fight (countdownSeconds in settings.yml). */
+    public static int countdownSeconds() {
+        return SpawnArena.settings == null ? 3 : Math.max(0, SpawnArena.settings.countdownSeconds);
+    }
+
     public void initiateFight(final Player fighter1, final Player fighter2, final Arena arena) {
         initiateTeamFight(List.of(fighter1), List.of(fighter2), arena);
     }
@@ -203,7 +208,11 @@ public class Fight {
         if (this.mode == FightMode.TWO_V_TWO)
             this.announceTeams();
 
-        final int[] counter = {5};
+        // A ping so they notice they've been matched, only for them
+        for (final Player p : this.getMembers())
+            Threads.entity(p, () -> p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 2f));
+
+        final int[] counter = {countdownSeconds()};
         this.starting = Threads.globalTimer(task -> {
             if (this.fightState != FightState.COUNTDOWN) {
                 task.cancel();

@@ -94,12 +94,12 @@ public final class SetUpFightCommand extends ArenaTabComplete implements Command
         if (players.size() == 2) {
             // Started directly (the queue now gives players who've waited long a turn first)
             new Fight().initiateFight(players.get(0), players.get(1), arena);
-            sender.sendMessage(ChatColor.GREEN + String.format("Set up a 1v1: %s vs %s. Starting in 5 seconds.",
+            sender.sendMessage(ChatColor.GREEN + String.format("Set up a 1v1: %s vs %s. Starting in " + me.zeronull.spawnarena.Fight.countdownSeconds() + " seconds.",
                     players.get(0).getName(), players.get(1).getName()));
             return true;
         }
         new Fight().initiateTeamFight(players.subList(0, 2), players.subList(2, 4), arena);
-        sender.sendMessage(ChatColor.GREEN + String.format("Set up a 2v2: %s & %s vs %s & %s. Starting in 5 seconds.",
+        sender.sendMessage(ChatColor.GREEN + String.format("Set up a 2v2: %s & %s vs %s & %s. Starting in " + me.zeronull.spawnarena.Fight.countdownSeconds() + " seconds.",
                 players.get(0).getName(), players.get(1).getName(), players.get(2).getName(), players.get(3).getName()));
         return true;
     }

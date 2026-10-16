@@ -151,6 +151,8 @@ public final class LeaderboardHolograms {
                 "<gray>Win: <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55> <dark_gray>·</dark_gray> <gray>once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
                 "<gold>★ <yellow>#1 streak: <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
                         + "%</bold></#55FF55> <dark_gray>·</dark_gray> <yellow>once every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
+                "<gray>#2 streak: <#55FF55>%spawnarena_reward_secondamount_" + arena + "%</#55FF55> <dark_gray>/</dark_gray> <aqua>%spawnarena_reward_secondevery_" + arena
+                        + "%</aqua> <dark_gray>·</dark_gray> <gray>#3: <#55FF55>%spawnarena_reward_thirdamount_" + arena + "%</#55FF55> <dark_gray>/</dark_gray> <aqua>%spawnarena_reward_thirdevery_" + arena + "%</aqua>",
                 "<dark_gray><strikethrough>                              </strikethrough>",
                 "<gray>Next reward: <#FFE066><bold>%spawnarena_reward_status_" + arena + "%</bold></#FFE066>",
                 "<gray>Last win: <white>%spawnarena_reward_last_" + arena + "%</white>",

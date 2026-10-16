@@ -123,6 +123,8 @@ public class ConfigHandler {
             arena.setFfa(config.ffa);
             arena.setWinReward(config.winReward, config.winRewardCooldownMinutes);
             arena.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
+            arena.setPodiumRewards(config.secondRewardMultiplier, config.secondRewardCooldownMinutes,
+                    config.thirdRewardMultiplier, config.thirdRewardCooldownMinutes);
             arena.setEgapCooldownSeconds(config.egapCooldownSeconds);
 
             arenas.add(arena);

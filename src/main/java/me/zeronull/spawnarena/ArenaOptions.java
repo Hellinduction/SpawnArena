@@ -37,6 +37,37 @@ public abstract class ArenaOptions {
         this.leaderRewardCooldownMinutes = cooldownMinutes;
     }
 
+    // #2 and #3 on the current win streak leaderboard
+    private volatile double secondRewardMultiplier = 1, thirdRewardMultiplier = 1;
+    private volatile int secondRewardCooldownMinutes, thirdRewardCooldownMinutes;
+
+    public void setPodiumRewards(final double second, final int secondCooldown, final double third, final int thirdCooldown) {
+        this.secondRewardMultiplier = second;
+        this.secondRewardCooldownMinutes = secondCooldown;
+        this.thirdRewardMultiplier = third;
+        this.thirdRewardCooldownMinutes = thirdCooldown;
+    }
+
+    /** Win reward multiplier for this place on the current win streak board: 1, 2 or 3 (anything else = 1). */
+    public double rewardMultiplierFor(final int rank) {
+        return switch (rank) {
+            case 1 -> this.leaderRewardMultiplier;
+            case 2 -> this.secondRewardMultiplier;
+            case 3 -> this.thirdRewardMultiplier;
+            default -> 1;
+        };
+    }
+
+    /** Minutes between win rewards for this place on the current win streak board (anything else = the normal wait). */
+    public int rewardCooldownMinutesFor(final int rank) {
+        return switch (rank) {
+            case 1 -> this.leaderRewardCooldownMinutes;
+            case 2 -> this.secondRewardCooldownMinutes;
+            case 3 -> this.thirdRewardCooldownMinutes;
+            default -> this.getWinRewardCooldownMinutes();
+        };
+    }
+
     private volatile int egapCooldownSeconds;
 
     public int getEgapCooldownSeconds() {

@@ -54,7 +54,8 @@ public final class WinRewards {
         }
 
         // Checked after this win was recorded, so a win that takes the #1 streak already counts
-        final boolean leader = stats.isStreakLeader(winner.getUniqueId(), arenaName);
+        final int rank = stats.streakRank(winner.getUniqueId(), arenaName);
+        final boolean leader = rank == 1;
         double amount = stats.rewardAmountFor(winner.getUniqueId(), arena);
         final double cap = stats.dailyCap();
         if (cap > 0)
@@ -79,9 +80,10 @@ public final class WinRewards {
         stats.logPayout(winner.getUniqueId(), arenaName, amount, beaten, leader);
         stats.setLastResult(winner.getUniqueId(), arenaName, "+" + StatsManager.formatMoney(amount));
 
-        if (leader && arena.getLeaderRewardMultiplier() != 1)
+        if (rank > 0 && arena.rewardMultiplierFor(rank) != 1)
             winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning! "
-                    + ChatColor.GOLD + "(" + formatMultiplier(arena.getLeaderRewardMultiplier()) + " top win streak bonus)");
+                    + ChatColor.GOLD + "(" + formatMultiplier(arena.rewardMultiplierFor(rank)) + " "
+                    + (rank == 1 ? "top" : "#" + rank) + " win streak bonus)");
         else
             winner.sendMessage(ChatColor.GREEN + "+" + StatsManager.formatMoney(amount) + ChatColor.GRAY + " for winning!");
         if (stats.hasReachedDailyCap(winner.getUniqueId()))

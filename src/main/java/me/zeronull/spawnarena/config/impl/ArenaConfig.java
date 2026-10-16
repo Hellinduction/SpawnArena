@@ -46,6 +46,18 @@ public final class ArenaConfig {
     @Comment("Minutes between win rewards for the #1 current win streak holder")
     public int leaderRewardCooldownMinutes = 10;
 
+    @Comment("Win reward multiplier for the #2 current win streak (needs the same minimum streak as the #1 bonus)")
+    public double secondRewardMultiplier = 1.5;
+
+    @Comment("Minutes between win rewards for the #2 current win streak")
+    public int secondRewardCooldownMinutes = 15;
+
+    @Comment("Win reward multiplier for the #3 current win streak (needs the same minimum streak as the #1 bonus)")
+    public double thirdRewardMultiplier = 1.2;
+
+    @Comment("Minutes between win rewards for the #3 current win streak")
+    public int thirdRewardCooldownMinutes = 20;
+
     @Comment({"Seconds a fighter has to wait after eating an enchanted golden apple before eating another (shown on",
             "the item, like an ender pearl's). Only while fighting in this arena: it's cleared when they're out of the",
             "fight, and never touches golden apples anywhere else. 0 = no cooldown."})

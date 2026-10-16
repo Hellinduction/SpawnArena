@@ -1035,22 +1035,33 @@ public class StatsManager {
      * Uses the cached leaderboard, so it's cheap enough for per-second hologram placeholders.
      */
     public boolean isStreakLeader(UUID uuid, String arena) {
+        return streakRank(uuid, arena) == 1;
+    }
+
+    /**
+     * This player's place (1, 2 or 3) on the arena's current win streak board, or 0 if they're not on the podium.
+     * Only streaks at least leaderBonusMinStreak long count, so the first winners in an empty arena don't get a
+     * bonus straight away. On a tie, whoever got there first is higher.
+     */
+    public int streakRank(UUID uuid, String arena) {
         final List<LeaderboardEntry> top = getTopPlayersCached(arena, "win_streak",
                 me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT);
-        // Only once the #1 streak is long enough, so the first winner in an empty arena isn't the leader straight away
         final int min = SpawnArena.settings == null ? 1 : Math.max(1, SpawnArena.settings.leaderBonusMinStreak);
-        return !top.isEmpty() && top.get(0).value() >= min && top.get(0).uuid().equals(uuid);
+        for (int i = 0; i < Math.min(3, top.size()); i++) {
+            if (top.get(i).value() < min)
+                return 0;
+            if (top.get(i).uuid().equals(uuid))
+                return i + 1;
+        }
+        return 0;
     }
 
     public double rewardAmountFor(UUID uuid, Arena arena) {
-        final double base = arena.getWinReward();
-        return isStreakLeader(uuid, arena.getArenaName()) ? base * arena.getLeaderRewardMultiplier() : base;
+        return arena.getWinReward() * arena.rewardMultiplierFor(streakRank(uuid, arena.getArenaName()));
     }
 
     public int rewardCooldownMinutesFor(UUID uuid, Arena arena) {
-        return isStreakLeader(uuid, arena.getArenaName())
-                ? arena.getLeaderRewardCooldownMinutes()
-                : arena.getWinRewardCooldownMinutes();
+        return arena.rewardCooldownMinutesFor(streakRank(uuid, arena.getArenaName()));
     }
 
     /** Milliseconds until this player can earn the arena's win reward again (0 = ready now). */

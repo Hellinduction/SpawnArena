@@ -42,4 +42,28 @@ public final class SlapFish implements Listener {
         if (isSlapFish(e.getItem()))
             e.setCancelled(true);
     }
+
+    /** It's only for the fight it was handed out in: it can't be dropped, even by staff allowed to drop items. */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onDrop(final org.bukkit.event.player.PlayerDropItemEvent e) {
+        if (isSlapFish(e.getItemDrop().getItemStack()))
+            e.setCancelled(true);
+    }
+
+    /** One that's on the ground anyway (older versions let staff drop it) goes, rather than to whoever walks over it. */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onPickup(final org.bukkit.event.entity.EntityPickupItemEvent e) {
+        if (isSlapFish(e.getItem().getItemStack())) {
+            e.setCancelled(true);
+            e.getItem().remove();
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onHopperPickup(final org.bukkit.event.inventory.InventoryPickupItemEvent e) {
+        if (isSlapFish(e.getItem().getItemStack())) {
+            e.setCancelled(true);
+            e.getItem().remove();
+        }
+    }
 }
