@@ -229,13 +229,7 @@ public final class FfaFight extends Fight {
                 player.removePotionEffect(effect.getType());
         }
         if (this.arena.isGiveKnockBackStick()) {
-            final ItemStack fish = new ItemStack(Material.TROPICAL_FISH);
-            final org.bukkit.enchantments.Enchantment knockback = org.bukkit.Registry.ENCHANTMENT.get(NamespacedKey.minecraft("knockback"));
-            if (knockback != null)
-                fish.addUnsafeEnchantment(knockback, 1);
-            fish.editMeta(meta -> meta.displayName(MiniMessage.miniMessage().deserialize(
-                    "<!italic><aqua><obfuscated>|</obfuscated></aqua><yellow><bold>Slap Fish</bold></yellow><aqua><obfuscated>|</obfuscated></aqua>")));
-            player.getInventory().addItem(fish);
+            player.getInventory().addItem(SlapFish.create());
         }
 
         final Location spawn = this.pickSpawn();

@@ -452,14 +452,7 @@ public class Fight {
         }
 
         if (this.arena.isGiveKnockBackStick()) {
-            // A fish rather than a stick: Litematica uses the stick as its tool item
-            final ItemStack fish = new ItemStack(Material.TROPICAL_FISH);
-            final Enchantment knockback = Registry.ENCHANTMENT.get(NamespacedKey.minecraft("knockback"));
-            if (knockback != null)
-                fish.addUnsafeEnchantment(knockback, 1);
-            fish.editMeta(meta -> meta.displayName(MiniMessage.miniMessage().deserialize(
-                    "<!italic><aqua><obfuscated>|</obfuscated></aqua><yellow><bold>Slap Fish</bold></yellow><aqua><obfuscated>|</obfuscated></aqua>")));
-            fighter.getInventory().addItem(fish);
+            fighter.getInventory().addItem(SlapFish.create());
         }
 
         this.arena.teleportFighter(fighter, this.getSpawnOf(fighter)).whenComplete((ok, error) -> this.arrived(fighter));
