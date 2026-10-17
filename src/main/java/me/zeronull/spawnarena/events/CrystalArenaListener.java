@@ -1,16 +1,8 @@
 package me.zeronull.spawnarena.events;
 
-import me.zeronull.spawnarena.Arena;
-import me.zeronull.spawnarena.CrystalPvp;
+import me.zeronull.spawnarena.*;
 import me.zeronull.spawnarena.CrystalPvp.BlockKey;
-import me.zeronull.spawnarena.Fight;
-import me.zeronull.spawnarena.FightState;
-import me.zeronull.spawnarena.SpawnArena;
-import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.Tag;
+import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.entity.EnderCrystal;
@@ -21,24 +13,8 @@ import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.Action;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockBurnEvent;
-import org.bukkit.event.block.BlockExplodeEvent;
-import org.bukkit.event.block.BlockFertilizeEvent;
-import org.bukkit.event.block.BlockIgniteEvent;
-import org.bukkit.event.block.BlockMultiPlaceEvent;
-import org.bukkit.event.block.BlockPistonExtendEvent;
-import org.bukkit.event.block.BlockPistonRetractEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
-import org.bukkit.event.block.BlockSpreadEvent;
-import org.bukkit.event.entity.CreatureSpawnEvent;
-import org.bukkit.event.entity.EntityChangeBlockEvent;
-import org.bukkit.event.entity.EntityDamageByEntityEvent;
-import org.bukkit.event.entity.EntityDamageEvent;
-import org.bukkit.event.entity.EntityExplodeEvent;
-import org.bukkit.event.entity.EntityPlaceEvent;
-import org.bukkit.event.entity.ItemSpawnEvent;
+import org.bukkit.event.block.*;
+import org.bukkit.event.entity.*;
 import org.bukkit.event.hanging.HangingBreakEvent;
 import org.bukkit.event.hanging.HangingPlaceEvent;
 import org.bukkit.event.player.PlayerBucketEmptyEvent;
@@ -46,14 +22,8 @@ import org.bukkit.event.player.PlayerBucketFillEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.world.EntitiesLoadEvent;
 import org.bukkit.event.world.StructureGrowEvent;
-import org.bukkit.inventory.EquipmentSlot;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.IdentityHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 
 /**
  * The rules for crystal PvP arenas (see {@link CrystalPvp}). WorldGuard can keep denying build, PvP and

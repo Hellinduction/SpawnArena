@@ -4,7 +4,6 @@ import me.zeronull.spawnarena.Arena;
 import me.zeronull.spawnarena.Fight;
 import me.zeronull.spawnarena.FightState;
 import me.zeronull.spawnarena.SpawnArena;
-import org.bukkit.Bukkit;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
@@ -14,7 +13,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityCombustByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 

@@ -74,11 +74,6 @@ public final class SettingsConfig {
             "Losing loses the bet. The bonus counts toward dailyRewardCap."})
     public int betWinBonusPercent = 50;
 
-    @Comment({"A win streak only earns a podium bonus (an arena's leaderRewardMultiplier for #1, second/third... for",
-            "#2 and #3, and their shorter waits) once it's at least this long, so the first winners in an empty arena",
-            "don't get one straight away. 1 = any streak."})
-    public int leaderBonusMinStreak = 3;
-
     @Comment({"If the arena's tick rate (TPS) averaged below this during a fight, the loser gets lagRefundPercent of their",
             "bet back (not if they quit). On Folia it's the tick rate of the part of the world the arena is in. 0 turns it off."})
     public double lagRefundBelowTps = 17;

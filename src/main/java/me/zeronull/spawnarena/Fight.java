@@ -7,14 +7,12 @@ import net.kyori.adventure.text.JoinConfiguration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.*;
-import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 
 import java.lang.reflect.Method;
 import java.util.*;
-import java.util.function.Consumer;
 
 /**
  * A match between two teams: one player each for 1v1, two each for 2v2. Team A spawns at the

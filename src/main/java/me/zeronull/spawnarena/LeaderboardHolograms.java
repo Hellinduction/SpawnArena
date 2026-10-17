@@ -148,11 +148,11 @@ public final class LeaderboardHolograms {
     private static List<String> rewardLines(final String arena) {
         return new ArrayList<>(List.of(
                 "<gradient:#FFD700:#FF8C00><bold>✦ " + displayName(arena) + " Rewards ✦</bold></gradient>",
-                "<gray>Win: <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55> <dark_gray>·</dark_gray> <gray>once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
+                "<gray>Win: <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55> <gray>per win <dark_gray>·</dark_gray> <gray>once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
                 "<gold>★ <yellow>#1 streak: <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
-                        + "%</bold></#55FF55> <dark_gray>·</dark_gray> <yellow>once every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
-                "<gray>#2 streak: <#55FF55>%spawnarena_reward_secondamount_" + arena + "%</#55FF55> <dark_gray>/</dark_gray> <aqua>%spawnarena_reward_secondevery_" + arena
-                        + "%</aqua> <dark_gray>·</dark_gray> <gray>#3: <#55FF55>%spawnarena_reward_thirdamount_" + arena + "%</#55FF55> <dark_gray>/</dark_gray> <aqua>%spawnarena_reward_thirdevery_" + arena + "%</aqua>",
+                        + "%</bold></#55FF55> <yellow>per win <dark_gray>·</dark_gray> <yellow>once every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
+                "<gray>#2 streak: <#55FF55>%spawnarena_reward_secondamount_" + arena + "%</#55FF55> <gray>per win <dark_gray>/</dark_gray> <aqua>%spawnarena_reward_secondevery_" + arena
+                        + "%</aqua> <dark_gray>·</dark_gray> <gray>#3: <#55FF55>%spawnarena_reward_thirdamount_" + arena + "%</#55FF55> <gray>per win <dark_gray>/</dark_gray> <aqua>%spawnarena_reward_thirdevery_" + arena + "%</aqua>",
                 "<dark_gray><strikethrough>                              </strikethrough>",
                 "<gray>Next reward: <#FFE066><bold>%spawnarena_reward_status_" + arena + "%</bold></#FFE066>",
                 "<gray>Last win: <white>%spawnarena_reward_last_" + arena + "%</white>",
@@ -325,23 +325,44 @@ public final class LeaderboardHolograms {
                 .map(h -> h.getData().getLocation().clone()).orElse(null);
     }
 
+
     /**
-     * Clear ground to look at a hologram from: a few blocks away on whichever side is open, facing it. Null if
-     * there's nowhere to stand nearby (it floats over nothing). Call on the thread that owns the hologram's chunk.
+     * The middle of a hologram's text (its location is the bottom of the text, which grows upwards), for facing it.
+     * Null if there's no hologram by that name.
      */
-    public static Location viewingSpot(final Location holo) {
-        final org.bukkit.World world = holo.getWorld();
-        final int[][] sides = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
-        for (final int distance : new int[]{3, 2, 4, 5, 6}) {
-            for (final int[] side : sides) {
-                final int x = holo.getBlockX() + side[0] * distance;
-                final int z = holo.getBlockZ() + side[1] * distance;
+    public static Location middleOf(final String name) {
+        if (!name.startsWith(NAME_PREFIX))
+            return null;
+        return FancyHologramsPlugin.get().getHologramManager().getHologram(name).map(h -> {
+            final Location at = h.getData().getLocation().clone();
+            if (h.getData() instanceof TextHologramData text) {
+                final double scale = text.getScale() == null ? 1 : text.getScale().y();
+                final double translation = text.getTranslation() == null ? 0 : text.getTranslation().y();
+                at.add(0, translation + text.getText().size() * LINE_HEIGHT * scale / 2, 0);
+            }
+            return at;
+        }).orElse(null);
+    }
+
+    /**
+     * Clear ground to look at a hologram from: a few blocks away on whichever side is open, in line with it and facing
+     * the middle of its text. Null if there's nowhere to stand nearby (it floats over nothing). Call on the thread that
+     * owns the hologram's chunk.
+     */
+    public static Location viewingSpot(final Location base, final Location middle) {
+        final org.bukkit.World world = middle.getWorld();
+        final double[][] sides = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}, {0.7071, 0.7071}, {0.7071, -0.7071}, {-0.7071, 0.7071}, {-0.7071, -0.7071}};
+        for (final int distance : new int[]{3, 4, 2, 5, 6}) {
+            for (final double[] side : sides) {
+                // Exactly that far from the hologram itself, not from the corner of its block
+                final double x = middle.getX() + side[0] * distance;
+                final double z = middle.getZ() + side[1] * distance;
                 for (final int dy : new int[]{0, -1, 1, -2, 2, -3, -4, 3}) {
-                    final int y = holo.getBlockY() + dy;
-                    final org.bukkit.block.Block feet = world.getBlockAt(x, y, z);
+                    final int y = base.getBlockY() + dy;
+                    final org.bukkit.block.Block feet = world.getBlockAt((int) Math.floor(x), y, (int) Math.floor(z));
                     if (feet.isPassable() && !feet.isLiquid() && feet.getRelative(org.bukkit.block.BlockFace.UP).isPassable()
                             && feet.getRelative(org.bukkit.block.BlockFace.DOWN).getType().isSolid())
-                        return facing(new Location(world, x + 0.5, y, z + 0.5), holo);
+                        return facing(new Location(world, x, y, z), middle);
                 }
             }
         }
@@ -349,13 +370,13 @@ public final class LeaderboardHolograms {
     }
 
     /** In the air 3 blocks from it (for someone who can fly, when there's no ground near it). */
-    public static Location airSpot(final Location holo) {
-        return facing(holo.clone().add(0.5, 0, 3.5), holo);
+    public static Location airSpot(final Location base, final Location middle) {
+        return facing(base.clone().add(0, 0, 3), middle);
     }
 
-    /** Turned to look at the middle of the hologram's text. */
-    private static Location facing(final Location spot, final Location holo) {
-        spot.setDirection(holo.clone().add(0.5, 1.5, 0.5).toVector().subtract(spot.clone().add(0, 1.62, 0).toVector()));
+    /** Turned to look straight at the middle of the hologram's text. */
+    private static Location facing(final Location spot, final Location middle) {
+        spot.setDirection(middle.toVector().subtract(spot.clone().add(0, 1.62, 0).toVector()));
         return spot;
     }
 

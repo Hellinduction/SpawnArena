@@ -1,10 +1,6 @@
 package me.zeronull.spawnarena.commands.impl;
 
-import me.zeronull.spawnarena.Arena;
-import me.zeronull.spawnarena.ArenaMode;
-import me.zeronull.spawnarena.FightMode;
-import me.zeronull.spawnarena.QueueMenu;
-import me.zeronull.spawnarena.SpawnArena;
+import me.zeronull.spawnarena.*;
 import me.zeronull.spawnarena.commands.ArenaTabComplete;
 import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
@@ -19,8 +15,12 @@ import java.util.List;
  * /joinarenaqueue <arena>                — joins the 1v1 queue straight away; again to leave (the original NPC command)
  * /joinarenaqueue <arena> <1v1|2v2|auto> — joins that queue straight away; again to leave
  * /joinarenaqueue <arena> menu           — opens the 1v1 / Auto / 2v2 menu
+ * Anything but 1v1 (2v2, auto, the menu) needs {@link #MODES_PERMISSION}.
  */
 public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandExecutor {
+    /** 2v2, auto and the queue menu; without it, players can only queue 1v1. */
+    public static final String MODES_PERMISSION = "spawnarena.joinarenaqueue.modes";
+
     public JoinArenaQueueCommand() {
         super(0);
     }
@@ -61,6 +61,11 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         // arena's lock, when they're let in)
         if (arena.isFfa()) {
             me.zeronull.spawnarena.FfaFight.join(player, arena);
+            return true;
+        }
+
+        if (args.length >= 2 && !args[1].equalsIgnoreCase("1v1") && !player.hasPermission(MODES_PERMISSION)) {
+            sender.sendMessage(ChatColor.RED + "You can only queue 1v1 here: /joinarenaqueue " + arena.getArenaName());
             return true;
         }
 
@@ -167,7 +172,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String label, String[] args) {
         if (args.length == 2)
-            return List.of("1v1", "2v2", "auto", "menu").stream().filter(s -> s.startsWith(args[1].toLowerCase())).toList();
+            return (sender.hasPermission(MODES_PERMISSION) ? List.of("1v1", "2v2", "auto", "menu") : List.of("1v1")).stream().filter(s -> s.startsWith(args[1].toLowerCase())).toList();
         if (args.length > 2)
             return Collections.emptyList();
         return super.onTabComplete(sender, command, label, args);

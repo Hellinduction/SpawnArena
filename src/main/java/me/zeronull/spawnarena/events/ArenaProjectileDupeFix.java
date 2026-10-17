@@ -14,7 +14,9 @@ import org.bukkit.event.entity.ProjectileLaunchEvent;
 import org.bukkit.event.player.PlayerPickupArrowEvent;
 import org.bukkit.projectiles.ProjectileSource;
 
-import java.util.*;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * Fighters' inventories are snapshotted before a fight and restored after it, so any trident/arrow

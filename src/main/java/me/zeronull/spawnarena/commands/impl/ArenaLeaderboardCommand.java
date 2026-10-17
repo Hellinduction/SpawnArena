@@ -165,7 +165,8 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             return true;
         }
         final org.bukkit.Location holo = LeaderboardHolograms.locationOf(args[1]);
-        if (holo == null || holo.getWorld() == null) {
+        final org.bukkit.Location middle = LeaderboardHolograms.middleOf(args[1]);
+        if (holo == null || middle == null || holo.getWorld() == null) {
             sender.sendMessage("§cNo hologram named §e" + args[1] + "§c.");
             return true;
         }
@@ -173,14 +174,14 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         final boolean canFly = p.getAllowFlight() || p.getGameMode() == org.bukkit.GameMode.CREATIVE
                 || p.getGameMode() == org.bukkit.GameMode.SPECTATOR;
         me.zeronull.spawnarena.Threads.location(holo, () -> {
-            org.bukkit.Location spot = LeaderboardHolograms.viewingSpot(holo);
+            org.bukkit.Location spot = LeaderboardHolograms.viewingSpot(holo, middle);
             if (spot == null && !canFly) {
                 p.sendMessage("§cThere's nowhere safe to stand near §e" + args[1] + "§c. Fly there instead.");
                 return;
             }
             final boolean fly = spot == null;
             if (fly)
-                spot = LeaderboardHolograms.airSpot(holo);
+                spot = LeaderboardHolograms.airSpot(holo, middle);
             me.zeronull.spawnarena.Threads.teleport(p, spot).thenAccept(ok -> {
                 if (!Boolean.TRUE.equals(ok))
                     return;

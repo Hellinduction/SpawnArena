@@ -44,6 +44,12 @@ public final class QueueMenuListener implements Listener {
         };
         if (e.getSlot() != QueueMenu.SLOT_1V1 && e.getSlot() != QueueMenu.SLOT_2V2 && e.getSlot() != QueueMenu.SLOT_AUTO)
             return;
+        // The permission could have been taken away while the menu was open
+        if (e.getSlot() != QueueMenu.SLOT_1V1 && !player.hasPermission(me.zeronull.spawnarena.commands.impl.JoinArenaQueueCommand.MODES_PERMISSION)) {
+            player.closeInventory();
+            player.sendMessage(ChatColor.RED + "You can only queue 1v1.");
+            return;
+        }
 
         final Arena arena = SpawnArena.arenas.of(menu.getArenaName());
         player.closeInventory();

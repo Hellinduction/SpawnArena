@@ -1,6 +1,5 @@
 package me.zeronull.spawnarena.commands.impl;
 
-import me.zeronull.spawnarena.Arena;
 import me.zeronull.spawnarena.FfaFight;
 import me.zeronull.spawnarena.SpawnArena;
 import org.bukkit.ChatColor;

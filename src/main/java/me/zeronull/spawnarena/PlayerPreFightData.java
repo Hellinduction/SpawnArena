@@ -12,7 +12,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.json.JSONObject;
 
-import java.io.File;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;

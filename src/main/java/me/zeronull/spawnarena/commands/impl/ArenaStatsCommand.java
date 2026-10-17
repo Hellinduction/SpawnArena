@@ -176,7 +176,7 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                     audit(sender, target, arena, "elo", oldElo, me.zeronull.spawnarena.StatsManager.START_ELO, "reset");
                 sender.sendMessage(String.format("§aReset all stats for §e%s §ain §e%s", target.getName(), arena));
             }
-            default -> sender.sendMessage("§cUnknown subcommand. Use: get, set, reset");
+            default -> sender.sendMessage("§cUnknown subcommand. Use: get, set, reset, resetcooldown, payouts, log, rollback, players, migrate");
         }
         return true;
     }

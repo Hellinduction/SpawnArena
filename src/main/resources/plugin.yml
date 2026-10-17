@@ -51,7 +51,7 @@ commands:
     permission: spawnarena.restore
     permission-message: "§cYou don't have permission!"
   arenastats:
-    description: View or edit a player's arena stats (wins, streaks, Elo, money made), or count players per arena
+    description: View or edit a player's arena stats (wins, losses, games, streaks, Elo, free-for-all kills, money made), or count players per arena
     permission: spawnarena.arenastats
     permission-message: "§cYou don't have permission!"
   arenaleaderboard:
@@ -67,7 +67,7 @@ commands:
     permission-message: "§cYou don't have permission!"
 
   arenalock:
-    description: Close or open the arenas (no new queues or fights while closed)
+    description: Close or open the arenas (no new queues or fights while closed; closing sends everyone out of free-for-alls)
     usage: "/arenalock [on|off]"
     permission: spawnarena.arenalock
     permission-message: "§cYou don't have permission!"
@@ -128,6 +128,9 @@ permissions:
   spawnarena.setarenaspawn:
     default: op
   spawnarena.joinarenaqueue:
+    default: op
+  spawnarena.joinarenaqueue.modes:
+    description: Queue 2v2 or auto, and open the queue menu (/joinarenaqueue <arena> 2v2|auto|menu); without it, 1v1 only
     default: op
   spawnarena.createarena:
     default: op

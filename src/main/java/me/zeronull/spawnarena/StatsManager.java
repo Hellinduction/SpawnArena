@@ -1045,15 +1045,13 @@ public class StatsManager {
 
     /**
      * This player's place (1, 2 or 3) on the arena's current win streak board, or 0 if they're not on the podium.
-     * Only streaks at least leaderBonusMinStreak long count, so the first winners in an empty arena don't get a
-     * bonus straight away. On a tie, whoever got there first is higher.
+     * On a tie, whoever got there first is higher.
      */
     public int streakRank(UUID uuid, String arena) {
         final List<LeaderboardEntry> top = getTopPlayersCached(arena, "win_streak",
                 me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT);
-        final int min = SpawnArena.settings == null ? 1 : Math.max(1, SpawnArena.settings.leaderBonusMinStreak);
         for (int i = 0; i < Math.min(3, top.size()); i++) {
-            if (top.get(i).value() < min)
+            if (top.get(i).value() < 1)
                 return 0;
             if (top.get(i).uuid().equals(uuid))
                 return i + 1;

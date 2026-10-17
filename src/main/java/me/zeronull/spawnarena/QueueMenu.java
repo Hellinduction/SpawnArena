@@ -16,7 +16,7 @@ import org.jetbrains.annotations.NotNull;
 import java.util.ArrayList;
 import java.util.List;
 
-/** The per-arena "1v1 / Auto / 2v2" queue picker opened by /joinarenaqueue <arena> (and the NPCs). */
+/** The per-arena "1v1 / Auto / 2v2" queue picker opened by /joinarenaqueue <arena> menu. */
 public final class QueueMenu implements InventoryHolder {
     public static final int SLOT_1V1 = 11;
     public static final int SLOT_AUTO = 13;

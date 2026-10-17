@@ -1,6 +1,5 @@
 package me.zeronull.spawnarena.config;
 
-import de.exlll.configlib.YamlConfigurationProperties;
 import de.exlll.configlib.YamlConfigurations;
 import me.zeronull.spawnarena.*;
 import me.zeronull.spawnarena.config.impl.ArenaConfig;

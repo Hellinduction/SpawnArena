@@ -6,7 +6,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
