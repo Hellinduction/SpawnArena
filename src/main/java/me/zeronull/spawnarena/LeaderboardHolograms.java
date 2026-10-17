@@ -148,7 +148,7 @@ public final class LeaderboardHolograms {
     private static List<String> rewardLines(final String arena) {
         return new ArrayList<>(List.of(
                 "<gradient:#FFD700:#FF8C00><bold>✦ " + displayName(arena) + " Rewards ✦</bold></gradient>",
-                "<gray>Win: <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55> <gray>per win <dark_gray>·</dark_gray> <gray>once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
+                "<gray>Win: <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55> <dark_gray>·</dark_gray> <gray>once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
                 "<gold>★ <yellow>#1 streak: <#55FF55><bold>%spawnarena_reward_leaderamount_" + arena
                         + "%</bold></#55FF55> <yellow>per win <dark_gray>·</dark_gray> <yellow>once every <aqua>%spawnarena_reward_leaderevery_" + arena + "%</aqua> <gold>★",
                 "<gray>#2 streak: <#55FF55>%spawnarena_reward_secondamount_" + arena + "%</#55FF55> <gray>per win <dark_gray>/</dark_gray> <aqua>%spawnarena_reward_secondevery_" + arena
