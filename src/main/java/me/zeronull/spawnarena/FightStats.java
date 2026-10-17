@@ -70,6 +70,11 @@ public final class FightStats {
 
     /** The hover card: duration, then each player (winners first) with only the stats that apply and aren't zero. */
     public Component card(final Fight fight, final List<Player> winners, final List<Player> losers) {
+        return this.card(fight, winners, losers, java.util.Map.of());
+    }
+
+    /** With each player's Elo after the fight and how much it moved ({new, change}), where it counted. */
+    public Component card(final Fight fight, final List<Player> winners, final List<Player> losers, final java.util.Map<java.util.UUID, int[]> elo) {
         final Arena arena = fight.getArena();
         final boolean damageOn = arena.isAllowDamage() && !arena.isDeathOnTouchLiquid();
         final boolean crystal = arena.isCrystalPvp();
@@ -89,6 +94,10 @@ public final class FightStats {
             text.append("\n").append(won ? "<green>" : "<red>").append("<p").append(i).append(">").append(won ? "</green>" : "</red>");
             if (damageOn && won && fight.isFighter(p) && p.isOnline())
                 text.append(" <gray>(").append(hearts(p.getHealth() + p.getAbsorptionAmount())).append("❤ left)</gray>");
+            final int[] rating = elo.get(p.getUniqueId());
+            if (rating != null)
+                text.append(" <dark_gray>·</dark_gray> <gray>Elo <white>").append(rating[0]).append("</white> ")
+                        .append(rating[1] >= 0 ? "<green>+" + rating[1] + "</green>" : "<red>" + rating[1] + "</red>");
 
             final List<String> parts = new ArrayList<>();
             if (damageOn) {

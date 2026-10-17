@@ -785,8 +785,8 @@ public class Fight {
     private void announceResult(final List<Player> winners, final List<Player> losers) {
         final String arenaPart = "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " ";
 
-        // Hovering over the result shows the fight's stats
-        final net.kyori.adventure.text.event.HoverEvent<Component> statsHover =
+        // Hovering over the result shows the fight's stats (and, once it's worked out, everyone's Elo change)
+        net.kyori.adventure.text.event.HoverEvent<Component> statsHover =
                 net.kyori.adventure.text.event.HoverEvent.showText(this.stats.card(this, winners, losers));
         // The losers went out on their own (fell, drowned, their own blast...) without the winners ever touching
         // them: said so instead of "beat". Not for quitting, which has its own meaning
@@ -854,6 +854,8 @@ public class Fight {
                             Placeholder.unparsed("elo", String.valueOf(change[0])),
                             Placeholder.parsed("change", change[1] >= 0 ? "<green>+" + change[1] + "</green>" : "<red>" + change[1] + "</red>")));
             }
+            if (!elo.isEmpty())
+                statsHover = net.kyori.adventure.text.event.HoverEvent.showText(this.stats.card(this, winners, losers, elo));
         }
 
         if (endedStreaks.isEmpty()) {

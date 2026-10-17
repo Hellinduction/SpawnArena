@@ -32,8 +32,8 @@ public final class ArenaDuelCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        if (args.length < 2 || !(args[0].equalsIgnoreCase("accept") || args[0].equalsIgnoreCase("deny"))) {
-            player.sendMessage("§cUsage: /arenaduel accept|deny <player>  §7or  §c/arenaduel toggle");
+        if (args.length < 2 || !(args[0].equalsIgnoreCase("accept") || args[0].equalsIgnoreCase("deny") || args[0].equalsIgnoreCase("cancel"))) {
+            player.sendMessage("§cUsage: /arenaduel accept|deny|cancel <player>  §7or  §c/arenaduel toggle");
             player.sendMessage("§7Shift-right-click a player near an arena to challenge them.");
             return true;
         }
@@ -44,7 +44,9 @@ public final class ArenaDuelCommand implements CommandExecutor, TabCompleter {
             return true;
         }
 
-        if (args[0].equalsIgnoreCase("accept"))
+        if (args[0].equalsIgnoreCase("cancel"))
+            DuelManager.cancel(player, requester); // here "requester" is who they challenged
+        else if (args[0].equalsIgnoreCase("accept"))
             DuelManager.accept(player, requester);
         else
             DuelManager.deny(player, requester);
@@ -55,7 +57,7 @@ public final class ArenaDuelCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command cmd,
                                       @NotNull String label, String[] args) {
         if (args.length == 1)
-            return List.of("accept", "deny", "toggle").stream().filter(s -> s.startsWith(args[0].toLowerCase())).toList();
+            return List.of("accept", "deny", "cancel", "toggle").stream().filter(s -> s.startsWith(args[0].toLowerCase())).toList();
         if (args.length == 2 && !args[0].equalsIgnoreCase("toggle"))
             return null; // online player names
         return Collections.emptyList();

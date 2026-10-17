@@ -165,6 +165,9 @@ public class StatsManager {
                 s.execute("ALTER TABLE arena_stats ADD COLUMN elo INT NOT NULL DEFAULT " + START_ELO);
             if (!hasColumn(c, "arena_stats", "elo_at"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN elo_at BIGINT NOT NULL DEFAULT 0");
+            // Rated fights played, for eloMinGames (counted from when this column was added)
+            if (!hasColumn(c, "arena_stats", "elo_games"))
+                s.execute("ALTER TABLE arena_stats ADD COLUMN elo_games INT NOT NULL DEFAULT 0");
             s.execute("CREATE TABLE IF NOT EXISTS arena_rewards (" +
                     "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
@@ -1216,9 +1219,37 @@ public class StatsManager {
             final int change = -Math.min(r, Math.max(1, (int) Math.round(ELO_K * expected(r, winnersAvg))));
             result.put(p.getUniqueId(), new int[]{r + change, change});
         }
-        for (final java.util.Map.Entry<UUID, int[]> e : result.entrySet())
+        for (final java.util.Map.Entry<UUID, int[]> e : result.entrySet()) {
             setField(e.getKey(), arena, "elo", e.getValue()[0]);
+            countRatedGame(e.getKey(), arena);
+        }
         return result;
+    }
+
+    private void countRatedGame(final UUID uuid, final String arena) {
+        final String sql = "UPDATE arena_stats SET elo_games = elo_games + 1 WHERE server_id=" + sid + " AND uuid=? AND arena=?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] countRatedGame: " + e.getMessage());
+        }
+    }
+
+    /** Rated fights needed to show on an Elo board (eloMinGames), so two lucky wins and quitting can't top it. */
+    public static int eloMinGames() {
+        return SpawnArena.settings == null ? 0 : Math.max(0, SpawnArena.settings.eloMinGames);
+    }
+
+    /** Who a board may list: FFA boards only those who've played FFA, Elo boards only those with enough rated fights. */
+    private static String boardFilter(final String field, final String alias) {
+        if (field.startsWith("ffa_"))
+            return " AND (" + alias + "ffa_kills > 0 OR " + alias + "ffa_deaths > 0)";
+        if (field.equals("elo") && eloMinGames() > 0)
+            return " AND " + alias + "elo_games >= " + eloMinGames();
+        return "";
     }
 
     /** Chance (0..1) a player rated {@code rating} beats one rated {@code opponent}. */
@@ -1490,8 +1521,11 @@ public class StatsManager {
         final String reachedAt = reachedAtColumn(field);
         final String tie = reachedAt == null ? "o.uuid < s.uuid"
                 : "(o." + reachedAt + " < s." + reachedAt + " OR (o." + reachedAt + " = s." + reachedAt + " AND o.uuid < s.uuid))";
-        final String played = field.startsWith("ffa_") ? " AND (o.ffa_kills > 0 OR o.ffa_deaths > 0)" : "";
-        final String sql = "SELECT s." + field + " AS v, (SELECT COUNT(*) FROM arena_stats o WHERE o.server_id=" + sid
+        final String played = boardFilter(field, "o.");
+        // Not on the board themselves (too few rated fights): no place, "unranked"
+        final String listed = boardFilter(field, "s.");
+        final String sql = "SELECT s." + field + " AS v, " + (listed.isEmpty() ? "1" : "CASE WHEN 1=1" + listed + " THEN 1 ELSE 0 END") + " AS listed, "
+                + "(SELECT COUNT(*) FROM arena_stats o WHERE o.server_id=" + sid
                 + " AND o.arena=s.arena" + played + " AND (o." + field + " > s." + field + " OR (o." + field + " = s." + field
                 + " AND " + tie + "))) AS ahead FROM arena_stats s WHERE s.server_id=" + sid + " AND s.arena=? AND s.uuid=?";
         try (Connection c = dataSource.getConnection();
@@ -1499,7 +1533,9 @@ public class StatsManager {
             ps.setString(1, arena.toLowerCase());
             ps.setString(2, uuid.toString());
             try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? new Standing(rs.getInt("ahead") + 1, rs.getInt("v")) : new Standing(0, 0);
+                if (!rs.next())
+                    return new Standing(0, 0);
+                return new Standing(rs.getInt("listed") == 1 ? rs.getInt("ahead") + 1 : 0, rs.getInt("v"));
             }
         } catch (SQLException e) {
             Bukkit.getLogger().warning("[SpawnArena] getStanding: " + e.getMessage());
@@ -1535,7 +1571,7 @@ public class StatsManager {
         // Ties: whoever reached that value first ranks higher, so there's always exactly one #1
         final String reachedAt = reachedAtColumn(field);
         final String tieBreak = reachedAt != null ? ", " + reachedAt + " ASC" : "";
-        final String played = field.startsWith("ffa_") ? " AND (ffa_kills > 0 OR ffa_deaths > 0)" : "";
+        final String played = boardFilter(field, "");
         final String sql = "SELECT uuid, " + field + " FROM arena_stats " +
                 "WHERE server_id=" + sid + " AND arena=?" + played + " ORDER BY " + field + " DESC" + tieBreak + ", uuid ASC LIMIT ?";
         try (Connection c = dataSource.getConnection();
@@ -1593,13 +1629,13 @@ public class StatsManager {
         props.setProperty("user", "sa");
         props.setProperty("password", "");
 
-        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses, ffa_kills, ffa_deaths, ffa_best_streak, ffa_kills_at, ffa_best_at) " +
-                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses, ffa_kills, ffa_deaths, ffa_best_streak, ffa_kills_at, ffa_best_at, elo_games) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak), " +
                 "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at), " +
                 "lost_streak = VALUES(lost_streak), lost_at = VALUES(lost_at), elo = VALUES(elo), elo_at = VALUES(elo_at), losses = VALUES(losses), " +
                 "ffa_kills = VALUES(ffa_kills), ffa_deaths = VALUES(ffa_deaths), ffa_best_streak = VALUES(ffa_best_streak), " +
-                "ffa_kills_at = VALUES(ffa_kills_at), ffa_best_at = VALUES(ffa_best_at)";
+                "ffa_kills_at = VALUES(ffa_kills_at), ffa_best_at = VALUES(ffa_best_at), elo_games = VALUES(elo_games)";
 
         int copied = 0;
         try (Connection h2 = new org.h2.Driver().connect(h2FileUrl() + ";IFEXISTS=TRUE", props);
@@ -1609,7 +1645,7 @@ public class StatsManager {
                      + reachedAtSelect(h2, "lost_streak") + reachedAtSelect(h2, "lost_at")
                      + (hasColumn(h2, "arena_stats", "elo") ? ", elo" : ", " + START_ELO + " AS elo") + reachedAtSelect(h2, "elo_at") + reachedAtSelect(h2, "losses")
                      + reachedAtSelect(h2, "ffa_kills") + reachedAtSelect(h2, "ffa_deaths") + reachedAtSelect(h2, "ffa_best_streak")
-                     + reachedAtSelect(h2, "ffa_kills_at") + reachedAtSelect(h2, "ffa_best_at")
+                     + reachedAtSelect(h2, "ffa_kills_at") + reachedAtSelect(h2, "ffa_best_at") + reachedAtSelect(h2, "elo_games")
                      + " FROM arena_stats");
              Connection target = dataSource.getConnection()) {
 
@@ -1634,6 +1670,7 @@ public class StatsManager {
                     ps.setInt(16, rs.getInt("ffa_best_streak"));
                     ps.setLong(17, rs.getLong("ffa_kills_at"));
                     ps.setLong(18, rs.getLong("ffa_best_at"));
+                    ps.setInt(19, rs.getInt("elo_games"));
                     ps.addBatch();
                     if (++copied % 500 == 0)
                         ps.executeBatch();

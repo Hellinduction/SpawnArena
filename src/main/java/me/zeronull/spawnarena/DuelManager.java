@@ -104,7 +104,8 @@ public final class DuelManager {
                 Placeholder.unparsed("requester", requester.getName()),
                 Placeholder.unparsed("arena", arenaName)));
         requester.sendMessage(MiniMessage.miniMessage().deserialize(
-                "<red><bold>NO STATS OR PAYOUTS</bold></red> <dark_gray>·</dark_gray> <yellow>Duel request sent to </yellow><gold><target></gold><yellow> in </yellow><gold><arena></gold><yellow>. It expires in </yellow><gold><seconds>s</gold><yellow>.</yellow>",
+                "<red><bold>NO STATS OR PAYOUTS</bold></red> <dark_gray>·</dark_gray> <yellow>Duel request sent to </yellow><gold><target></gold><yellow> in </yellow><gold><arena></gold><yellow>. It expires in </yellow><gold><seconds>s</gold><yellow>.</yellow> "
+                        + "<click:run_command:'/arenaduel cancel " + target.getName() + "'><hover:show_text:'<red>Take back the duel request'><red><bold>[Cancel]</bold></red></hover></click>",
                 Placeholder.unparsed("target", target.getName()),
                 Placeholder.unparsed("arena", arenaName),
                 Placeholder.unparsed("seconds", String.valueOf(seconds))));
@@ -158,6 +159,21 @@ public final class DuelManager {
                 Placeholder.unparsed("requester", Grammar.possessive(requester.getName()))));
         requester.sendMessage(MiniMessage.miniMessage().deserialize("<red><target> denied your duel request.",
                 Placeholder.unparsed("target", target.getName())));
+    }
+
+    /** The requester takes back the request they sent this player ([Cancel] on the "request sent" message). */
+    public static void cancel(final Player requester, final Player target) {
+        final Map<UUID, Request> requests = REQUESTS.get(target.getUniqueId());
+        final Request request = requests == null ? null : requests.remove(requester.getUniqueId());
+        if (request == null || System.currentTimeMillis() > request.expiresAt()) {
+            requester.sendMessage(MiniMessage.miniMessage().deserialize("<red>You don't have a duel request out to <target> (it may have expired or been answered).",
+                    Placeholder.unparsed("target", target.getName())));
+            return;
+        }
+        requester.sendMessage(MiniMessage.miniMessage().deserialize("<gray>Cancelled your duel request to <target>.",
+                Placeholder.unparsed("target", target.getName())));
+        target.sendMessage(MiniMessage.miniMessage().deserialize("<gray><requester> withdrew their duel request.",
+                Placeholder.unparsed("requester", requester.getName())));
     }
 
     /**

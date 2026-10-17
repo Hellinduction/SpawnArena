@@ -85,8 +85,8 @@ commands:
     permission-message: "§cYou don't have permission!"
 
   arenaduel:
-    description: Accept, deny or toggle duel requests (shift-right-click a player near an arena to send one)
-    usage: "/arenaduel accept|deny <player> | toggle"
+    description: Accept, deny or cancel duel requests, or toggle receiving them (shift-right-click a player near an arena to send one)
+    usage: "/arenaduel accept|deny|cancel <player> | toggle"
     permission: spawnarena.duel
     permission-message: "§cYou don't have permission!"
 
