@@ -43,7 +43,7 @@ public final class SettingsConfig {
 
     @Comment({"Rated fights a player needs in an arena before they show on its Elo leaderboard (their \"You\" line says",
             "unranked until then), so winning a couple and never playing again can't top it. 0 = everyone shows."})
-    public int eloMinGames = 10;
+    public int eloMinGames = 5;
 
     @Comment({"Don't pay win rewards when the winner and loser have ever connected from the same IP address.",
             "IPs are stored hashed. Local/LAN addresses are ignored."})
