@@ -79,6 +79,7 @@ public final class LeaderboardHolograms {
         final TextHologramData data = new TextHologramData(name, loc);
         data.setText(leaderboardLines(arena, stat, limit));
         data.setTextUpdateInterval(UPDATE_INTERVAL_MS);
+        data.setTextShadow(true);
         data.setPersistent(true);
 
         final Hologram hologram = manager.create(data);
@@ -137,6 +138,7 @@ public final class LeaderboardHolograms {
         final TextHologramData data = new TextHologramData(name, loc);
         data.setText(rewardLines(arena));
         data.setTextUpdateInterval(REWARD_UPDATE_INTERVAL_MS);
+        data.setTextShadow(true);
         data.setPersistent(true);
 
         final Hologram hologram = manager.create(data);
@@ -257,6 +259,7 @@ public final class LeaderboardHolograms {
 
             text.setText(lines);
             text.setTextUpdateInterval(interval);
+            text.setTextShadow(true);
             h.forceUpdate();
             h.refreshForViewers();
             updated++;
