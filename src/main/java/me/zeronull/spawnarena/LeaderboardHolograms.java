@@ -246,12 +246,9 @@ public final class LeaderboardHolograms {
                 lines = rewardLines(arena);
                 interval = REWARD_UPDATE_INTERVAL_MS;
             } else {
-                String stat = null;
-                for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo"}) {
-                    if (rest.endsWith("_" + s)) { stat = s; break; }
-                }
-                final String arena = stat == null ? null : resolveArena(rest.substring(0, rest.length() - stat.length() - 1));
-                if (arena == null) { skipped.add(name); continue; }
+                final String[] board = boardOf(name);
+                if (board == null) { skipped.add(name); continue; }
+                final String arena = board[0], stat = board[1];
                 final int rows = Math.max(1, Math.min((int) text.getText().stream().filter(l -> l.contains("spawnarena_top_player_")).count(),
                         me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT));
                 lines = leaderboardLines(arena, stat, rows);
@@ -267,6 +264,36 @@ public final class LeaderboardHolograms {
 
         manager.saveHolograms();
         return new UpdateResult(updated, skipped);
+    }
+
+    /** A leaderboard hologram's {arena, stat}, read back from its name; null for reward holograms and unknown ones. */
+    private static String[] boardOf(final String name) {
+        if (!name.startsWith(NAME_PREFIX))
+            return null;
+        // spawnarena_lb_<arena>_<stat>_<4 digits>
+        final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
+        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo"}) {
+            if (rest.endsWith("_" + s)) {
+                final String arena = resolveArena(rest.substring(0, rest.length() - s.length() - 1));
+                return arena == null ? null : new String[]{arena, s};
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Looks up this player's place on every leaderboard hologram in the background (on join), so their "You" line is
+     * ready before they ever see it instead of showing "..." until the board's next refresh.
+     */
+    public static void warmStandings(final java.util.UUID uuid) {
+        if (me.zeronull.spawnarena.SpawnArena.statsManager == null)
+            return;
+        for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
+            final String[] board = boardOf(h.getData().getName());
+            final String field = board == null ? null : me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.statToField(board[1]);
+            if (field != null)
+                me.zeronull.spawnarena.SpawnArena.statsManager.getStandingCached(uuid, board[0], field);
+        }
     }
 
     /** Hologram names store the arena in lower case; map it back to the arena's real name. */

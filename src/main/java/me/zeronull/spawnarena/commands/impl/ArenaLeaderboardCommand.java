@@ -280,7 +280,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         };
     }
 
-    private static String statToField(String stat) {
+    public static String statToField(String stat) {
         return switch (stat) {
             case "wins" -> "wins";
             case "streak" -> "win_streak";

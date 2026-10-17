@@ -1486,13 +1486,14 @@ public class StatsManager {
 
     /** Counts everyone the board puts ahead of them: higher value, or the same value reached earlier (then by uuid). */
     private Standing fetchStanding(final UUID uuid, final String arena, final String field) {
+        // Same order as the board: value, then who got there first (where that's kept), then uuid
         final String reachedAt = reachedAtColumn(field);
-        if (reachedAt == null)
-            return null;
+        final String tie = reachedAt == null ? "o.uuid < s.uuid"
+                : "(o." + reachedAt + " < s." + reachedAt + " OR (o." + reachedAt + " = s." + reachedAt + " AND o.uuid < s.uuid))";
+        final String played = field.startsWith("ffa_") ? " AND (o.ffa_kills > 0 OR o.ffa_deaths > 0)" : "";
         final String sql = "SELECT s." + field + " AS v, (SELECT COUNT(*) FROM arena_stats o WHERE o.server_id=" + sid
-                + " AND o.arena=s.arena AND (o." + field + " > s." + field + " OR (o." + field + " = s." + field
-                + " AND (o." + reachedAt + " < s." + reachedAt + " OR (o." + reachedAt + " = s." + reachedAt
-                + " AND o.uuid < s.uuid))))) AS ahead FROM arena_stats s WHERE s.server_id=" + sid + " AND s.arena=? AND s.uuid=?";
+                + " AND o.arena=s.arena" + played + " AND (o." + field + " > s." + field + " OR (o." + field + " = s." + field
+                + " AND " + tie + "))) AS ahead FROM arena_stats s WHERE s.server_id=" + sid + " AND s.arena=? AND s.uuid=?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, arena.toLowerCase());
