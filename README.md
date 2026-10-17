@@ -19,7 +19,7 @@ Don't add `shade:shade` to the command: shading already runs during `package`, a
 
 - Java 21+, Paper/LeafMC 1.21.11 (or Folia 1.21.11)
 - WorldGuard, plus WorldEdit **or** FastAsyncWorldEdit (detected automatically)
-- Optional: Vault + an economy plugin (win rewards and `/arenabet`), PlaceholderAPI (stats placeholders), FancyHolograms (leaderboard and reward holograms)
+- Optional: Vault + an economy plugin (win rewards and `/arenabet`), PlaceholderAPI (stats placeholders), FancyHolograms (leaderboard and reward holograms), TAB (fight outlines keep their colour with TAB's nametags), Simple Voice Chat (separate fights in one arena can't hear each other)
 
 # Velocity bridge
 

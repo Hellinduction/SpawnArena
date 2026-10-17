@@ -46,13 +46,13 @@ public final class ArenaConfig {
     @Comment("Minutes between win rewards for the #1 current win streak holder")
     public int leaderRewardCooldownMinutes = 10;
 
-    @Comment("Win reward multiplier for the #2 current win streak (needs the same minimum streak as the #1 bonus)")
+    @Comment("Win reward multiplier for the #2 current win streak")
     public double secondRewardMultiplier = 1.5;
 
     @Comment("Minutes between win rewards for the #2 current win streak")
     public int secondRewardCooldownMinutes = 15;
 
-    @Comment("Win reward multiplier for the #3 current win streak (needs the same minimum streak as the #1 bonus)")
+    @Comment("Win reward multiplier for the #3 current win streak")
     public double thirdRewardMultiplier = 1.2;
 
     @Comment("Minutes between win rewards for the #3 current win streak")
