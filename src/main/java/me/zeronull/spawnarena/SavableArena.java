@@ -53,6 +53,18 @@ public final class SavableArena extends Arena {
         return config;
     }
 
+    /**
+     * Rewrites an arena's file with every current option and comment, keeping its values: options added in newer
+     * versions show up, and old comments get replaced. Done when arenas load (startup and /arenareload).
+     */
+    public static void refreshArenaConfig(final File configFile) {
+        try {
+            createArenaConfig(configFile);
+        } catch (final RuntimeException e) {
+            SpawnArena.INSTANCE.getLogger().warning("Couldn't refresh " + configFile.getName() + " with the current options: " + e.getMessage());
+        }
+    }
+
     public static void createArenaConfig(final File configFile) {
         final YamlConfigurationProperties properties = ConfigLib.BUKKIT_DEFAULT_PROPERTIES.toBuilder()
                 .build();
@@ -150,6 +162,7 @@ public final class SavableArena extends Arena {
      */
     public boolean reloadFromDisk() {
         CrystalPvp.forgetSnapshot(this);
+        refreshArenaConfig(this.getConfigFile());
         final ArenaConfig config = getArenaConfig(this.getConfigFile());
         final boolean becameFfa;
         // Checked and applied under the arena's lock, which joining a free-for-all and starting a match also take,

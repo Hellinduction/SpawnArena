@@ -32,7 +32,7 @@ Everything works on Folia, with these differences:
 - **No teleport events.** Folia never fires `PlayerTeleportEvent`, so these do nothing there:
   - teleporting while queued doesn't take you out of the queue;
   - a command or plugin teleport out of the arena mid-fight doesn't count as a loss (leaving the arena on foot or by pearl is still stopped);
-  - an anticheat setback into or over lava (or a sumo arena's water) isn't redirected back to where the player was, and touching it shortly after such a setback isn't forgiven.
+  - an anticheat setback into or over lava (or a sumo arena's water) can't be redirected as it happens. Instead it's spotted from the player's steps, and touching the lava or water right after still puts them back where they were.
 - **No FastAsyncWorldEdit.** FAWE doesn't support Folia, so arenas are pasted with plain WorldEdit on the arena's own region thread. A crystal arena's reset after each fight then takes a few seconds, during which that part of the world is busy.
 - **No `/reload`.** Restart the server to update the plugin.
 

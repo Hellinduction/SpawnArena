@@ -106,6 +106,7 @@ public class ConfigHandler {
             return new ArrayList<>();
 
         for (final File configFile : arenaConfigs) {
+            SavableArena.refreshArenaConfig(configFile);
             final ArenaConfig config = SavableArena.getArenaConfig(configFile);
             final Arena arena = SavableArena.deserialize(config);
 

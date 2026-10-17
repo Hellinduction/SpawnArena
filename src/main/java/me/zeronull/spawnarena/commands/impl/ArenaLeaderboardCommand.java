@@ -80,7 +80,7 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             return true;
         }
         if (args.length < 3) {
-            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak> [limit]");
+            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak|reward> [limit]");
             return true;
         }
 
