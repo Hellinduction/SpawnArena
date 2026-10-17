@@ -32,6 +32,8 @@ public final class PlayerPreFightData {
     protected GameMode previousGameMode;
     protected double health;
     protected int foodLevel;
+    /** The hotbar slot they were holding (put back afterwards; the fight may switch them to its own item). */
+    protected int heldSlot;
     protected List<PotionEffect> effects;
     /** Items that belong to the player but didn't fit in their inventory when the fight started (e.g. a recalled trident). */
     // Copy-on-write: added to on the player's thread while a save on another thread may be serializing it
@@ -48,6 +50,7 @@ public final class PlayerPreFightData {
         previousGameMode = player.getGameMode();
         health = player.getHealth();
         foodLevel = player.getFoodLevel();
+        heldSlot = player.getInventory().getHeldItemSlot();
         effects = new ArrayList<>(player.getActivePotionEffects());
 
         this.uuid = player.getUniqueId();
@@ -78,6 +81,7 @@ public final class PlayerPreFightData {
         this.previousGameMode = GameMode.valueOf(obj.getString("previous_gamemode"));
         this.health = obj.getDouble("health");
         this.foodLevel = obj.getInt("food_level");
+        this.heldSlot = obj.optInt("held_slot", -1); // saves from older versions don't have it
         if (obj.has("extra_items")) {
             for (final ItemStack item : ItemSerializer.deserialize(obj.getString("extra_items")))
                 if (item != null)
@@ -131,6 +135,8 @@ public final class PlayerPreFightData {
         final double max = maxHealth == null ? 20 : maxHealth.getValue();
         this.player.setHealth(Math.max(0.5, Math.min(this.health, max)));
         this.player.setFoodLevel(this.foodLevel);
+        if (this.heldSlot >= 0 && this.heldSlot <= 8)
+            this.player.getInventory().setHeldItemSlot(this.heldSlot);
         this.player.setLevel(this.level);
         this.player.setExp(this.exp);
         this.player.getInventory().setContents(this.contents);
@@ -308,6 +314,7 @@ public final class PlayerPreFightData {
         obj.put("previous_gamemode", this.previousGameMode.name());
         obj.put("health", this.health);
         obj.put("food_level", this.foodLevel);
+        obj.put("held_slot", this.heldSlot);
         if (!this.extraItems.isEmpty())
             obj.put("extra_items", ItemSerializer.serialize(this.extraItems.toArray(new ItemStack[0])));
 

@@ -106,6 +106,32 @@ public class Fight {
             this.variant.equip(fighter);
         else if (this.arena.isGiveKnockBackStick())
             fighter.getInventory().addItem(SlapFish.create());
+        else
+            return;
+        holdKit(fighter);
+    }
+
+    /**
+     * Puts the fight's item in their hand: switches to its hotbar slot, or (a full hotbar) swaps it into the first one.
+     * Their own held slot and inventory are put back afterwards with everything else.
+     */
+    private static void holdKit(final Player fighter) {
+        final org.bukkit.inventory.PlayerInventory inv = fighter.getInventory();
+        int slot = -1;
+        for (int i = 0; i < inv.getStorageContents().length; i++)
+            if (SlapFish.isKitItem(inv.getItem(i))) {
+                slot = i;
+                break;
+            }
+        if (slot < 0)
+            return;
+        if (slot > 8) {
+            final ItemStack kit = inv.getItem(slot), first = inv.getItem(0);
+            inv.setItem(0, kit);
+            inv.setItem(slot, first);
+            slot = 0;
+        }
+        inv.setHeldItemSlot(slot);
     }
 
     public FightStats stats() {
@@ -808,8 +834,19 @@ public class Fight {
                     endedStreaks.put(loser, streak);
                 SpawnArena.statsManager.recordLoss(loser, this.arena.arenaName);
             }
-            for (final Player winner : winners)
-                winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName));
+            // Beating the same opponent again and again stops raising the streak after sameOpponentStreakLimit wins
+            final int limit = SpawnArena.settings == null ? 0 : SpawnArena.settings.sameOpponentStreakLimit;
+            final UUID opponent = WinRewards.opponentKey(losers);
+            for (final Player winner : winners) {
+                final int inARow = opponent == null ? 1 : SpawnArena.statsManager.noteStreakOpponent(winner.getUniqueId(), this.arena.arenaName, opponent);
+                final boolean raise = limit <= 0 || inARow <= limit;
+                winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName, raise));
+                if (!raise && winner.isOnline())
+                    winner.sendMessage(MiniMessage.miniMessage().deserialize(
+                            "<yellow>Your win streak didn't go up: you've beaten <white><who></white> <white><n></white> times in a row. "
+                                    + "Beat someone else to keep it climbing.",
+                            Placeholder.component("who", displayNames(losers)), Placeholder.unparsed("n", String.valueOf(inARow))));
+            }
 
             final Map<UUID, int[]> elo = SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
             for (final Player p : this.getMembers()) {
