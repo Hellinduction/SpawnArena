@@ -69,7 +69,7 @@ public final class ArenaWizard {
         int minY, maxY;
         Location spawn1, spawn2, exit;
         boolean exitChosen;
-        boolean crystalPvp, waterDeath, knockbackFish, plateWin, clearItems, multi, ffa, resetAfterFight = true;
+        boolean crystalPvp, waterDeath, knockbackFish, plateWin, clearItems, multi, ffa, randomSumo, resetAfterFight = true;
         // Starts at the plugin's default for new arenas
         double winReward = new me.zeronull.spawnarena.config.impl.ArenaConfig().winReward;
         /** What the −/+ buttons change it by: a fifth of the default (50k -> 10k, 50m -> 10m) */
@@ -365,6 +365,7 @@ public final class ArenaWizard {
                             }
                             case "water" -> s.waterDeath = !s.waterDeath;
                             case "fish" -> s.knockbackFish = !s.knockbackFish;
+                            case "random" -> s.randomSumo = !s.randomSumo && s.waterDeath;
                             case "plate" -> s.plateWin = !s.plateWin && !s.ffa;
                             case "clear" -> s.clearItems = !s.clearItems;
                             case "multi" -> s.multi = !s.multi && !s.crystalPvp && !s.ffa;
@@ -717,6 +718,7 @@ public final class ArenaWizard {
             c.shouldClearItems = s.clearItems;
             c.arenaMode = s.multi ? ArenaMode.MULTI.toString() : ArenaMode.SINGLE.toString();
             c.ffa = s.ffa;
+            c.randomSumo = s.randomSumo && s.waterDeath;
             c.winReward = s.winReward;
             if (reset) {
                 c.pasteLocation = s.pasteAt;
@@ -906,7 +908,10 @@ public final class ArenaWizard {
                                     + "Kills and deaths are counted apart; no wins, rewards or bets")).append("  ")
                     .append(toggle("Crystal PvP", s.crystalPvp, "crystal", tag, "Players can build and use end crystals")).append("  ")
                     .append(toggle("Water = out", s.waterDeath, "water", tag, "Touching water loses (sumo)")).append("  ")
-                    .append(toggle("Slap Fish", s.knockbackFish, "fish", tag, "Give everyone a knockback fish")).append("\n")
+                    .append(toggle("Slap Fish", s.knockbackFish, "fish", tag, "Give everyone a knockback fish")).append("  ")
+                    .append(s.waterDeath ? toggle("Random sumo", s.randomSumo, "random", tag,
+                            "Each match gets a random variant: Classic, Archer, Ice Rink, Snowball Fight, Rod, Moon Gravity or Shrinking Platform")
+                            : "<dark_gray>[Random sumo (needs Water = out)]</dark_gray>").append("\n")
                     .append(s.ffa ? "<dark_gray>[No pressure plate wins (free-for-all)]</dark_gray>"
                             : toggle("Pressure plate wins", s.plateWin, "plate", tag, "Stepping on a stone pressure plate wins")).append("  ")
                     .append(toggle("Clear inventory", s.clearItems, "clear", tag, "Fight with an empty inventory (it's given back after)")).append("  ")

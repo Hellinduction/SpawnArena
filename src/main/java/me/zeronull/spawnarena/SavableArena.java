@@ -208,6 +208,7 @@ public final class SavableArena extends Arena {
         super.setArenaMode(config.arenaMode);
         super.setCrystalPvp(config.crystalPvp);
         super.setFfa(config.ffa);
+        super.setRandomSumo(config.randomSumo);
         this.setWinReward(config.winReward, config.winRewardCooldownMinutes);
         this.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
         this.setPodiumRewards(config.secondRewardMultiplier, config.secondRewardCooldownMinutes,

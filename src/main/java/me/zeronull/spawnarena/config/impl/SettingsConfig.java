@@ -106,4 +106,9 @@ public final class SettingsConfig {
     @Comment({"Free-for-all arenas: a kill streak of every this many kills (5, 10, 15...) is announced to the server,",
             "and so is someone ending a streak at least this long. 0 keeps every free-for-all message inside the arena."})
     public int ffaStreakAnnounce = 5;
+
+    @Comment({"Random sumo's Ice Rink in MULTI arenas (several matches on the same platform): the ice is only shown to that",
+            "match's players (the real floor doesn't change). Their game slides on it while the server still sees the old floor,",
+            "which some anticheats may flag. Set to false and Ice Rink is never picked in MULTI arenas (SINGLE arenas use real ice)."})
+    public boolean sumoIceInMulti = true;
 }

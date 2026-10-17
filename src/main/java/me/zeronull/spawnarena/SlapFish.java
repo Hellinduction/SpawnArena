@@ -18,6 +18,20 @@ import org.bukkit.persistence.PersistentDataType;
  */
 public final class SlapFish implements Listener {
     private static final NamespacedKey KEY = new NamespacedKey(SpawnArena.INSTANCE, "slap_fish");
+    /** Any item handed out for a fight (random sumo's bow, rod, snowballs...): kept to that fight like the fish. */
+    private static final NamespacedKey KIT = new NamespacedKey(SpawnArena.INSTANCE, "fight_kit");
+
+    /** Marks an item as handed out for the fight. */
+    public static ItemStack tag(final ItemStack item) {
+        item.editMeta(meta -> meta.getPersistentDataContainer().set(KIT, PersistentDataType.BYTE, (byte) 1));
+        return item;
+    }
+
+    /** The fish, or anything else handed out for a fight. */
+    public static boolean isKitItem(final ItemStack item) {
+        return isSlapFish(item) || (item != null && item.hasItemMeta()
+                && item.getItemMeta().getPersistentDataContainer().has(KIT, PersistentDataType.BYTE));
+    }
 
     public static ItemStack create() {
         final ItemStack fish = new ItemStack(Material.TROPICAL_FISH);
@@ -46,14 +60,14 @@ public final class SlapFish implements Listener {
     /** It's only for the fight it was handed out in: it can't be dropped, even by staff allowed to drop items. */
     @EventHandler(priority = EventPriority.LOWEST)
     public void onDrop(final org.bukkit.event.player.PlayerDropItemEvent e) {
-        if (isSlapFish(e.getItemDrop().getItemStack()))
+        if (isKitItem(e.getItemDrop().getItemStack()))
             e.setCancelled(true);
     }
 
     /** One that's on the ground anyway (older versions let staff drop it) goes, rather than to whoever walks over it. */
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPickup(final org.bukkit.event.entity.EntityPickupItemEvent e) {
-        if (isSlapFish(e.getItem().getItemStack())) {
+        if (isKitItem(e.getItem().getItemStack())) {
             e.setCancelled(true);
             e.getItem().remove();
         }
@@ -61,7 +75,7 @@ public final class SlapFish implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onHopperPickup(final org.bukkit.event.inventory.InventoryPickupItemEvent e) {
-        if (isSlapFish(e.getItem().getItemStack())) {
+        if (isKitItem(e.getItem().getItemStack())) {
             e.setCancelled(true);
             e.getItem().remove();
         }

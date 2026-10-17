@@ -284,7 +284,9 @@ public abstract class Arena extends ArenaOptions {
                     || p.getGameMode() == GameMode.SPECTATOR
                     || p.hasPermission("spawnarena.bypasskickout")
                     || SpawnArena.arenas.hasFighter(p)
-                || FfaFight.isJoining(p);
+                || FfaFight.isJoining(p)
+                // Out of their match a moment ago and about to be sent back with their things: not an onlooker
+                || Fight.AWAITING_RESTORE.contains(p.getUniqueId());
         }
 
         /** Sends non-fighters out of this one arena only. */

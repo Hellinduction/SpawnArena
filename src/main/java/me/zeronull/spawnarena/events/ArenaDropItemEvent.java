@@ -22,7 +22,8 @@ public class ArenaDropItemEvent implements Listener {
             return;
         }
 
-        if (player.hasPermission("spawnarena.allowdropinfight")) {
+        // Staff with the permission, and only once they've switched it on with /arenadrop
+        if (me.zeronull.spawnarena.commands.impl.ArenaDropCommand.mayDropInFight(player)) {
             return;
         }
 

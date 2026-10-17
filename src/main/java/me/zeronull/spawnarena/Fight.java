@@ -62,6 +62,51 @@ public class Fight {
     private final FightStats stats = new FightStats();
     /** Crystal arenas: the snapshot, taken during the countdown; nobody is sent in until it's ready. */
     protected volatile java.util.concurrent.CompletableFuture<Boolean> arenaReady = java.util.concurrent.CompletableFuture.completedFuture(true);
+    /** Random sumo: this match's variant (null when the arena doesn't use random sumo). */
+    protected volatile SumoVariant variant;
+
+    public SumoVariant getVariant() {
+        return this.variant;
+    }
+
+    /** MULTI Ice Rink: the platform, shown as ice only to this match's players. */
+    protected volatile java.util.concurrent.CompletableFuture<List<SumoIce.FakeBlock>> fakeIce;
+
+    /** Shrinking Platform: drops the edge a ring at a time while the fight is on. */
+    private volatile ScheduledTask shrinkTask;
+
+    /** Picks this match's random sumo variant and gets Ice Rink's or Shrinking Platform's floor ready. */
+    protected void pickVariant() {
+        this.variant = SumoVariant.pickFor(this.arena, this.isFfa());
+        if (this.variant == SumoVariant.SHRINK) {
+            SumoIce.record(this.arena); // saved now, put back at the end
+            return;
+        }
+        if (this.variant != SumoVariant.ICE)
+            return;
+        if (SumoVariant.iceIsClientSide(this.arena))
+            this.fakeIce = SumoIce.findForFake(this.arena);
+        else
+            SumoIce.freeze(this.arena);
+    }
+
+    /** MULTI Ice Rink: shows this player the ice (once they're in). */
+    protected void showFakeIce(final Player player) {
+        final java.util.concurrent.CompletableFuture<List<SumoIce.FakeBlock>> ice = this.fakeIce;
+        if (ice != null)
+            ice.thenAccept(blocks -> {
+                if (this.isFighter(player)) // not someone who's already out by the time it's worked out
+                    SumoIce.showIce(player, blocks);
+            });
+    }
+
+    /** Hands out the arena's fight items: the random sumo variant's, or the Slap Fish. */
+    protected void giveKit(final Player fighter) {
+        if (this.variant != null)
+            this.variant.equip(fighter);
+        else if (this.arena.isGiveKnockBackStick())
+            fighter.getInventory().addItem(SlapFish.create());
+    }
 
     public FightStats stats() {
         return this.stats;
@@ -204,6 +249,10 @@ public class Fight {
         // arena then: it's empty, and a new match only starts once the last one's reset is done)
         if (arena.isCrystalPvp())
             this.arenaReady = CrystalPvp.takeSnapshot(this);
+        this.pickVariant();
+        if (this.variant != null)
+            for (final Player p : this.getMembers())
+                p.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce()));
 
         if (this.mode == FightMode.TWO_V_TWO)
             this.announceTeams();
@@ -319,6 +368,8 @@ public class Fight {
         this.tryCancel(this.starting);
         this.performShowLogic();
         CrystalPvp.cleanup(this); // nothing can be placed before the fight starts, but just in case
+        if (this.variant == SumoVariant.ICE || this.variant == SumoVariant.SHRINK)
+            SumoIce.thaw(this.arena);
         return true;
     }
 
@@ -460,9 +511,7 @@ public class Fight {
                 fighter.removePotionEffect(effect.getType());
         }
 
-        if (this.arena.isGiveKnockBackStick()) {
-            fighter.getInventory().addItem(SlapFish.create());
-        }
+        this.giveKit(fighter);
 
         this.arena.teleportFighter(fighter, this.getSpawnOf(fighter)).whenComplete((ok, error) -> this.arrived(fighter));
     }
@@ -476,6 +525,10 @@ public class Fight {
             this.fightState = FightState.IN_FIGHT;
         }
         this.stats.start();
+        for (final Player p : this.getFighters())
+            this.showFakeIce(p);
+        if (this.variant == SumoVariant.SHRINK)
+            this.shrinkTask = SumoShrink.start(this);
         if (this.mode == FightMode.TWO_V_TWO)
             Threads.async(() -> TeamPicker.remember(this.teamA, this.teamB));
         this.performHideLogic();
@@ -626,8 +679,14 @@ public class Fight {
         FightGlow.end(this);
         this.performShowLogic();
 
-        // Crystal arenas: everything put back as it was when the fight started
-        final java.util.concurrent.CompletableFuture<Void> cleaned = CrystalPvp.cleanup(this);
+        // Crystal arenas: everything put back as it was when the fight started; Ice Rink: the floor back too
+        final ScheduledTask shrink = this.shrinkTask;
+        if (shrink != null && !shrink.isCancelled())
+            shrink.cancel();
+        SumoShrink.clear(this);
+        final java.util.concurrent.CompletableFuture<Void> cleaned = this.variant == SumoVariant.ICE || this.variant == SumoVariant.SHRINK
+                ? CrystalPvp.cleanup(this).thenCompose(ignored -> SumoIce.thaw(this.arena))
+                : CrystalPvp.cleanup(this);
 
         // Reset before the next match is started, so the paste isn't racing its countdown (and after the
         // crystal clean-up, so the two don't fight over the same blocks)
@@ -677,6 +736,9 @@ public class Fight {
         try {
             FightGlow.remove(player);
             me.zeronull.spawnarena.events.EgapCooldown.clear(player);
+            final java.util.concurrent.CompletableFuture<List<SumoIce.FakeBlock>> ice = this.fakeIce;
+            if (ice != null && ice.isDone() && !ice.isCompletedExceptionally())
+                SumoIce.showReal(player, ice.join()); // the real floor again, before they're sent back
             if (!this.restored.add(player.getUniqueId()))
                 return;
             final PlayerPreFightData data = this.preFightData.get(player.getUniqueId());

@@ -163,6 +163,7 @@ public final class FfaFight extends Fight {
         Arena.ArenaUtils.kickOutLingeringPlayers(this.arena);
         if (this.arena.isCrystalPvp())
             this.arenaReady = CrystalPvp.takeSnapshot(this);
+        this.pickVariant();
         this.ticker = Threads.globalTimer(task -> this.tick(), 20L, 20L);
     }
 
@@ -228,9 +229,7 @@ public final class FfaFight extends Fight {
             for (final PotionEffect effect : new ArrayList<>(player.getActivePotionEffects()))
                 player.removePotionEffect(effect.getType());
         }
-        if (this.arena.isGiveKnockBackStick()) {
-            player.getInventory().addItem(SlapFish.create());
-        }
+        this.giveKit(player);
 
         final Location spawn = this.pickSpawn();
         this.spawnSpots.put(id, spawn);
@@ -265,7 +264,10 @@ public final class FfaFight extends Fight {
         }
 
         this.protect(player);
+        this.showFakeIce(player);
         final String arenaName = Arena.displayName(this.arena.getArenaName());
+        if (this.variant != null)
+            player.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce()));
         player.sendMessage(MiniMessage.miniMessage().deserialize(
                 "<green>You're in the <white><arena></white> free-for-all! Everyone here is your opponent.</green> "
                         + "<gray>Your things are kept: you get them back as they were when you die or leave. Leave with "

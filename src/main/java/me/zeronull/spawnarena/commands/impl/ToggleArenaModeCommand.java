@@ -18,6 +18,23 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
 
     @Override
     public boolean onCommand(final CommandSender sender, final Command command, final String label, final String[] args) {
+        // Random sumo on/off (takes effect from the next match), from anywhere
+        if (args.length >= 2 && args[1].equalsIgnoreCase("random")) {
+            final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
+            if (!(found instanceof SavableArena savable)) {
+                sender.sendMessage(ChatColor.RED + "That arena was not found.");
+                return true;
+            }
+            final boolean on = !savable.isRandomSumo();
+            savable.setRandomSumo(on);
+            savable.save(config -> config.randomSumo = on);
+            sender.sendMessage(on
+                    ? ChatColor.GREEN + "Random sumo is on for " + savable.getArenaName() + ": each match gets a random variant (from the next match)."
+                    + (savable.isDeathOnTouchLiquid() ? "" : ChatColor.YELLOW + " It only applies to sumo arenas (where touching water loses), which this isn't.")
+                    : ChatColor.YELLOW + "Random sumo is off for " + savable.getArenaName() + " (from the next match).");
+            return true;
+        }
+
         // Free-for-all on/off works from anywhere, the console included
         if (args.length >= 2 && args[1].equalsIgnoreCase("ffa")) {
             final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
@@ -35,7 +52,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
         }
 
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa]"));
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa|random]"));
             return true;
         }
 
@@ -121,7 +138,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
     public java.util.List<String> onTabComplete(final org.bukkit.command.CommandSender sender, final org.bukkit.command.Command command,
                                                 final String label, final String[] args) {
         if (args.length == 2)
-            return "ffa".startsWith(args[1].toLowerCase()) ? java.util.List.of("ffa") : java.util.List.of();
+            return java.util.List.of("ffa", "random").stream().filter(o -> o.startsWith(args[1].toLowerCase())).toList();
         return super.onTabComplete(sender, command, label, args);
     }
 

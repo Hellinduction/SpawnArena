@@ -82,6 +82,8 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.EgapCooldown(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.FightStatsListener(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new SlapFish(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new SumoShrink(), this);
+        Threads.globalLater(SumoIce::restoreLeftovers, 40L);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaDropItemEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPreventCraftingSlot(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPlayerLeave(), this);
@@ -143,6 +145,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("arenaduel", new ArenaDuelCommand());
         this.registerCommand("arenawins", new ArenaWinsCommand());
         this.registerCommand("leavearena", new me.zeronull.spawnarena.commands.impl.LeaveArenaCommand());
+        this.registerCommand("arenadrop", new me.zeronull.spawnarena.commands.impl.ArenaDropCommand());
         this.registerCommand("arenabet", new me.zeronull.spawnarena.commands.impl.ArenaBetCommand());
         this.registerCommand("arenasetup", new me.zeronull.spawnarena.commands.impl.ArenaSetupCommand());
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {

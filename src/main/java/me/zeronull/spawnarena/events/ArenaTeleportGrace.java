@@ -237,7 +237,10 @@ public final class ArenaTeleportGrace implements Listener {
 
     /** Where they were before the teleport; none (so no rescue) if that's in liquid too or outside the arena. */
     private static Location safeSpot(final Fight fight, final Player player, final Location from) {
-        if (from != null && !LiquidListener.inLiquid(from.getBlock()) && fight.getArena().equals(SpawnArena.arenas.of(from)))
+        // Only somewhere with real ground under it: someone already knocked off (in the air over the water or lava) isn't
+        // put back, they were going in anyway
+        if (from != null && !LiquidListener.inLiquid(from.getBlock()) && fight.getArena().equals(SpawnArena.arenas.of(from))
+                && (!from.isChunkLoaded() || !org.bukkit.Bukkit.isOwnedByCurrentRegion(from) || !dangerAtOrBelow(fight.getArena(), from)))
             return from.clone();
         return null;
     }

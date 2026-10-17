@@ -274,14 +274,13 @@ public final class PlayerPreFightData {
     }
 
     private void restorePotionEffects() {
-        if (this.effects == null || this.effects.isEmpty())
-            return;
-
+        // Whatever they picked up in the fight goes, even if they had no effects before it
         for (final PotionEffect effect : this.player.getActivePotionEffects())
             this.player.removePotionEffect(effect.getType());
 
-        for (final PotionEffect effect : this.effects)
-            this.player.addPotionEffect(effect);
+        if (this.effects != null)
+            for (final PotionEffect effect : this.effects)
+                this.player.addPotionEffect(effect);
     }
 
     private ItemStack[] cloneItemStackArray(ItemStack[] items) {

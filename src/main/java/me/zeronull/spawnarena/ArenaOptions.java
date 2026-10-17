@@ -10,6 +10,16 @@ public abstract class ArenaOptions {
     private volatile ArenaMode arenaMode;
     private volatile boolean crystalPvp;
     private volatile boolean ffa;
+    private volatile boolean randomSumo;
+
+    public boolean isRandomSumo() {
+        return this.randomSumo;
+    }
+
+    public ArenaOptions setRandomSumo(final boolean value) {
+        this.randomSumo = value;
+        return this;
+    }
     private volatile double winReward;
     private volatile int winRewardCooldownMinutes;
 
