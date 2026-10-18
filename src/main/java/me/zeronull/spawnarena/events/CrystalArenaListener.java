@@ -71,6 +71,12 @@ public final class CrystalArenaListener implements Listener {
             return;
         }
 
+        // A ClickVillagers villager: ArenaVillagerGuard already said no (allowing it here would put it down as a plain head)
+        if (ArenaVillagerGuard.placesVillager(e)) {
+            e.setCancelled(true);
+            return;
+        }
+
         final List<BlockState> replaced = e instanceof BlockMultiPlaceEvent multi
                 ? multi.getReplacedBlockStates() : List.of(e.getBlockReplacedState());
 

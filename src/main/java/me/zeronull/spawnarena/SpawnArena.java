@@ -89,6 +89,7 @@ public class SpawnArena extends JavaPlugin {
         Threads.globalLater(SumoIce::restoreLeftovers, 40L);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaDropItemEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.ArenaMobSpawnGuard(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.ArenaVillagerGuard(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPreventCraftingSlot(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPlayerLeave(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPlayerLeaveAreaEvent(), this);
