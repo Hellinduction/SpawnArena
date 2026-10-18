@@ -60,7 +60,46 @@ public enum SumoVariant {
             choices.remove(ICE);
         if (!shrinkAllowed(arena, ffa))
             choices.remove(SHRINK);
-        return choices.get(ThreadLocalRandom.current().nextInt(choices.size()));
+        return deal(arena.getArenaName().toLowerCase(java.util.Locale.ROOT), choices);
+    }
+
+    /** Each arena's shuffled deck of variants still to come, and the last one dealt. */
+    private static final java.util.Map<String, java.util.ArrayDeque<SumoVariant>> DECKS = new java.util.HashMap<>();
+    private static final java.util.Map<String, SumoVariant> LAST = new java.util.HashMap<>();
+
+    /**
+     * Like dealing from a shuffled deck holding each variant once: over a round every variant comes up once, so
+     * nobody gets the same one again and again by chance. A new round is shuffled when the deck runs out (never
+     * starting with the one just played); a variant not allowed right now is skipped and stays for later.
+     */
+    private static synchronized SumoVariant deal(final String arena, final List<SumoVariant> allowed) {
+        final java.util.ArrayDeque<SumoVariant> deck = DECKS.computeIfAbsent(arena, a -> new java.util.ArrayDeque<>());
+        for (final java.util.Iterator<SumoVariant> it = deck.iterator(); it.hasNext(); ) {
+            final SumoVariant next = it.next();
+            if (allowed.contains(next)) {
+                it.remove();
+                LAST.put(arena, next);
+                return next;
+            }
+        }
+        // Nothing left that's allowed here: a new round
+        final List<SumoVariant> round = new ArrayList<>(List.of(values()));
+        java.util.Collections.shuffle(round, ThreadLocalRandom.current());
+        final SumoVariant last = LAST.get(arena);
+        if (round.size() > 1 && round.get(0) == last)
+            java.util.Collections.swap(round, 0, 1 + ThreadLocalRandom.current().nextInt(round.size() - 1));
+        deck.clear();
+        deck.addAll(round);
+        final List<SumoVariant> fallback = allowed.isEmpty() ? List.of(CLASSIC) : allowed;
+        for (final java.util.Iterator<SumoVariant> it = deck.iterator(); it.hasNext(); ) {
+            final SumoVariant next = it.next();
+            if (fallback.contains(next) && (next != last || fallback.size() == 1)) {
+                it.remove();
+                LAST.put(arena, next);
+                return next;
+            }
+        }
+        return fallback.get(0);
     }
 
     /** Real ice when one match has the arena to itself; shown only to that match's players in MULTI, if allowed. */
@@ -115,8 +154,7 @@ public enum SumoVariant {
                 bow.editMeta(meta -> meta.setUnbreakable(true));
                 player.getInventory().addItem(SlapFish.tag(bow), SlapFish.tag(new ItemStack(Material.ARROW)));
             }
-            case SNOWBALL -> player.getInventory().addItem(SlapFish.tag(new ItemStack(Material.SNOWBALL, 16)),
-                    SlapFish.tag(new ItemStack(Material.SNOWBALL, 16)), SlapFish.tag(new ItemStack(Material.SNOWBALL, 16)));
+            case SNOWBALL -> player.getInventory().addItem(SlapFish.tag(new ItemStack(Material.SNOWBALL, 16))); // never runs out
             case ROD -> {
                 final ItemStack rod = new ItemStack(Material.FISHING_ROD);
                 enchant(rod, "knockback", 1);
