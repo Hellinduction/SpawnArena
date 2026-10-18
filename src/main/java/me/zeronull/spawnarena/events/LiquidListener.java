@@ -28,9 +28,15 @@ public final class LiquidListener implements Listener, Runnable {
         return false;
     }
 
+    /** Cheap checks first (moves come in constantly): only a fighter, in the arenas' world, during a fight, can lose to liquid. */
+    private static boolean couldLose(final Player player) {
+        return player.getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD)
+                && SpawnArena.arenas.hasActiveFight() && SpawnArena.arenas.hasFighter(player);
+    }
+
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPlayerMove(final PlayerMoveEvent e) {
-        if (inLiquid(e.getPlayer().getLocation().getBlock()))
+        if (couldLose(e.getPlayer()) && inLiquid(e.getPlayer().getLocation().getBlock()))
             SpawnArena.INSTANCE.getServer().getPluginManager().callEvent(new PlayerLiquidEnterEvent(e.getPlayer()));
     }
 
@@ -38,7 +44,7 @@ public final class LiquidListener implements Listener, Runnable {
     public void run() {
         for (final Player p : SpawnArena.INSTANCE.getServer().getOnlinePlayers()) {
             me.zeronull.spawnarena.Threads.entity(p, () -> {
-                if (inLiquid(p.getLocation().getBlock()))
+                if (couldLose(p) && inLiquid(p.getLocation().getBlock()))
                     SpawnArena.INSTANCE.getServer().getPluginManager().callEvent(new PlayerLiquidEnterEvent(p));
             });
         }
