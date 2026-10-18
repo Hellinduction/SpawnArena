@@ -14,6 +14,7 @@ public class ArenaPlayerLeave implements Listener {
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
+        me.zeronull.spawnarena.AnticheatExempt.remove(player.getUniqueId()); // by uuid, so it works once they're gone
         if (!SpawnArena.arenas.hasActiveFight()) {
             return;
         }

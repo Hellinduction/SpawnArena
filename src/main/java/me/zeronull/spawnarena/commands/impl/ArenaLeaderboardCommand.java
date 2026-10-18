@@ -137,6 +137,13 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             sender.sendMessage("§7No leaderboard holograms.");
             return true;
         }
+        // The console can't click or hover: just the names, and the command to remove one
+        if (!(sender instanceof Player)) {
+            sender.sendMessage("§6Leaderboard holograms §7(remove one with /arenaleaderboard remove <name>):");
+            for (final String name : names)
+                sender.sendMessage("§7 - §e" + name);
+            return true;
+        }
         sender.sendMessage("§6Leaderboard holograms §7(click one to go there):");
         for (final String name : names) {
             // Built directly: placeholders aren't filled in inside MiniMessage click actions

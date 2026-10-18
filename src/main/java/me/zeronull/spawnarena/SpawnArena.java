@@ -84,6 +84,7 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new SlapFish(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new SumoShrink(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new SumoIce(), this);
+        AnticheatExempt.start();
         Threads.globalLater(SumoIce::restoreLeftovers, 40L);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaDropItemEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.ArenaMobSpawnGuard(), this);
@@ -169,6 +170,7 @@ public class SpawnArena extends JavaPlugin {
     @Override
     public void onDisable() {
         this.shutdownArenas();
+        AnticheatExempt.stop();
         me.zeronull.spawnarena.config.ConfigHandler.getInstance().flushPreFights();
         LagOuts.unwatchAll();
         if (statsManager != null) statsManager.close();

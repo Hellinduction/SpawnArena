@@ -568,6 +568,9 @@ public class Fight {
         for (final Player p : this.getFighters())
             this.showFakeIce(p);
         if (this.fakeIce != null)
+            for (final Player p : this.getFighters())
+                AnticheatExempt.add(p); // the anticheat sees the real floor
+        if (this.fakeIce != null)
             this.iceTask = Threads.globalTimer(task -> {
                 if (this.fightState != FightState.IN_FIGHT) {
                     task.cancel();
@@ -709,6 +712,7 @@ public class Fight {
         }
 
         for (final Player p : this.getMembers()) {
+            AnticheatExempt.remove(p.getUniqueId());
             ArenaProjectileDupeFix.discardProjectiles(p);
             if (!this.restored.contains(p.getUniqueId()))
                 AWAITING_RESTORE.add(p.getUniqueId());
@@ -789,6 +793,7 @@ public class Fight {
             final java.util.concurrent.CompletableFuture<List<SumoIce.FakeBlock>> ice = this.fakeIce;
             if (ice != null && ice.isDone() && !ice.isCompletedExceptionally())
                 SumoIce.showReal(player, ice.join()); // the real floor again, before they're sent back
+            AnticheatExempt.remove(player.getUniqueId());
             if (!this.restored.add(player.getUniqueId()))
                 return;
             final PlayerPreFightData data = this.preFightData.get(player.getUniqueId());

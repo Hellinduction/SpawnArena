@@ -115,4 +115,9 @@ public final class SettingsConfig {
             "match's players (the real floor doesn't change). Their game slides on it while the server still sees the old floor,",
             "which some anticheats may flag. Set to false and Ice Rink is never picked in MULTI arenas (SINGLE arenas use real ice)."})
     public boolean sumoIceInMulti = true;
+
+    @Comment({"With bunnyAC installed: MULTI Ice Rink players are taken out of bunnyAC for their match (it sees the real floor",
+            "and flags them for sliding), and put back as soon as they're out. Staff-exempted players are left alone. Until",
+            "bunnyAC can exempt players from single checks, this means no anticheat checks at all for that match."})
+    public boolean iceRinkAnticheatExempt = true;
 }

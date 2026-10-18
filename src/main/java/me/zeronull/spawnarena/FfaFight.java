@@ -254,6 +254,8 @@ public final class FfaFight extends Fight {
 
         this.protect(player);
         this.showFakeIce(player);
+        if (this.fakeIce != null)
+            AnticheatExempt.add(player); // the anticheat sees the real floor
         final String arenaName = Arena.displayName(this.arena.getArenaName());
         if (this.variant != null)
             player.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce()));

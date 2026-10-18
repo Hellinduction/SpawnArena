@@ -12,6 +12,7 @@ softdepend:
   - FancyHolograms
   - TAB
   - Parkour
+  - bunnyAC
 folia-supported: true
 
 commands:
