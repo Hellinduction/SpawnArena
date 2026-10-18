@@ -26,11 +26,16 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
                 return true;
             }
             final boolean on = !savable.isRandomSumo();
+            // Only sumo arenas (touching water loses) have variants; turning it off always works
+            if (on && !savable.isDeathOnTouchLiquid()) {
+                sender.sendMessage(ChatColor.RED + "Random sumo is only for sumo arenas (where touching water loses), which "
+                        + savable.getArenaName() + " isn't.");
+                return true;
+            }
             savable.setRandomSumo(on);
             savable.save(config -> config.randomSumo = on);
             sender.sendMessage(on
                     ? ChatColor.GREEN + "Random sumo is on for " + savable.getArenaName() + ": each match gets a random variant (from the next match)."
-                    + (savable.isDeathOnTouchLiquid() ? "" : ChatColor.YELLOW + " It only applies to sumo arenas (where touching water loses), which this isn't.")
                     : ChatColor.YELLOW + "Random sumo is off for " + savable.getArenaName() + " (from the next match).");
             return true;
         }
@@ -137,8 +142,13 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
     @Override
     public java.util.List<String> onTabComplete(final org.bukkit.command.CommandSender sender, final org.bukkit.command.Command command,
                                                 final String label, final String[] args) {
-        if (args.length == 2)
-            return java.util.List.of("ffa", "random").stream().filter(o -> o.startsWith(args[1].toLowerCase())).toList();
+        if (args.length == 2) {
+            // "random" only for sumo arenas (or one that somehow has it on, to turn it off)
+            final me.zeronull.spawnarena.Arena arena = SpawnArena.arenas.of(args[0]);
+            final boolean sumo = arena != null && (arena.isDeathOnTouchLiquid() || arena.isRandomSumo());
+            return (sumo ? java.util.List.of("ffa", "random") : java.util.List.of("ffa")).stream()
+                    .filter(o -> o.startsWith(args[1].toLowerCase())).toList();
+        }
         return super.onTabComplete(sender, command, label, args);
     }
 

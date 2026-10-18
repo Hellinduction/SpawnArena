@@ -23,14 +23,14 @@ import java.util.logging.Level;
  * that level inside the arena's region. What was changed is written to disk first, so a crash can't leave the ice
  * behind (it's put back on the next start).
  */
-public final class SumoIce {
+public final class SumoIce implements org.bukkit.event.Listener {
     private record Saved(int x, int y, int z, String data) {}
 
     /** At most this many floor blocks are turned to ice (a sumo platform is far smaller). */
     private static final int MAX_BLOCKS = 4096;
     private static final Map<String, List<Saved>> FROZEN = new ConcurrentHashMap<>();
 
-    private SumoIce() {}
+    public SumoIce() {} // only for its click listener
 
     private static File folder() {
         return new File(SpawnArena.INSTANCE.getDataFolder(), "sumo-ice");
@@ -195,8 +195,10 @@ public final class SumoIce {
         Threads.entity(player, () -> {
             if (!player.isOnline())
                 return;
+            final Map<Location, BlockData> changes = new java.util.HashMap<>();
             for (final FakeBlock b : blocks)
-                player.sendBlockChange(b.at(), ICE);
+                changes.put(b.at(), ICE);
+            player.sendMultiBlockChange(changes);
         });
     }
 
@@ -205,9 +207,29 @@ public final class SumoIce {
         Threads.entity(player, () -> {
             if (!player.isOnline())
                 return;
+            final Map<Location, BlockData> changes = new java.util.HashMap<>();
             for (final FakeBlock b : blocks)
-                player.sendBlockChange(b.at(), b.real());
+                changes.put(b.at(), b.real());
+            player.sendMultiBlockChange(changes);
         });
+    }
+
+    /**
+     * MULTI Ice Rink: clicking a block (the fake ice, or one next to it) makes the server send the real block back, so
+     * the fighter would see the normal floor again. Their fight's ice is shown again a tick later (and a little after).
+     */
+    @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.MONITOR)
+    public void onClick(final org.bukkit.event.player.PlayerInteractEvent e) {
+        final Block clicked = e.getClickedBlock();
+        if (clicked == null || SpawnArena.arenas == null)
+            return;
+        final org.bukkit.entity.Player player = e.getPlayer();
+        final Arena arena = SpawnArena.arenas.of(player);
+        final Fight fight = arena == null ? null : arena.getFight(player);
+        if (fight == null || !fight.hasFakeIceNear(clicked))
+            return;
+        Threads.entityLater(player, () -> fight.showFakeIce(player), 1L);
+        Threads.entityLater(player, () -> fight.showFakeIce(player), 5L);
     }
 
     /** On startup: floors a crash left as ice are put back. */

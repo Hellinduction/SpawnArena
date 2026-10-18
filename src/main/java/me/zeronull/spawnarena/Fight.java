@@ -72,6 +72,8 @@ public class Fight {
 
     /** Shrinking Platform: drops the edge a ring at a time while the fight is on. */
     private volatile ScheduledTask shrinkTask;
+    /** MULTI Ice Rink: shows the fake ice again every second (anything that resyncs the real floor is undone). */
+    private volatile ScheduledTask iceTask;
 
     /** Picks this match's random sumo variant and gets Ice Rink's or Shrinking Platform's floor ready. */
     protected void pickVariant() {
@@ -89,13 +91,27 @@ public class Fight {
     }
 
     /** MULTI Ice Rink: shows this player the ice (once they're in). */
-    protected void showFakeIce(final Player player) {
+    public void showFakeIce(final Player player) {
         final java.util.concurrent.CompletableFuture<List<SumoIce.FakeBlock>> ice = this.fakeIce;
         if (ice != null)
             ice.thenAccept(blocks -> {
                 if (this.isFighter(player)) // not someone who's already out by the time it's worked out
                     SumoIce.showIce(player, blocks);
             });
+    }
+
+    /** MULTI Ice Rink: whether this block is one of the fake ice blocks, or right next to one. */
+    public boolean hasFakeIceNear(final org.bukkit.block.Block block) {
+        final java.util.concurrent.CompletableFuture<List<SumoIce.FakeBlock>> ice = this.fakeIce;
+        if (ice == null || !ice.isDone() || ice.isCompletedExceptionally())
+            return false;
+        for (final SumoIce.FakeBlock b : ice.join()) {
+            final Location at = b.at();
+            if (at.getWorld() == block.getWorld() && Math.abs(at.getBlockX() - block.getX()) <= 1
+                    && Math.abs(at.getBlockY() - block.getY()) <= 1 && Math.abs(at.getBlockZ() - block.getZ()) <= 1)
+                return true;
+        }
+        return false;
     }
 
     /** Hands out the arena's fight items: the random sumo variant's, or the Slap Fish. */
@@ -551,6 +567,15 @@ public class Fight {
         this.stats.start();
         for (final Player p : this.getFighters())
             this.showFakeIce(p);
+        if (this.fakeIce != null)
+            this.iceTask = Threads.globalTimer(task -> {
+                if (this.fightState != FightState.IN_FIGHT) {
+                    task.cancel();
+                    return;
+                }
+                for (final Player p : this.getFighters())
+                    this.showFakeIce(p);
+            }, 20L, 20L);
         if (this.variant == SumoVariant.SHRINK)
             this.shrinkTask = SumoShrink.start(this);
         if (this.mode == FightMode.TWO_V_TWO)
@@ -707,6 +732,7 @@ public class Fight {
         final ScheduledTask shrink = this.shrinkTask;
         if (shrink != null && !shrink.isCancelled())
             shrink.cancel();
+        this.tryCancel(this.iceTask);
         SumoShrink.clear(this);
         final java.util.concurrent.CompletableFuture<Void> cleaned = this.variant == SumoVariant.ICE || this.variant == SumoVariant.SHRINK
                 ? CrystalPvp.cleanup(this).thenCompose(ignored -> SumoIce.thaw(this.arena))
@@ -898,17 +924,18 @@ public class Fight {
      */
     private void announceStreakEnded(final Player loser, final int streak, final List<Player> winners, final List<Player> losers,
                                      final net.kyori.adventure.text.event.HoverEvent<Component> statsHover, final boolean selfOut) {
+        // Worded and coloured like the usual "X beat Y in the sumo arena!" result; only the headline and the streak stand out
         final Component message = MiniMessage.miniMessage().deserialize(selfOut
-                        ? "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><loser></gold> <red>took themselves out, losing their "
-                                + "<white><bold><streak></bold></white>-win streak in <arena>. <gold><winner></gold> wins!"
-                        : "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><winner></gold> <red>ended <loser><possessive> "
-                                + "<white><bold><streak></bold></white>-win streak in <arena>!",
+                        ? "<dark_red><bold>STREAK ENDED!</bold> <loser> took themselves out in the <arena>arena, losing their "
+                                + "<white><bold><streak></bold></white>-win streak. <winner> wins!"
+                        : "<dark_red><bold>STREAK ENDED!</bold> <winner> ended <loser><possessive> "
+                                + "<white><bold><streak></bold></white>-win streak in the <arena>arena!",
                 Placeholder.component("loser", loser.displayName()),
                 // "Chris'" rather than "Chris's"
                 Placeholder.unparsed("possessive", Grammar.possessiveSuffix(loser.getName())),
                 Placeholder.component("winner", displayNames(winners)),
                 Placeholder.unparsed("streak", String.valueOf(streak)),
-                Placeholder.unparsed("arena", Arena.displayName(this.arena.getArenaName()))).hoverEvent(statsHover);
+                Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " ")).hoverEvent(statsHover);
 
         broadcast(message, winners, losers);
 
@@ -960,18 +987,18 @@ public class Fight {
     }
 
     /**
-     * " with a winstreak of 5" (1v1), or " with winstreaks of 5 & 1" (2v2, in the same order as the winners'
+     * " with a win streak of 5" (1v1), or " with win streaks of 5 & 1" (2v2, in the same order as the winners'
      * names). Empty unless a winner is on a streak of more than 2.
      */
     private static String streakPart(final List<Integer> streaks) {
         if (streaks.stream().noneMatch(s -> s > 2))
             return "";
         if (streaks.size() == 1)
-            return " with a winstreak of <white>" + streaks.get(0) + "<dark_red>";
+            return " with a win streak of <white>" + streaks.get(0) + "<dark_red>";
         final List<String> parts = new ArrayList<>();
         for (final int s : streaks)
             parts.add("<white>" + s + "<dark_red>");
-        return " with winstreaks of " + String.join(" & ", parts);
+        return " with win streaks of " + String.join(" & ", parts);
     }
 
     private static Component displayNames(final List<Player> players) {

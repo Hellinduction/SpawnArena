@@ -572,9 +572,9 @@ public final class FfaFight extends Fight {
         if (lostStreak >= every) {
             final Player ender = killersHere.isEmpty() ? null : killersHere.get(0);
             broadcast(MiniMessage.miniMessage().deserialize(ender == null
-                            ? "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><victim></gold> <red>took themselves out, losing their "
-                                    + "<white><bold><streak></bold></white> kill streak in the <arena> free-for-all."
-                            : "<dark_red><bold>STREAK ENDED!</bold></dark_red> <gold><killer></gold> <red>ended <victim><possessive> "
+                            ? "<dark_red><bold>STREAK ENDED!</bold> <victim> took themselves out in the <arena> free-for-all, losing their "
+                                    + "<white><bold><streak></bold></white> kill streak."
+                            : "<dark_red><bold>STREAK ENDED!</bold> <killer> ended <victim><possessive> "
                                     + "<white><bold><streak></bold></white> kill streak in the <arena> free-for-all!",
                     Placeholder.component("victim", victim.displayName()),
                     Placeholder.unparsed("possessive", Grammar.possessiveSuffix(victim.getName())),
@@ -658,6 +658,10 @@ public final class FfaFight extends Fight {
             return;
         final List<Player> fighting = this.getFighters();
         final int count = fighting.size();
+        // MULTI Ice Rink: the fake ice again, in case anything showed them the real floor
+        if (this.fakeIce != null)
+            for (final Player p : fighting)
+                this.showFakeIce(p);
         for (final Player p : fighting)
             Threads.entity(p, () -> {
                 if (!this.alive.contains(p) || !p.isOnline())
