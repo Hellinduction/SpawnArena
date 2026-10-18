@@ -254,11 +254,11 @@ public final class FfaFight extends Fight {
 
         this.protect(player);
         this.showFakeIce(player);
-        if (this.fakeIce != null)
-            AnticheatExempt.add(player); // the anticheat sees the real floor
+        if (this.fakeIce != null || this.variant == SumoVariant.MOON)
+            AnticheatExempt.add(player); // it sees the real floor (Ice Rink in MULTI), or flags Moon Gravity's jumps
         final String arenaName = Arena.displayName(this.arena.getArenaName());
         if (this.variant != null)
-            player.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce()));
+            player.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce(this.arena)));
         player.sendMessage(MiniMessage.miniMessage().deserialize(
                 "<green>You're in the <white><arena></white> free-for-all! Everyone here is your opponent.</green> "
                         + "<gray>Your things are kept: you get them back as they were when you die or leave. Leave with "

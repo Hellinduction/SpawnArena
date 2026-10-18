@@ -117,7 +117,7 @@ public class Fight {
     /** Hands out the arena's fight items: the random sumo variant's, or the Slap Fish. */
     protected void giveKit(final Player fighter) {
         if (this.variant != null)
-            this.variant.equip(fighter);
+            this.variant.equip(fighter, this.arena);
         else if (this.arena.isGiveKnockBackStick())
             fighter.getInventory().addItem(SlapFish.create());
         else
@@ -292,7 +292,7 @@ public class Fight {
         this.pickVariant();
         if (this.variant != null)
             for (final Player p : this.getMembers())
-                p.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce()));
+                p.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce(this.arena)));
 
         if (this.mode == FightMode.TWO_V_TWO)
             this.announceTeams();
@@ -567,9 +567,9 @@ public class Fight {
         this.stats.start();
         for (final Player p : this.getFighters())
             this.showFakeIce(p);
-        if (this.fakeIce != null)
+        if (this.fakeIce != null || this.variant == SumoVariant.MOON)
             for (final Player p : this.getFighters())
-                AnticheatExempt.add(p); // the anticheat sees the real floor
+                AnticheatExempt.add(p); // it sees the real floor (Ice Rink in MULTI), or flags Moon Gravity's jumps
         if (this.fakeIce != null)
             this.iceTask = Threads.globalTimer(task -> {
                 if (this.fightState != FightState.IN_FIGHT) {

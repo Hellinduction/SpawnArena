@@ -19,7 +19,8 @@ import java.util.regex.Pattern;
 
 /**
  * MULTI Ice Rink: the ice is only shown to that match's players, so bunnyAC (which sees the real floor) flags them for
- * sliding. Until bunnyAC can exempt players from single checks, they're taken out of bunnyAC altogether for the match
+ * sliding; and it flags Moon Gravity's jumps too. Until bunnyAC can exempt players from single checks, they're taken out
+ * of bunnyAC altogether for the match
  * ({@code acwhitelist}) and put back the moment they're out ({@code acunwhitelist}).
  *
  * <p>bunnyAC asks the console to confirm each of those with a one-time code ("Confirm within 30 seconds: exempt
@@ -146,7 +147,7 @@ public final class AnticheatExempt {
         a.stop();
     }
 
-    /** A player starting an Ice Rink match in a MULTI arena: out of bunnyAC until {@link #remove}. */
+    /** A player starting a MULTI Ice Rink or a Moon Gravity match: out of bunnyAC until {@link #remove}. */
     public static void add(final Player player) {
         final UUID uuid = player.getUniqueId();
         if (appender == null || !bunnyEnabled() || (SpawnArena.settings != null && !SpawnArena.settings.iceRinkAnticheatExempt)

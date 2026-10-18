@@ -216,6 +216,22 @@ public abstract class Arena extends ArenaOptions {
         return distance;
     }
 
+    /**
+     * Blocks between the higher spawn's feet and the top of the arena's WorldGuard region (how high a fighter can go
+     * before they're out of it), or infinite without a region.
+     */
+    public double headroom() {
+        if (!ArenaUtils.WORLD_EDIT_SUPPORT || this.spawnPoint1 == null || this.spawnPoint1.getWorld() == null)
+            return Double.POSITIVE_INFINITY;
+        final com.sk89q.worldguard.protection.managers.RegionManager manager =
+                ArenaUtils.REGION_CONTAINER.get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(this.spawnPoint1.getWorld()));
+        final com.sk89q.worldguard.protection.regions.ProtectedRegion region = manager == null ? null : manager.getRegion(this.arenaName);
+        if (region == null)
+            return Double.POSITIVE_INFINITY;
+        final double feet = Math.max(this.spawnPoint1.getY(), this.spawnPoint2 == null ? this.spawnPoint1.getY() : this.spawnPoint2.getY());
+        return region.getMaximumPoint().y() + 1 - feet;
+    }
+
     public String getArenaName() {
         return this.arenaName;
     }

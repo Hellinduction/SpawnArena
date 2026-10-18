@@ -77,14 +77,35 @@ public enum SumoVariant {
         return arena.getArenaMode() != ArenaMode.SINGLE;
     }
 
+    /** How high a jump goes with no jump boost, then with each level of it (in blocks, roughly). */
+    private static final double[] JUMP_HEIGHTS = {1.25, 1.84, 2.53, 3.31, 4.17};
+    /** Moon Gravity leaves at least this much room above the top of a jump, for knockback. */
+    private static final double JUMP_MARGIN = 1.5;
+
+    /**
+     * Moon Gravity's jump boost amplifier for this arena: the strongest one (up to Jump Boost II) whose jump still leaves
+     * JUMP_MARGIN blocks below the top of the arena's region; -1 for none (just slow falling).
+     */
+    public static int moonJumpAmplifier(final Arena arena) {
+        final double room = arena.headroom() - JUMP_MARGIN;
+        int amplifier = -1;
+        for (int level = 1; level <= 2; level++)
+            if (JUMP_HEIGHTS[level] <= room)
+                amplifier = level - 1;
+        return amplifier;
+    }
+
     /** Sets a fighter up for this variant (on their thread, after their own things are saved). */
-    public void equip(final Player player) {
+    public void equip(final Player player, final Arena arena) {
         switch (this) {
             case CLASSIC, ICE, SHRINK -> player.getInventory().addItem(SlapFish.create());
             case MOON -> {
                 player.getInventory().addItem(SlapFish.create());
                 // Long enough for any match; taken off with everything else when their own things are given back
-                player.addPotionEffect(new PotionEffect(PotionEffectType.JUMP_BOOST, 20 * 60 * 20, 1, false, false, true));
+                // As high as the arena has room for (a jump out of the top of it is a setback, which anticheats flag)
+                final int jump = moonJumpAmplifier(arena);
+                if (jump >= 0)
+                    player.addPotionEffect(new PotionEffect(PotionEffectType.JUMP_BOOST, 20 * 60 * 20, jump, false, false, true));
                 player.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 20 * 60 * 20, 0, false, false, true));
             }
             case ARCHER -> {
@@ -112,7 +133,9 @@ public enum SumoVariant {
     }
 
     /** "Sumo: Archer (Punch bow)" for the start of the match. */
-    public String announce() {
-        return "<gold>Sumo: <yellow><bold>" + this.title + "</bold></yellow> <gray>(" + this.hint + ")";
+    public String announce(final Arena arena) {
+        // No room for a jump boost there: just the slow fall
+        final String hint = this == MOON && moonJumpAmplifier(arena) < 0 ? "fall slow" : this.hint;
+        return "<gold>Sumo: <yellow><bold>" + this.title + "</bold></yellow> <gray>(" + hint + ")";
     }
 }
