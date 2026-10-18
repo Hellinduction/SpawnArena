@@ -284,21 +284,6 @@ public final class LeaderboardHolograms {
         return null;
     }
 
-    /**
-     * Looks up this player's place on every leaderboard hologram in the background (on join), so their "You" line is
-     * ready before they ever see it instead of showing "..." until the board's next refresh.
-     */
-    public static void warmStandings(final java.util.UUID uuid) {
-        if (me.zeronull.spawnarena.SpawnArena.statsManager == null)
-            return;
-        for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
-            final String[] board = boardOf(h.getData().getName());
-            final String field = board == null ? null : me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.statToField(board[1]);
-            if (field != null)
-                me.zeronull.spawnarena.SpawnArena.statsManager.getStandingCached(uuid, board[0], field);
-        }
-    }
-
     /** Hologram names store the arena in lower case; map it back to the arena's real name. */
     private static String resolveArena(final String lowerName) {
         if (me.zeronull.spawnarena.SpawnArena.arenas == null)

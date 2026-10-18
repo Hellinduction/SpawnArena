@@ -1478,65 +1478,54 @@ public class StatsManager {
 
     public void invalidateLeaderboards() {
         topCache.clear();
-        // Kept (so nobody sees a blank), just refreshed on their next look
-        standingCache.replaceAll((key, cached) -> new CachedStanding(0, cached.standing()));
+        rankCache.clear();
     }
 
     /** A player's place on a leaderboard (in the board's own order) and their value; rank 0 = not on it at all. */
     public record Standing(int rank, int value) {}
-    private record CachedStanding(long fetchedAt, Standing standing) {}
-    private final java.util.Map<String, CachedStanding> standingCache = new java.util.concurrent.ConcurrentHashMap<>();
-    private final java.util.Set<String> standingLoading = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private record CachedRanks(long fetchedAt, java.util.Map<UUID, Standing> ranks) {}
+    /** "arena:field" -> everyone's place on that board, read in one go and dropped whenever the boards are. */
+    private final java.util.Map<String, CachedRanks> rankCache = new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
-     * Never queries the database on the calling thread (holograms resolve this for every viewer): returns what's
-     * cached, null the very first time, and refreshes it in the background once it's as old as the leaderboards.
+     * This player's place on a board, for its "You" line. Everyone's place is read in one query and kept exactly as
+     * long as the board's own rows ({@link #getTopPlayersCached}), so the two always change together. Null if the
+     * database couldn't be read.
      */
-    public Standing getStandingCached(final UUID uuid, final String arena, final String field) {
-        final String key = uuid + ":" + arena.toLowerCase() + ":" + field;
-        final CachedStanding cached = standingCache.get(key);
-        if ((cached == null || System.currentTimeMillis() - cached.fetchedAt() >= TOP_CACHE_MILLIS) && standingLoading.add(key)) {
-            Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> {
-                try {
-                    final Standing fresh = fetchStanding(uuid, arena, field);
-                    if (fresh != null)
-                        standingCache.put(key, new CachedStanding(System.currentTimeMillis(), fresh));
-                } finally {
-                    standingLoading.remove(key);
-                }
-            });
+    public Standing getStanding(final UUID uuid, final String arena, final String field) {
+        final String key = arena.toLowerCase() + ":" + field;
+        final long now = System.currentTimeMillis();
+        CachedRanks cached = rankCache.get(key);
+        if (cached == null || now - cached.fetchedAt() >= TOP_CACHE_MILLIS) {
+            final java.util.Map<UUID, Standing> ranks = fetchRanks(arena, field);
+            if (ranks == null)
+                return cached == null ? null : cached.ranks().get(uuid);
+            cached = new CachedRanks(now, ranks);
+            rankCache.put(key, cached);
         }
-        return cached == null ? null : cached.standing();
+        final Standing standing = cached.ranks().get(uuid);
+        return standing != null ? standing : new Standing(0, 0);
     }
 
-    /** Drops a player's cached leaderboard places (when they leave), so the cache doesn't grow forever. */
-    public void forgetStandings(final UUID uuid) {
-        final String prefix = uuid + ":";
-        standingCache.keySet().removeIf(key -> key.startsWith(prefix));
-    }
-
-    /** Counts everyone the board puts ahead of them: higher value, or the same value reached earlier (then by uuid). */
-    private Standing fetchStanding(final UUID uuid, final String arena, final String field) {
-        // Same order as the board: value, then who got there first (where that's kept), then uuid
+    /** Everyone in the arena in the board's order (value, who got there first, uuid); those the board leaves out get 0. */
+    private java.util.Map<UUID, Standing> fetchRanks(final String arena, final String field) {
         final String reachedAt = reachedAtColumn(field);
-        final String tie = reachedAt == null ? "o.uuid < s.uuid"
-                : "(o." + reachedAt + " < s." + reachedAt + " OR (o." + reachedAt + " = s." + reachedAt + " AND o.uuid < s.uuid))";
-        final String played = boardFilter(field, "o.");
-        // Not on the board themselves (too few rated fights): no place, "unranked"
-        final String listed = boardFilter(field, "s.");
-        final String sql = "SELECT s." + field + " AS v, " + (listed.isEmpty() ? "1" : "CASE WHEN 1=1" + listed + " THEN 1 ELSE 0 END") + " AS listed, "
-                + "(SELECT COUNT(*) FROM arena_stats o WHERE o.server_id=" + sid
-                + " AND o.arena=s.arena" + played + " AND (o." + field + " > s." + field + " OR (o." + field + " = s." + field
-                + " AND " + tie + "))) AS ahead FROM arena_stats s WHERE s.server_id=" + sid + " AND s.arena=? AND s.uuid=?";
+        final String listed = boardFilter(field, "");
+        final String sql = "SELECT uuid, " + field + " AS v, " + (listed.isEmpty() ? "1" : "CASE WHEN 1=1" + listed + " THEN 1 ELSE 0 END")
+                + " AS listed FROM arena_stats WHERE server_id=" + sid + " AND arena=? ORDER BY " + field + " DESC"
+                + (reachedAt != null ? ", " + reachedAt + " ASC" : "") + ", uuid ASC";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, arena.toLowerCase());
-            ps.setString(2, uuid.toString());
+            final java.util.Map<UUID, Standing> ranks = new java.util.HashMap<>();
+            int place = 0;
             try (ResultSet rs = ps.executeQuery()) {
-                if (!rs.next())
-                    return new Standing(0, 0);
-                return new Standing(rs.getInt("listed") == 1 ? rs.getInt("ahead") + 1 : 0, rs.getInt("v"));
+                while (rs.next()) {
+                    final boolean on = rs.getInt("listed") == 1;
+                    ranks.put(UUID.fromString(rs.getString("uuid")), new Standing(on ? ++place : 0, rs.getInt("v")));
+                }
             }
+            return ranks;
         } catch (SQLException e) {
             Bukkit.getLogger().warning("[SpawnArena] getStanding: " + e.getMessage());
             return null;

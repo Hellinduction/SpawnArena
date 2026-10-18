@@ -50,7 +50,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             return null;
         final String field = statToField(stat);
         final String arena = rest.substring(0, rest.length() - stat.length() - 1);
-        final StatsManager.Standing standing = SpawnArena.statsManager.getStandingCached(player.getUniqueId(), arena, field);
+        final StatsManager.Standing standing = SpawnArena.statsManager.getStanding(player.getUniqueId(), arena, field);
         if (standing == null)
             return "...";
         if (rank)

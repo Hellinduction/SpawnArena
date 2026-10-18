@@ -30,10 +30,6 @@ public final class ArenaPlayerJoinEvent implements Listener {
             me.zeronull.spawnarena.PlayerPreFightData.giveOwedItemsAsync(joined);
         }, 20L);
 
-        // Their places on the leaderboard holograms, ready for the "You" lines
-        if (org.bukkit.Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
-            me.zeronull.spawnarena.LeaderboardHolograms.warmStandings(e.getPlayer().getUniqueId());
-
         // IP history for the win-reward alt check; DB write kept off the main thread
         final java.util.UUID uuid = e.getPlayer().getUniqueId();
         final java.net.InetAddress address = e.getPlayer().getAddress() == null ? null : e.getPlayer().getAddress().getAddress();
