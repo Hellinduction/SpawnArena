@@ -130,7 +130,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
                     + arena.getArenaName() + " now sends players straight in. Kills, deaths and kill streaks are counted apart; "
                     + "no wins, rewards or bets there.");
         } else {
-            player.sendMessage(ChatColor.GREEN + "Free-for-all is off for " + arena.getArenaName() + ": it's back to normal queued matches.");
+            player.sendMessage(ChatColor.YELLOW + "Free-for-all is off for " + arena.getArenaName() + ": it's back to normal queued matches.");
         }
     }
 
