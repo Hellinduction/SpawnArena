@@ -36,11 +36,6 @@ public final class SettingsConfig {
             "until the player beats someone else (paid or not). 0 = no limit."})
     public int sameOpponentLimit = 3;
 
-    @Comment({"Wins in a row against the same opponent (in 2v2, the same pair) that raise a win streak. After that many, beating",
-            "them again still counts as a win but doesn't raise the streak (nor break it), until the player beats someone else",
-            "or loses. Stops a friend feeding someone a streak. 0 = no limit."})
-    public int sameOpponentStreakLimit = 5;
-
     @Comment({"Rated fights a player needs in an arena before they show on its Elo leaderboard (their \"You\" line says",
             "unranked until then), so winning a couple and never playing again can't top it. 0 = everyone shows."})
     public int eloMinGames = 5;

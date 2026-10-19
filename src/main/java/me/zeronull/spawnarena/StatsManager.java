@@ -151,11 +151,6 @@ public class StatsManager {
                     "PRIMARY KEY (server_id, meta_key))");
             if (!hasColumn(c, "arena_stats", "losses"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN losses INT NOT NULL DEFAULT 0");
-            // Who they last beat and how many times in a row (for sameOpponentStreakLimit)
-            if (!hasColumn(c, "arena_stats", "streak_opponent"))
-                s.execute("ALTER TABLE arena_stats ADD COLUMN streak_opponent VARCHAR(36) NULL");
-            if (!hasColumn(c, "arena_stats", "streak_opponent_wins"))
-                s.execute("ALTER TABLE arena_stats ADD COLUMN streak_opponent_wins INT NOT NULL DEFAULT 0");
             // Free-for-all arenas: counted apart from everything above
             for (final String column : FFA_COLUMNS)
                 if (!hasColumn(c, "arena_stats", column))
@@ -1280,13 +1275,6 @@ public class StatsManager {
 
     /** Records a win. Returns the new win streak. */
     public int recordWin(Player player, String arena) {
-        return recordWin(player, arena, true);
-    }
-
-    /** Records a win; with {@code raiseStreak} false it counts as a win but leaves the streak as it is. Returns the streak. */
-    public int recordWin(Player player, String arena, boolean raiseStreak) {
-        if (!raiseStreak)
-            return recordWinWithoutStreak(player, arena);
         ensure(player.getUniqueId(), arena);
         // MySQL applies SET assignments left to right (later ones see earlier results), H2 doesn't,
         // so everything that reads the old win_streak / best_win_streak comes before they're changed.
@@ -1314,50 +1302,12 @@ public class StatsManager {
         return getWinStreak(player.getUniqueId(), arena);
     }
 
-    private int recordWinWithoutStreak(final Player player, final String arena) {
-        ensure(player.getUniqueId(), arena);
-        try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement("UPDATE arena_stats SET wins = wins + 1, wins_at = ? WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
-            ps.setLong(1, System.currentTimeMillis());
-            ps.setString(2, player.getUniqueId().toString());
-            ps.setString(3, arena.toLowerCase());
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordWin: " + e.getMessage());
-        }
-        invalidateLeaderboards();
-        return getWinStreak(player.getUniqueId(), arena);
-    }
-
-    /**
-     * Notes a win against {@code opponent} (a player, or a 2v2 pair's key) and returns how many wins in a row that is
-     * against them: 1 for someone new.
-     */
-    public int noteStreakOpponent(final UUID winner, final String arena, final UUID opponent) {
-        ensure(winner, arena);
-        final String sql = "UPDATE arena_stats SET streak_opponent_wins = CASE WHEN streak_opponent = ? THEN streak_opponent_wins + 1 ELSE 1 END, "
-                + "streak_opponent = ? WHERE server_id=" + sid + " AND uuid=? AND arena=?";
-        try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, opponent.toString());
-            ps.setString(2, opponent.toString());
-            ps.setString(3, winner.toString());
-            ps.setString(4, arena.toLowerCase());
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] noteStreakOpponent: " + e.getMessage());
-            return 1;
-        }
-        return getField(winner, arena, "streak_opponent_wins");
-    }
-
     /** Ends their streak, keeping what it was (if they had one) as their last lost streak. */
     public void recordLoss(Player player, String arena) {
         ensure(player.getUniqueId(), arena);
         // The streak is read before it's zeroed: lost_streak and lost_at come first (MySQL applies SETs in order)
         final String sql = "UPDATE arena_stats SET lost_streak = CASE WHEN win_streak > 0 THEN win_streak ELSE lost_streak END, "
-                + "lost_at = CASE WHEN win_streak > 0 THEN ? ELSE lost_at END, win_streak = 0, streak_at = ?, losses = losses + 1, "
-                + "streak_opponent = NULL, streak_opponent_wins = 0 "
+                + "lost_at = CASE WHEN win_streak > 0 THEN ? ELSE lost_at END, win_streak = 0, streak_at = ?, losses = losses + 1 "
                 + "WHERE server_id=" + sid + " AND uuid=? AND arena=?";
         final long now = System.currentTimeMillis();
         try (Connection c = dataSource.getConnection();

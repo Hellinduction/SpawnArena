@@ -869,19 +869,8 @@ public class Fight {
                     endedStreaks.put(loser, streak);
                 SpawnArena.statsManager.recordLoss(loser, this.arena.arenaName);
             }
-            // Beating the same opponent again and again stops raising the streak after sameOpponentStreakLimit wins
-            final int limit = SpawnArena.settings == null ? 0 : SpawnArena.settings.sameOpponentStreakLimit;
-            final UUID opponent = WinRewards.opponentKey(losers);
-            for (final Player winner : winners) {
-                final int inARow = opponent == null ? 1 : SpawnArena.statsManager.noteStreakOpponent(winner.getUniqueId(), this.arena.arenaName, opponent);
-                final boolean raise = limit <= 0 || inARow <= limit;
-                winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName, raise));
-                if (!raise && winner.isOnline())
-                    winner.sendMessage(MiniMessage.miniMessage().deserialize(
-                            "<yellow>Your win streak didn't go up: you've beaten <white><who></white> <white><n></white> times in a row. "
-                                    + "Beat someone else to keep it climbing.",
-                            Placeholder.component("who", displayNames(losers)), Placeholder.unparsed("n", String.valueOf(inARow))));
-            }
+            for (final Player winner : winners)
+                winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName));
 
             final Map<UUID, int[]> elo = SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
             for (final Player p : this.getMembers()) {
