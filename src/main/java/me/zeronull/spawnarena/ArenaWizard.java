@@ -495,6 +495,15 @@ public final class ArenaWizard {
      * hit a wall, making an octagon, and the height goes up to the first ceiling. Sumo rings (no walls) get
      * the pasted box instead.
      */
+    /** Ground a fighter can dig through (or the bedrock under it), for finding how deep the arena's floor goes. */
+    private static boolean isGround(final Material type) {
+        return switch (type) {
+            case DIRT, COARSE_DIRT, ROOTED_DIRT, GRASS_BLOCK, PODZOL, MYCELIUM, MUD, OBSIDIAN, CRYING_OBSIDIAN, BEDROCK,
+                 OCHRE_FROGLIGHT, PEARLESCENT_FROGLIGHT, VERDANT_FROGLIGHT -> true;
+            default -> false;
+        };
+    }
+
     private static void detectRegion(final Player player, final Session s, final Location from, final Step then) {
         s.busy = true;
         final Location at = from.getBlock().getLocation();
@@ -545,9 +554,15 @@ public final class ArenaWizard {
                         break;
                     }
                 }
-                // Down past uneven floors too: standing on a 2-high lump of the crystal pit's bedrock, this still
-                // reaches its lowest layer
-                s.minY = cy - 4;
+                // Down through all the ground fighters can dig (a crystal pit's dirt and obsidian, and the bedrock under
+                // it), so it's theirs to break and is put back after each fight; at least 4 down either way
+                int bottom = cy - 4;
+                for (int y = cy - 1; y >= Math.max(w.getMinHeight(), cy - 64); y--) {
+                    if (!isGround(w.getBlockAt(cx, y, cz).getType()))
+                        break;
+                    bottom = Math.min(bottom, y);
+                }
+                s.minY = bottom;
                 s.maxY = ceiling;
             }
             s.points = points;
@@ -603,7 +618,7 @@ public final class ArenaWizard {
             }
             for (int x = minX; x <= maxX; x++)
                 for (int z = minZ; z <= maxZ; z++)
-                    for (int y = s.minY - 2; y <= s.minY + 4; y++)
+                    for (int y = s.minY - 2; y <= s.maxY; y++) // anywhere up the region: under a deep dirt floor they're on top of it
                         if (w.getBlockAt(x, y, z).getType() == Material.OCHRE_FROGLIGHT)
                             found.add(w.getBlockAt(x, y, z));
             Block a = null, b = null;
@@ -693,7 +708,16 @@ public final class ArenaWizard {
             if (regions.hasRegion(s.name))
                 regions.removeRegion(s.name);
             final ProtectedRegion region = new ProtectedPolygonalRegion(s.name, s.points, s.minY, s.maxY);
-            region.setPriority(10);
+            // Above the spawn's own regions, whose flags (invincible, no pearls, no fall damage...) would otherwise
+            // win inside the arena. PvP is denied for everyone there; SpawnArena lets the fighters hit each other
+            region.setPriority(100);
+            region.setFlag(com.sk89q.worldguard.protection.flags.Flags.INVINCIBILITY, com.sk89q.worldguard.protection.flags.StateFlag.State.DENY);
+            region.setFlag(com.sk89q.worldguard.protection.flags.Flags.PVP, com.sk89q.worldguard.protection.flags.StateFlag.State.DENY);
+            if (s.crystalPvp) {
+                // Crystal PvP is fought with pearls and takes fall damage
+                region.setFlag(com.sk89q.worldguard.protection.flags.Flags.FALL_DAMAGE, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
+                region.setFlag(com.sk89q.worldguard.protection.flags.Flags.ENDERPEARL, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
+            }
             regions.addRegion(region);
             regions.save();
         } catch (final Exception e) {
