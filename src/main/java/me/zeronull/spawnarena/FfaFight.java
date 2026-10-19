@@ -206,6 +206,7 @@ public final class FfaFight extends Fight {
         data.addExtraItems(didntFit);
         final UUID id = player.getUniqueId();
         this.preFightData.put(id, data);
+        this.arrowsBefore.put(id, player.getArrowsInBody());
         this.restored.remove(id); // they may have been in this session before
         this.quitters.remove(id);
 

@@ -47,6 +47,15 @@ public enum SumoVariant {
      * it can't be shown to just one match) and a match that ends, so never in MULTI arenas or free-for-alls.
      */
     public static SumoVariant pickFor(final Arena arena, final boolean ffa) {
+        return pickFor(arena, ffa, List.of());
+    }
+
+    /**
+     * As {@link #pickFor(Arena, boolean)}, for a match between these players: each player goes through every variant
+     * before getting one again (other matches in the arena don't use up theirs). A free-for-all, where players come and
+     * go, deals from the arena's own deck instead.
+     */
+    public static SumoVariant pickFor(final Arena arena, final boolean ffa, final java.util.Collection<java.util.UUID> players) {
         if (!arena.isRandomSumo() || !arena.isDeathOnTouchLiquid())
             return null;
         final SumoVariant forced = forceNext;
@@ -60,7 +69,54 @@ public enum SumoVariant {
             choices.remove(ICE);
         if (!shrinkAllowed(arena, ffa))
             choices.remove(SHRINK);
+        if (!ffa && !players.isEmpty())
+            return dealFor(players, choices);
         return deal(arena.getArenaName().toLowerCase(java.util.Locale.ROOT), choices);
+    }
+
+    /** The variants each player has had in their current round, and the last one they had. */
+    private static final java.util.Map<java.util.UUID, java.util.EnumSet<SumoVariant>> HAD = new java.util.HashMap<>();
+    private static final java.util.Map<java.util.UUID, SumoVariant> LAST_HAD = new java.util.HashMap<>();
+
+    /**
+     * One that none of these players has had this round if there is one, otherwise one the fewest of them have had;
+     * never the one any of them just had, if that can be helped. A player who's had every variant allowed here starts a
+     * new round.
+     */
+    private static synchronized SumoVariant dealFor(final java.util.Collection<java.util.UUID> players, final List<SumoVariant> allowed) {
+        if (allowed.isEmpty())
+            return CLASSIC;
+        for (final java.util.UUID p : players) {
+            final java.util.EnumSet<SumoVariant> had = HAD.computeIfAbsent(p, u -> java.util.EnumSet.noneOf(SumoVariant.class));
+            if (had.containsAll(allowed))
+                had.clear();
+        }
+        final java.util.Set<SumoVariant> justHad = java.util.EnumSet.noneOf(SumoVariant.class);
+        for (final java.util.UUID p : players)
+            if (LAST_HAD.get(p) != null)
+                justHad.add(LAST_HAD.get(p));
+        List<SumoVariant> best = new ArrayList<>();
+        int bestScore = Integer.MAX_VALUE;
+        for (final SumoVariant v : allowed) {
+            int score = 0;
+            for (final java.util.UUID p : players)
+                if (HAD.get(p).contains(v))
+                    score += 2;
+            if (justHad.contains(v))
+                score += 100; // never the one someone just had, unless every choice is
+            if (score < bestScore) {
+                bestScore = score;
+                best = new ArrayList<>();
+            }
+            if (score == bestScore)
+                best.add(v);
+        }
+        final SumoVariant picked = best.get(ThreadLocalRandom.current().nextInt(best.size()));
+        for (final java.util.UUID p : players) {
+            HAD.get(p).add(picked);
+            LAST_HAD.put(p, picked);
+        }
+        return picked;
     }
 
     /** Each arena's shuffled deck of variants still to come, and the last one dealt. */

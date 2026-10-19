@@ -37,6 +37,8 @@ public class Fight {
     /** Players still in the match; eliminated players are restored and leave this set. */
     protected final Set<Player> alive = Collections.synchronizedSet(new LinkedHashSet<>());
     protected final Map<UUID, PlayerPreFightData> preFightData = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Arrows already stuck in each player when they went in (Archer takes away only the match's own). */
+    protected final Map<UUID, Integer> arrowsBefore = new java.util.concurrent.ConcurrentHashMap<>();
     protected final Set<UUID> restored = java.util.concurrent.ConcurrentHashMap.newKeySet();
     /** Where each player was when they went out (before being restored and teleported away). */
     private final Map<UUID, Location> eliminatedAt = new java.util.concurrent.ConcurrentHashMap<>();
@@ -77,7 +79,7 @@ public class Fight {
 
     /** Picks this match's random sumo variant and gets Ice Rink's or Shrinking Platform's floor ready. */
     protected void pickVariant() {
-        this.variant = SumoVariant.pickFor(this.arena, this.isFfa());
+        this.variant = SumoVariant.pickFor(this.arena, this.isFfa(), this.getMembers().stream().map(Player::getUniqueId).toList());
         if (this.variant == SumoVariant.SHRINK) {
             SumoIce.record(this.arena); // saved now, put back at the end
             return;
@@ -536,6 +538,7 @@ public class Fight {
         final PlayerPreFightData data = new PlayerPreFightData(fighter);
         data.addExtraItems(didntFit);
         this.preFightData.put(fighter.getUniqueId(), data);
+        this.arrowsBefore.put(fighter.getUniqueId(), fighter.getArrowsInBody());
 
         // Their /arenabet bet: taken if this fight can pay out, otherwise cancelled (duels included)
         if (Bukkit.getPluginManager().isPluginEnabled("Vault"))
@@ -790,6 +793,9 @@ public class Fight {
         try {
             FightGlow.remove(player);
             me.zeronull.spawnarena.events.EgapCooldown.clear(player);
+            // The arrows stuck in them from the match (any they came in with stay, unless they've fallen out already)
+            if (this.variant == SumoVariant.ARCHER && player.getArrowsInBody() > this.arrowsBefore.getOrDefault(player.getUniqueId(), 0))
+                player.setArrowsInBody(this.arrowsBefore.getOrDefault(player.getUniqueId(), 0));
             final java.util.concurrent.CompletableFuture<List<SumoIce.FakeBlock>> ice = this.fakeIce;
             if (ice != null && ice.isDone() && !ice.isCompletedExceptionally())
                 SumoIce.showReal(player, ice.join()); // the real floor again, before they're sent back
