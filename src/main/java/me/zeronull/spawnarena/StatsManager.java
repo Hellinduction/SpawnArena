@@ -1471,12 +1471,19 @@ public class StatsManager {
         if (cached != null && now - cached.fetchedAt() < TOP_CACHE_MILLIS)
             return cached.entries();
 
+        final long generation = cacheGeneration.get();
         final List<LeaderboardEntry> fresh = getTopPlayers(arena, field, limit);
-        topCache.put(key, new CachedTop(now, fresh));
+        // Read before a change that landed meanwhile (holograms read in the background): don't keep it
+        if (cacheGeneration.get() == generation)
+            topCache.put(key, new CachedTop(now, fresh));
         return fresh;
     }
 
+    /** Goes up on every change, so a read that started before one is never cached afterwards. */
+    private final java.util.concurrent.atomic.AtomicLong cacheGeneration = new java.util.concurrent.atomic.AtomicLong();
+
     public void invalidateLeaderboards() {
+        cacheGeneration.incrementAndGet();
         topCache.clear();
         rankCache.clear();
     }
@@ -1497,11 +1504,13 @@ public class StatsManager {
         final long now = System.currentTimeMillis();
         CachedRanks cached = rankCache.get(key);
         if (cached == null || now - cached.fetchedAt() >= TOP_CACHE_MILLIS) {
+            final long generation = cacheGeneration.get();
             final java.util.Map<UUID, Standing> ranks = fetchRanks(arena, field);
             if (ranks == null)
                 return cached == null ? null : cached.ranks().get(uuid);
             cached = new CachedRanks(now, ranks);
-            rankCache.put(key, cached);
+            if (cacheGeneration.get() == generation)
+                rankCache.put(key, cached);
         }
         final Standing standing = cached.ranks().get(uuid);
         return standing != null ? standing : new Standing(0, 0);

@@ -164,7 +164,8 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                         stat, target.getName(), arena, value));
             }
             case "reset" -> {
-                for (final String field : new String[]{"wins", "losses", "win_streak", "best_win_streak"}) {
+                // elo_games too: off the Elo board again until they've played enough rated games
+                for (final String field : new String[]{"wins", "losses", "win_streak", "best_win_streak", "elo_games"}) {
                     final int old = SpawnArena.statsManager.getField(uuid, arena, field);
                     SpawnArena.statsManager.setField(uuid, arena, field, 0);
                     if (old != 0)
@@ -178,6 +179,9 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             }
             default -> sender.sendMessage("§cUnknown subcommand. Use: get, set, reset, resetcooldown, payouts, log, rollback, players, migrate");
         }
+        // The boards show the change now rather than on their next redraw
+        if ((sub.equals("set") || sub.equals("reset")) && org.bukkit.Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
+            me.zeronull.spawnarena.LeaderboardHolograms.refreshAll();
         return true;
     }
 
