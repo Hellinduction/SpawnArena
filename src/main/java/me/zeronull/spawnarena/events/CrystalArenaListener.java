@@ -1,7 +1,10 @@
 package me.zeronull.spawnarena.events;
 
-import me.zeronull.spawnarena.*;
+import me.zeronull.spawnarena.Arena;
+import me.zeronull.spawnarena.CrystalPvp;
 import me.zeronull.spawnarena.CrystalPvp.BlockKey;
+import me.zeronull.spawnarena.FightState;
+import me.zeronull.spawnarena.SpawnArena;
 import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;

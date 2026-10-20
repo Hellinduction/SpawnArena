@@ -1,6 +1,9 @@
 package me.zeronull.spawnarena.events;
 
-import me.zeronull.spawnarena.*;
+import me.zeronull.spawnarena.Arena;
+import me.zeronull.spawnarena.FightState;
+import me.zeronull.spawnarena.FoliaUtils;
+import me.zeronull.spawnarena.SpawnArena;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.entity.Entity;

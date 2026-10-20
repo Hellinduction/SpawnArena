@@ -896,7 +896,7 @@ public class Fight {
         } else {
             // A long streak just ended: that replaces the usual result message
             for (final Map.Entry<Player, Integer> ended : endedStreaks.entrySet())
-                this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut);
+                this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut, winnerStreaks);
         }
 
         if (Bukkit.getPluginManager().isPluginEnabled("Vault")) {
@@ -923,18 +923,21 @@ public class Fight {
      * that player went down. Its thunder is vanilla's, so only players near enough to see it hear it.
      */
     private void announceStreakEnded(final Player loser, final int streak, final List<Player> winners, final List<Player> losers,
-                                     final net.kyori.adventure.text.event.HoverEvent<Component> statsHover, final boolean selfOut) {
+                                     final net.kyori.adventure.text.event.HoverEvent<Component> statsHover, final boolean selfOut,
+                                     final List<Integer> winnerStreaks) {
         // Worded and coloured like the usual "X beat Y in the sumo arena!" result; only the headline and the streak stand out
         final Component message = MiniMessage.miniMessage().deserialize(selfOut
                         ? "<dark_red><bold>STREAK ENDED!</bold> <loser> took themselves out in the <arena>arena, losing their "
-                                + "<white><bold><streak></bold></white>-win streak. <winner> wins!"
+                                + "<white><bold><streak></bold></white>-win streak. <winner> wins<ws_str>!"
                         : "<dark_red><bold>STREAK ENDED!</bold> <winner> ended <loser><possessive> "
-                                + "<white><bold><streak></bold></white>-win streak in the <arena>arena!",
+                                + "<white><bold><streak></bold></white>-win streak in the <arena>arena<ws_str>!",
                 Placeholder.component("loser", loser.displayName()),
                 // "Chris'" rather than "Chris's"
                 Placeholder.unparsed("possessive", Grammar.possessiveSuffix(loser.getName())),
                 Placeholder.component("winner", displayNames(winners)),
                 Placeholder.unparsed("streak", String.valueOf(streak)),
+                // The winner's own streak, like the usual result message has
+                Placeholder.parsed("ws_str", streakPart(winnerStreaks)),
                 Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " ")).hoverEvent(statsHover);
 
         broadcast(message, winners, losers);
