@@ -233,6 +233,12 @@ public class StatsManager {
                     "action VARCHAR(32) NOT NULL, " +
                     "changed_at BIGINT NOT NULL, " +
                     "rolled_back BOOLEAN NOT NULL DEFAULT FALSE)");
+            // Names by UUID (shared by the whole network): leaderboards show names even for players the server's own
+            // name cache has forgotten (long gone, or stats carried over from another database)
+            s.execute("CREATE TABLE IF NOT EXISTS player_names (" +
+                    "uuid VARCHAR(36) NOT NULL PRIMARY KEY, " +
+                    "name VARCHAR(16) NOT NULL, " +
+                    "updated_at BIGINT NOT NULL)");
             s.execute("CREATE TABLE IF NOT EXISTS player_ips (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "ip_hash VARCHAR(64) NOT NULL, " +
@@ -482,7 +488,7 @@ public class StatsManager {
             final int restored = Math.max(0, current - (e.newValue() - e.oldValue()));
             setField(e.target(), e.arena(), e.field(), restored);
             markRolledBack(e.id());
-            final String targetName = Bukkit.getOfflinePlayer(e.target()).getName();
+            final String targetName = nameOf(e.target());
             logStatChange(performer, performerName, e.target(), targetName == null ? e.target().toString() : targetName,
                     e.arena(), e.field(), current, restored, "rollback");
             undone++;
@@ -750,6 +756,106 @@ public class StatsManager {
             Bukkit.getLogger().warning("[SpawnArena] addEarnedToday: " + e.getMessage());
         }
         dailyCache.remove(uuid);
+    }
+
+    // ── Player names ────────────────────────────────────────────────────────
+
+    private final java.util.Map<UUID, String> names = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Names asked of Mojang already (found or not), so each is only looked up once per restart. */
+    private final java.util.Set<UUID> lookedUp = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.LinkedBlockingQueue<UUID> toLookUp = new java.util.concurrent.LinkedBlockingQueue<>();
+    private volatile boolean namesLoaded;
+
+    /** Loads every saved name and starts the background lookups. Call once, off the main thread. */
+    public void loadNames() {
+        try (Connection c = dataSource.getConnection();
+             Statement s = c.createStatement();
+             ResultSet rs = s.executeQuery("SELECT uuid, name FROM player_names")) {
+            while (rs.next()) {
+                try {
+                    names.putIfAbsent(UUID.fromString(rs.getString(1)), rs.getString(2));
+                } catch (final IllegalArgumentException ignored) {
+                }
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] loadNames: " + e.getMessage());
+        }
+        namesLoaded = true;
+        // One Mojang lookup at a time, well under their rate limit
+        Bukkit.getAsyncScheduler().runAtFixedRate(SpawnArena.INSTANCE, task -> lookUpNext(), 2, 2, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    /** A player's name: ours, else the server's own cache, else null (and it's looked up in the background). */
+    public String nameOf(final UUID uuid) {
+        final Player online = Bukkit.getPlayer(uuid);
+        if (online != null)
+            return online.getName();
+        final String saved = names.get(uuid);
+        if (saved != null)
+            return saved;
+        final String cached = Bukkit.getOfflinePlayer(uuid).getName();
+        if (cached != null) {
+            rememberName(uuid, cached);
+            return cached;
+        }
+        if (namesLoaded && lookedUp.add(uuid))
+            toLookUp.offer(uuid);
+        return null;
+    }
+
+    /** The UUID of a player by name, from the names we've saved (case doesn't matter), or null. */
+    public UUID uuidOfName(final String name) {
+        for (final java.util.Map.Entry<UUID, String> e : names.entrySet())
+            if (e.getValue().equalsIgnoreCase(name))
+                return e.getKey();
+        return null;
+    }
+
+    /** Saves a player's current name (on join, and when found). Writes off the main thread. */
+    public void rememberName(final UUID uuid, final String name) {
+        if (name == null || name.isEmpty() || name.equals(names.put(uuid, name)))
+            return;
+        Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> {
+            try (Connection c = dataSource.getConnection();
+                 PreparedStatement ps = c.prepareStatement("INSERT INTO player_names (uuid, name, updated_at) VALUES (?, ?, ?) "
+                         + "ON DUPLICATE KEY UPDATE name = VALUES(name), updated_at = VALUES(updated_at)")) {
+                ps.setString(1, uuid.toString());
+                ps.setString(2, name);
+                ps.setLong(3, System.currentTimeMillis());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                Bukkit.getLogger().warning("[SpawnArena] rememberName: " + e.getMessage());
+            }
+            invalidateLeaderboards();
+        });
+    }
+
+    private static final java.net.http.HttpClient HTTP = java.net.http.HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(5)).build();
+    private static final java.util.regex.Pattern NAME_FIELD = java.util.regex.Pattern.compile("\"name\"\\s*:\\s*\"([A-Za-z0-9_]{1,16})\"");
+
+    /** Asks Mojang for one unknown name (premium accounts only: offline-mode UUIDs aren't theirs). */
+    private void lookUpNext() {
+        final UUID uuid = toLookUp.poll();
+        if (uuid == null || uuid.version() != 4 || names.containsKey(uuid))
+            return;
+        try {
+            final java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder(java.net.URI.create(
+                    "https://sessionserver.mojang.com/session/minecraft/profile/" + uuid.toString().replace("-", "")))
+                    .timeout(java.time.Duration.ofSeconds(5)).GET().build();
+            final java.net.http.HttpResponse<String> response = HTTP.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 429) {
+                lookedUp.remove(uuid); // rate limited: tried again later
+                return;
+            }
+            if (response.statusCode() != 200)
+                return;
+            final java.util.regex.Matcher m = NAME_FIELD.matcher(response.body());
+            if (m.find())
+                rememberName(uuid, m.group(1));
+        } catch (final Exception e) {
+            lookedUp.remove(uuid); // e.g. no internet for a moment: tried again on the next view
+        }
     }
 
     // ── IP history (alt detection) ──────────────────────────────────────────
@@ -1530,9 +1636,9 @@ public class StatsManager {
                 while (rs.next()) {
                     final UUID uuid = UUID.fromString(rs.getString("uuid"));
                     final int value = rs.getInt(field);
-                    // Resolve display name via Bukkit (offline-safe)
-                    final String name = Bukkit.getOfflinePlayer(uuid).getName();
-                    entries.add(new LeaderboardEntry(uuid, name != null ? name : uuid.toString(), value));
+                    // Our own names first; one we don't know yet is looked up in the background
+                    final String name = nameOf(uuid);
+                    entries.add(new LeaderboardEntry(uuid, name != null ? name : "...", value));
                 }
             }
         } catch (SQLException e) {

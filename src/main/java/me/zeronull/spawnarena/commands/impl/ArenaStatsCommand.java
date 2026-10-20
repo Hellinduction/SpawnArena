@@ -379,7 +379,7 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
     }
 
     private static String nameOf(final UUID uuid) {
-        final String name = Bukkit.getOfflinePlayer(uuid).getName();
+        final String name = SpawnArena.statsManager.nameOf(uuid);
         return name == null ? uuid.toString().substring(0, 8) : name;
     }
 
@@ -388,7 +388,12 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
         final org.bukkit.entity.Player online = Bukkit.getPlayerExact(name);
         if (online != null)
             return online;
-        return Bukkit.getOfflinePlayerIfCached(name);
+        final org.bukkit.OfflinePlayer cached = Bukkit.getOfflinePlayerIfCached(name);
+        if (cached != null)
+            return cached;
+        // Someone the server's own cache has forgotten, but whose name we saved
+        final UUID saved = SpawnArena.statsManager.uuidOfName(name);
+        return saved == null ? null : Bukkit.getOfflinePlayer(saved);
     }
 
     /** How many different players have had a counted fight in each arena (duels don't count). */

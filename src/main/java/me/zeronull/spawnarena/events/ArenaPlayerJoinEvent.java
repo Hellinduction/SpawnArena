@@ -33,6 +33,8 @@ public final class ArenaPlayerJoinEvent implements Listener {
         // IP history for the win-reward alt check; DB write kept off the main thread
         final java.util.UUID uuid = e.getPlayer().getUniqueId();
         final java.net.InetAddress address = e.getPlayer().getAddress() == null ? null : e.getPlayer().getAddress().getAddress();
+        if (SpawnArena.statsManager != null)
+            SpawnArena.statsManager.rememberName(uuid, e.getPlayer().getName());
         if (SpawnArena.statsManager != null && address != null)
             org.bukkit.Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> SpawnArena.statsManager.recordIp(uuid, address));
     }

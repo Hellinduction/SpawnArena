@@ -37,6 +37,9 @@ public class SpawnArena extends JavaPlugin {
             Bukkit.getPluginManager().disablePlugin(this);
             return;
         }
+        // Saved player names, for leaderboards (off the main thread)
+        final StatsManager stats = statsManager;
+        Bukkit.getAsyncScheduler().runNow(this, task -> stats.loadNames());
 
         // Register PlaceholderAPI expansion if PAPI is present
         if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
