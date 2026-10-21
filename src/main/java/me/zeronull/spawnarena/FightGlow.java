@@ -50,8 +50,8 @@ public final class FightGlow implements Listener {
             NamedTextColor.DARK_AQUA, NamedTextColor.DARK_PURPLE, NamedTextColor.DARK_GREEN, NamedTextColor.DARK_RED,
             NamedTextColor.GRAY, NamedTextColor.DARK_BLUE, NamedTextColor.DARK_GRAY, NamedTextColor.BLACK};
 
-    /** Running fight -> index into COLOURS */
-    private static final Map<Fight, Integer> COLOUR_OF = new ConcurrentHashMap<>();
+    /** Running fight -> its colours (indexes into COLOURS): one for a 1v1, one per team in a 2v2 */
+    private static final Map<Fight, java.util.List<Integer>> COLOUR_OF = new ConcurrentHashMap<>();
     /** Fighter -> the colour they're outlined in right now */
     private static final Map<UUID, Integer> GLOWING = new ConcurrentHashMap<>();
 
@@ -63,21 +63,38 @@ public final class FightGlow implements Listener {
         return SpawnArena.settings == null || SpawnArena.settings.fightGlow;
     }
 
-    /** When a fight goes live: picks it a free colour and outlines its fighters. */
+    /**
+     * When a fight goes live: picks colours no other running fight has (one for a 1v1, one per team in a 2v2, so the
+     * teams can be told apart too) and outlines its fighters.
+     */
     public static void start(final Fight fight) {
         if (!enabled())
             return;
-        final int colour;
+        final java.util.List<Player> fighters = fight.getFighters();
+        if (fighters.isEmpty())
+            return;
+        final java.util.List<Player> firstTeam = fight.getTeamOf(fighters.get(0));
+        final boolean teams = fight.getMode() == FightMode.TWO_V_TWO;
+        final java.util.List<Integer> colours = new java.util.ArrayList<>();
         synchronized (COLOUR_OF) {
-            int free = -1;
-            for (int i = 0; i < COLOURS.length && free < 0; i++)
-                if (!COLOUR_OF.containsValue(i))
-                    free = i;
-            colour = free >= 0 ? free : COLOUR_OF.size() % COLOURS.length; // more fights than colours: share
-            COLOUR_OF.put(fight, colour);
+            final java.util.Set<Integer> taken = new java.util.HashSet<>();
+            COLOUR_OF.values().forEach(taken::addAll);
+            for (int n = 0; n < (teams ? 2 : 1); n++) {
+                int free = -1;
+                for (int i = 0; i < COLOURS.length && free < 0; i++)
+                    if (!taken.contains(i))
+                        free = i;
+                // More fights than colours: share one, but never the other team's in the same fight
+                if (free < 0)
+                    free = (COLOUR_OF.size() + n) % COLOURS.length;
+                taken.add(free);
+                colours.add(free);
+            }
+            COLOUR_OF.put(fight, colours);
         }
 
-        for (final Player fighter : fight.getFighters()) {
+        for (final Player fighter : fighters) {
+            final int colour = colours.size() > 1 && !firstTeam.contains(fighter) ? colours.get(1) : colours.get(0);
             // Checked again on their thread: they may already be out by the time it runs
             Threads.entity(fighter, () -> {
                 if (!fight.isFighter(fighter) || !COLOUR_OF.containsKey(fight) || !fighter.isOnline())

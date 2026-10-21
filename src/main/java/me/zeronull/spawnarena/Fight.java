@@ -832,9 +832,10 @@ public class Fight {
         if (this.duel) {
             // Duels don't count for anything, so only the duelists are told
             final Component message = MiniMessage.miniMessage().deserialize(selfOut
-                            ? "<dark_red><loser> took themselves out in a duel in the <arena>arena, <winner> wins!"
+                            ? "<dark_red><loser> took themselves out in a duel in the <arena>arena, <winner> <wins>!"
                             : "<dark_red><winner> beat <loser> in a duel in the <arena>arena!",
                     Placeholder.component("winner", displayNames(winners)),
+                    Placeholder.unparsed("wins", winners.size() > 1 ? "win" : "wins"), // "Bot1 & Bot3 win"
                     Placeholder.component("loser", displayNames(losers)),
                     Placeholder.parsed("arena", arenaPart)).hoverEvent(statsHover);
             for (final Player p : this.getMembers())
@@ -886,12 +887,13 @@ public class Fight {
 
         if (endedStreaks.isEmpty()) {
             broadcast(MiniMessage.miniMessage().deserialize(selfOut
-                            ? "<dark_red><loser> took themselves out in the <arena>arena, <winner> wins<ws_str>!"
+                            ? "<dark_red><loser> took themselves out in the <arena>arena, <winner> <wins><ws_str>!"
                             : "<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
                     Placeholder.component("winner", displayNames(winners)),
+                    Placeholder.unparsed("wins", winners.size() > 1 ? "win" : "wins"), // "Bot1 & Bot3 win"
                     Placeholder.component("loser", displayNames(losers)),
                     Placeholder.parsed("arena", arenaPart),
-                    Placeholder.parsed("ws_str", streakPart(winnerStreaks))).hoverEvent(statsHover),
+                    Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners))).hoverEvent(statsHover),
                     winners, losers);
         } else {
             // A long streak just ended: that replaces the usual result message
@@ -928,16 +930,17 @@ public class Fight {
         // Worded and coloured like the usual "X beat Y in the sumo arena!" result; only the headline and the streak stand out
         final Component message = MiniMessage.miniMessage().deserialize(selfOut
                         ? "<dark_red><bold>STREAK ENDED!</bold> <loser> took themselves out in the <arena>arena, losing their "
-                                + "<white><bold><streak></bold></white>-win streak. <winner> wins<ws_str>!"
+                                + "<white><bold><streak></bold></white>-win streak. <winner> <wins><ws_str>!"
                         : "<dark_red><bold>STREAK ENDED!</bold> <winner> ended <loser><possessive> "
                                 + "<white><bold><streak></bold></white>-win streak in the <arena>arena<ws_str>!",
                 Placeholder.component("loser", loser.displayName()),
                 // "Chris'" rather than "Chris's"
                 Placeholder.unparsed("possessive", Grammar.possessiveSuffix(loser.getName())),
                 Placeholder.component("winner", displayNames(winners)),
+                    Placeholder.unparsed("wins", winners.size() > 1 ? "win" : "wins"), // "Bot1 & Bot3 win"
                 Placeholder.unparsed("streak", String.valueOf(streak)),
                 // The winner's own streak, like the usual result message has
-                Placeholder.parsed("ws_str", streakPart(winnerStreaks)),
+                Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners)),
                 Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " ")).hoverEvent(statsHover);
 
         broadcast(message, winners, losers);
@@ -990,18 +993,19 @@ public class Fight {
     }
 
     /**
-     * " with a win streak of 5" (1v1), or " with win streaks of 5 & 1" (2v2, in the same order as the winners'
-     * names). Empty unless a winner is on a streak of more than 2.
+     * " with a win streak of 5" (1v1); in 2v2 " with a win streak of 5 (Alice)" or " with win streaks of 5 (Alice) &
+     * 4 (Bob)", each with whose it is. Only streaks of 3 or more show; empty if there are none.
      */
-    private static String streakPart(final List<Integer> streaks) {
-        if (streaks.stream().noneMatch(s -> s > 2))
-            return "";
+    private static String streakPart(final List<Integer> streaks, final List<Player> winners) {
         if (streaks.size() == 1)
-            return " with a win streak of <white>" + streaks.get(0) + "<dark_red>";
+            return streaks.get(0) > 2 ? " with a win streak of <white>" + streaks.get(0) + "<dark_red>" : "";
         final List<String> parts = new ArrayList<>();
-        for (final int s : streaks)
-            parts.add("<white>" + s + "<dark_red>");
-        return " with win streaks of " + String.join(" & ", parts);
+        for (int i = 0; i < streaks.size() && i < winners.size(); i++)
+            if (streaks.get(i) > 2)
+                parts.add("<white>" + streaks.get(i) + "<dark_red> (" + MiniMessage.miniMessage().escapeTags(winners.get(i).getName()) + ")");
+        if (parts.isEmpty())
+            return "";
+        return (parts.size() == 1 ? " with a win streak of " : " with win streaks of ") + String.join(" & ", parts);
     }
 
     private static Component displayNames(final List<Player> players) {
