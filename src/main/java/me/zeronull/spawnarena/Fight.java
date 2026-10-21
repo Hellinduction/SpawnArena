@@ -993,18 +993,25 @@ public class Fight {
     }
 
     /**
-     * " with a win streak of 5" (1v1); in 2v2 " with a win streak of 5 (Alice)" or " with win streaks of 5 (Alice) &
-     * 4 (Bob)", each with whose it is. Only streaks of 3 or more show; empty if there are none.
+     * " with a win streak of 5" (1v1); in 2v2 " with a win streak of 5 (Alice)" when only one shows, or " with win
+     * streaks of 5 & 4" (same order as the names) when both do. Only streaks of 3 or more show; empty if there are none.
      */
     private static String streakPart(final List<Integer> streaks, final List<Player> winners) {
         if (streaks.size() == 1)
             return streaks.get(0) > 2 ? " with a win streak of <white>" + streaks.get(0) + "<dark_red>" : "";
-        final List<String> parts = new ArrayList<>();
+        final List<Integer> shown = new ArrayList<>();
         for (int i = 0; i < streaks.size() && i < winners.size(); i++)
             if (streaks.get(i) > 2)
-                parts.add("<white>" + streaks.get(i) + "<dark_red> (" + MiniMessage.miniMessage().escapeTags(winners.get(i).getName()) + ")");
-        if (parts.isEmpty())
+                shown.add(i);
+        if (shown.isEmpty())
             return "";
+        // Just one: say whose it is. All of them: they're in the same order as the names, so that's clear already
+        if (shown.size() == 1 && streaks.size() > 1)
+            return " with a win streak of <white>" + streaks.get(shown.get(0)) + "<dark_red> ("
+                    + MiniMessage.miniMessage().escapeTags(winners.get(shown.get(0)).getName()) + ")";
+        final List<String> parts = new ArrayList<>();
+        for (final int i : shown)
+            parts.add("<white>" + streaks.get(i) + "<dark_red>");
         return (parts.size() == 1 ? " with a win streak of " : " with win streaks of ") + String.join(" & ", parts);
     }
 
