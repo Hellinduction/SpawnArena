@@ -73,6 +73,12 @@ commands:
     permission: spawnarena.arenalock
     permission-message: "§cYou don't have permission!"
 
+  arenapaste:
+    description: Paste a schematic at a spot (like //paste), saving what was there first so it can be undone
+    usage: "/arenapaste <schematic> <world> <x> <y> <z> [noair]"
+    permission: spawnarena.arenapaste
+    permission-message: "§cYou don't have permission!"
+
   arenareload:
     description: Reload settings.yml and arena configs
     usage: "/arenareload"
@@ -158,6 +164,8 @@ permissions:
   spawnarena.arenalock:
     default: op
   spawnarena.arenareload:
+    default: op
+  spawnarena.arenapaste:
     default: op
   spawnarena.setarenaexit:
     default: op

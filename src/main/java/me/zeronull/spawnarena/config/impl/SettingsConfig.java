@@ -115,7 +115,7 @@ public final class SettingsConfig {
             "everything else). Only below the spawns' feet and under the open pit (never under a wall), and only inside",
             "the arena's region. Bedrock is never diggable, even if listed. Empty list = nothing of the floor can be dug."})
     public java.util.List<String> crystalDiggableBlocks = new java.util.ArrayList<>(java.util.List.of(
-            "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud", "sand", "gravel", "netherrack", "obsidian"));
+            "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud", "sand", "gravel", "netherrack", "obsidian", "stone"));
 
     @Comment({"With bunnyAC installed: MULTI Ice Rink and Moon Gravity players are taken out of bunnyAC for their match (it",
             "flags the sliding, as it sees the real floor, and the moon jumps), and put back as soon as they're out.",

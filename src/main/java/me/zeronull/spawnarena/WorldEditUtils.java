@@ -140,6 +140,45 @@ public final class WorldEditUtils {
         return done;
     }
 
+    /**
+     * Saves what's in the box a schematic would cover to {@code backup} (origin at {@code loc}, so pasting the backup
+     * at {@code loc} puts it all back), then pastes it like //paste, its air left out with {@code ignoreAir}. Completes
+     * with the box pasted into, or fails if the schematic can't be read, the backup can't be written, or the paste fails.
+     */
+    public static CompletableFuture<BlockVector3[]> pasteWithBackup(final Location loc, final File schematic, final File backup,
+                                                                    final boolean ignoreAir) {
+        final CompletableFuture<BlockVector3[]> done = new CompletableFuture<>();
+        Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> {
+            final Clipboard clipboard;
+            try {
+                clipboard = load(schematic);
+            } catch (final Exception e) {
+                done.completeExceptionally(e);
+                return;
+            }
+            final Runnable paste = () -> {
+                try {
+                    final BlockVector3 to = BlockVector3.at(loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
+                    final BlockVector3 shift = to.subtract(clipboard.getOrigin());
+                    final BlockVector3 min = clipboard.getRegion().getMinimumPoint().add(shift);
+                    final BlockVector3 max = clipboard.getRegion().getMaximumPoint().add(shift);
+                    copyToFile(loc.getWorld(), min, max, loc, backup); // nothing is pasted unless this worked
+                    try (EditSession session = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(loc.getWorld()))) {
+                        Operations.complete(new ClipboardHolder(clipboard).createPaste(session).to(to).ignoreAirBlocks(ignoreAir).build());
+                    }
+                    done.complete(new BlockVector3[]{min, max});
+                } catch (final Exception e) {
+                    done.completeExceptionally(e);
+                }
+            };
+            if (FAWE)
+                paste.run();
+            else
+                Bukkit.getRegionScheduler().execute(SpawnArena.INSTANCE, loc, paste);
+        });
+        return done;
+    }
+
     /** Undoes a paste from {@link #pasteUndoable}, putting back what was there before. */
     public static CompletableFuture<Void> undo(final Location at, final Paste paste) {
         final CompletableFuture<Void> done = new CompletableFuture<>();
