@@ -22,6 +22,15 @@ public class ArenaDropItemEvent implements Listener {
             return;
         }
 
+        // Crystal fights: a fighter still in the fight can drop things. They become match items (CrystalArenaListener):
+        // only that match's fighters can pick them up, and they're deleted when it ends, when everyone's own
+        // inventory is put back anyway. Not while it counts down, ends, or their inventory is being given back
+        if (!awaitingRestore) {
+            final me.zeronull.spawnarena.Arena arena = SpawnArena.arenas.of(player);
+            if (arena != null && arena.isCrystalPvp() && me.zeronull.spawnarena.CrystalPvp.isActiveFighter(arena, player))
+                return;
+        }
+
         // Staff with the permission, and only once they've switched it on with /arenadrop
         if (me.zeronull.spawnarena.commands.impl.ArenaDropCommand.mayDropInFight(player)) {
             return;

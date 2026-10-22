@@ -59,8 +59,10 @@ public final class CrystalArenaListener implements Listener {
         if (arena == null) {
             // A fighter reaching out of a crystal arena still can't build outside it
             final Arena own = SpawnArena.arenas.of(player);
-            if (own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, player))
+            if (own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, player)) {
                 e.setCancelled(true);
+                this.tell(player, "You can only build inside the arena.");
+            }
             return;
         }
 
@@ -88,7 +90,7 @@ public final class CrystalArenaListener implements Listener {
                 break;
             if (!arena.equals(CrystalPvp.arenaAt(state.getLocation())))
                 problem = "You can only build inside the arena.";
-            else if (CrystalPvp.isOriginal(arena, state.getBlock()))
+            else if (!CrystalPvp.canBuild(arena, state.getBlock(), state.getType()))
                 problem = "You can only build in empty space.";
         }
 
@@ -113,9 +115,9 @@ public final class CrystalArenaListener implements Listener {
         // A crystal fighter can't break anything outside their arena's region either (most of the walls are
         // just outside it), whatever WorldGuard would allow them (ops get past WorldGuard)
         final Arena own = SpawnArena.arenas.of(player);
-        if (own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, player) && CrystalPvp.isOriginal(own, block)) {
+        if (own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, player) && !CrystalPvp.canBreak(own, block)) {
             e.setCancelled(true);
-            this.tell(player, "You can only break blocks placed during the fight.");
+            this.tell(player, "You can only break blocks placed during the fight, and the floor below the spawns.");
             return;
         }
 
@@ -128,9 +130,9 @@ public final class CrystalArenaListener implements Listener {
             return;
         }
 
-        if (CrystalPvp.isOriginal(arena, block)) {
+        if (!CrystalPvp.canBreak(arena, block)) {
             e.setCancelled(true);
-            this.tell(player, "You can only break blocks placed during the fight.");
+            this.tell(player, "You can only break blocks placed during the fight, and the floor below the spawns.");
             return;
         }
 
@@ -240,7 +242,7 @@ public final class CrystalArenaListener implements Listener {
         if (isCrystalFighter(player)) {
             // Into a spot that was empty when the fight started: wherever it flows is put back afterwards
             final Arena own = SpawnArena.arenas.of(player);
-            if (CrystalPvp.isOriginal(own, e.getBlock()))
+            if (!CrystalPvp.canBuild(own, e.getBlock()))
                 e.setCancelled(true);
             else
                 e.setCancelled(false);
@@ -312,7 +314,7 @@ public final class CrystalArenaListener implements Listener {
         final List<Block> candidates = before != null ? before : new ArrayList<>(blocks);
         blocks.clear();
         for (final Block block : candidates)
-            if (!CrystalPvp.isOriginal(originArena, block))
+            if (CrystalPvp.canBreak(originArena, block)) // what was placed in the fight, and the floor below the spawns
                 blocks.add(block);
         return true;
     }
@@ -477,7 +479,7 @@ public final class CrystalArenaListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onFlow(final org.bukkit.event.block.BlockFromToEvent e) {
         final Arena arena = CrystalPvp.arenaAt(e.getBlock());
-        if (arena != null && CrystalPvp.activeFight(arena) != null && CrystalPvp.isOriginal(arena, e.getToBlock()))
+        if (arena != null && CrystalPvp.activeFight(arena) != null && !CrystalPvp.canBuild(arena, e.getToBlock()))
             e.setCancelled(true);
     }
 

@@ -206,6 +206,71 @@ public final class CrystalPvp {
         return before == null || !isEmptySpace(before.getMaterial());
     }
 
+    /**
+     * Whether a fighter may break this block: one that wasn't there when the fight started, or part of the arena's
+     * own floor they're allowed to dig into ({@link #isDiggableFloor}).
+     */
+    public static boolean canBreak(final Arena arena, final Block block) {
+        return !isOriginal(arena, block) || isDiggableFloor(arena, block);
+    }
+
+    /** Whether a fighter may place or pour into this spot: one that was empty when the fight started, or a hole they dug. */
+    public static boolean canBuild(final Arena arena, final Block block) {
+        return canBuild(arena, block, block.getType());
+    }
+
+    /** As {@link #canBuild(Arena, Block)}, with what's there now given (a place event already shows the new block). */
+    public static boolean canBuild(final Arena arena, final Block block, final Material there) {
+        return !isOriginal(arena, block) || (isEmptySpace(there) && floorType(arena, block) != null);
+    }
+
+    /**
+     * Ground fighters may dig into: a block of a type in crystalDiggableBlocks (never bedrock), inside the arena's
+     * region, below the spawns' feet, and under the open pit: the spot above it at the spawns' height was empty when
+     * the fight started, so walls and whatever stands on the ground stay put. Dug blocks are put back with the rest.
+     */
+    public static boolean isDiggableFloor(final Arena arena, final Block block) {
+        return block.getType() == floorType(arena, block);
+    }
+
+    /** What this spot of diggable floor was when the fight started (see {@link #isDiggableFloor}), or null if it isn't one. */
+    private static Material floorType(final Arena arena, final Block block) {
+        if (!arena.equals(arenaAt(block)))
+            return null;
+        final Integer spawnY = arena.lowestSpawnY();
+        if (spawnY == null || block.getY() >= spawnY)
+            return null;
+        final Track track = TRACKS.get(arena);
+        final Snapshot snapshot = track == null ? null : track.snapshot;
+        if (snapshot == null)
+            return null;
+        final BlockData was = snapshot.at(block);
+        if (was == null || !diggable().contains(was.getMaterial()))
+            return null;
+        final BlockData above = snapshot.at(block.getWorld().getBlockAt(block.getX(), spawnY, block.getZ()));
+        return above != null && isEmptySpace(above.getMaterial()) ? was.getMaterial() : null;
+    }
+
+    private static volatile java.util.List<String> diggableFrom;
+    private static volatile java.util.Set<Material> diggable = java.util.EnumSet.noneOf(Material.class);
+
+    /** crystalDiggableBlocks as materials, worked out again whenever the setting changes. */
+    private static java.util.Set<Material> diggable() {
+        final java.util.List<String> names = SpawnArena.settings == null ? java.util.List.of() : SpawnArena.settings.crystalDiggableBlocks;
+        if (names != diggableFrom) {
+            final java.util.Set<Material> set = java.util.EnumSet.noneOf(Material.class);
+            if (names != null)
+                for (final String name : names) {
+                    final Material m = name == null ? null : Material.matchMaterial(name.trim());
+                    if (m != null && m.isBlock() && m != Material.BEDROCK)
+                        set.add(m);
+                }
+            diggable = set;
+            diggableFrom = names;
+        }
+        return diggable;
+    }
+
     private static final Map<Arena, Track> TRACKS = new java.util.concurrent.ConcurrentHashMap<>();
     /**
      * True on a thread while it's putting a crystal arena's blocks back: anything the block updates drop is

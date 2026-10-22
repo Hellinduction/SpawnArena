@@ -232,6 +232,16 @@ public abstract class Arena extends ArenaOptions {
         return region.getMaximumPoint().y() + 1 - feet;
     }
 
+    /** Block Y of the lower spawn's feet (the floor is just below it), or null without spawns. */
+    public Integer lowestSpawnY() {
+        final Location a = this.spawnPoint1, b = this.spawnPoint2;
+        if (a == null && b == null)
+            return null;
+        if (a == null || b == null)
+            return (a != null ? a : b).getBlockY();
+        return Math.min(a.getBlockY(), b.getBlockY());
+    }
+
     public String getArenaName() {
         return this.arenaName;
     }

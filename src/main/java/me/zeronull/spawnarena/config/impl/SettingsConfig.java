@@ -111,6 +111,12 @@ public final class SettingsConfig {
             "which some anticheats may flag. Set to false and Ice Rink is never picked in MULTI arenas (SINGLE arenas use real ice)."})
     public boolean sumoIceInMulti = true;
 
+    @Comment({"Crystal arenas: blocks fighters can dig out of the arena's own floor during a fight (put back afterwards, like",
+            "everything else). Only below the spawns' feet and under the open pit (never under a wall), and only inside",
+            "the arena's region. Bedrock is never diggable, even if listed. Empty list = nothing of the floor can be dug."})
+    public java.util.List<String> crystalDiggableBlocks = new java.util.ArrayList<>(java.util.List.of(
+            "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud", "sand", "gravel", "netherrack", "obsidian"));
+
     @Comment({"With bunnyAC installed: MULTI Ice Rink and Moon Gravity players are taken out of bunnyAC for their match (it",
             "flags the sliding, as it sees the real floor, and the moon jumps), and put back as soon as they're out.",
             "Staff-exempted players are left alone. Until bunnyAC can exempt players from single checks, this means no",

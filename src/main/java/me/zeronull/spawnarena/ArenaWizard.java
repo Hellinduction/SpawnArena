@@ -717,6 +717,9 @@ public final class ArenaWizard {
                 // Crystal PvP is fought with pearls and takes fall damage
                 region.setFlag(com.sk89q.worldguard.protection.flags.Flags.FALL_DAMAGE, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
                 region.setFlag(com.sk89q.worldguard.protection.flags.Flags.ENDERPEARL, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
+                // Otherwise WorldGuard wipes every crystal's blast before SpawnArena sees it. SpawnArena keeps the arena
+                // safe itself: only blocks placed in the fight, and the diggable floor, can be blown up
+                region.setFlag(com.sk89q.worldguard.protection.flags.Flags.OTHER_EXPLOSION, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
             }
             regions.addRegion(region);
             regions.save();
