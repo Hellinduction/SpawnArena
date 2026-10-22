@@ -591,6 +591,85 @@ public final class CrystalArenaListener implements Listener {
         litTnt.put(BlockKey.of(block), System.currentTimeMillis());
     }
 
+    /** Reach of a crystal placed by hand: a crystal that appears further than this from every fighter wasn't theirs. */
+    private static final double CRYSTAL_REACH = 6.5;
+    /** A right-click with a crystal this recent can be what made one appear. */
+    private static final long CRYSTAL_USE_MILLIS = 1_500;
+
+    /** Each crystal fighter's last right-click with an end crystal: when, and where they were. */
+    private record CrystalUse(long at, Location where) {}
+    private static final Map<java.util.UUID, CrystalUse> crystalUses = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void noteCrystalUse(final Player player, final org.bukkit.inventory.ItemStack item) {
+        if (item == null || item.getType() != Material.END_CRYSTAL || !isCrystalFighter(player))
+            return;
+        crystalUses.put(player.getUniqueId(), new CrystalUse(System.currentTimeMillis(), player.getLocation()));
+    }
+
+    // Whatever the click was on (a block, the air, or a crystal that's just been popped), and even if something
+    // else cancelled it: a plugin may have placed the crystal itself
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void noteCrystalClick(final PlayerInteractEvent e) {
+        if (e.getAction() == Action.RIGHT_CLICK_BLOCK || e.getAction() == Action.RIGHT_CLICK_AIR)
+            noteCrystalUse(e.getPlayer(), e.getItem());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void noteCrystalClickOnEntity(final org.bukkit.event.player.PlayerInteractEntityEvent e) {
+        noteCrystalUse(e.getPlayer(), e.getPlayer().getInventory().getItem(e.getHand()));
+    }
+
+    @EventHandler
+    public void forgetCrystalUses(final org.bukkit.event.player.PlayerQuitEvent e) {
+        crystalUses.remove(e.getPlayer().getUniqueId());
+    }
+
+    /**
+     * A crystal that appears mid-fight without a place event: plugins like FasterCrystals spawn crystals themselves
+     * (placing one onto a spot where one was just popped). It's counted as placed by the fighter who just right-clicked
+     * with a crystal within reach of it (the latest), or else by the nearest fighter within reach; otherwise it would be
+     * part of the arena and could never be popped. With no fighter in reach it isn't allowed.
+     */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onCrystalAppear(final org.bukkit.event.entity.EntitySpawnEvent e) {
+        if (!(e.getEntity() instanceof EnderCrystal crystal))
+            return;
+        final Arena arena = CrystalPvp.arenaAt(e.getLocation());
+        final Fight fight = arena == null ? null : CrystalPvp.activeFight(arena);
+        if (fight == null || CrystalPvp.isPlacedCrystal(arena, crystal))
+            return;
+        final long now = System.currentTimeMillis();
+        final double reach = CRYSTAL_REACH * CRYSTAL_REACH;
+        Player clicked = null, nearest = null;
+        long latest = 0;
+        double best = reach;
+        for (final Player p : fight.getFighters()) {
+            final Location at = p.getLocation(); // a read of where they are; fine from any thread
+            if (at.getWorld() == null || !at.getWorld().equals(e.getLocation().getWorld()))
+                continue;
+            final double d = at.distanceSquared(e.getLocation());
+            if (d > reach)
+                continue;
+            if (d <= best) {
+                best = d;
+                nearest = p;
+            }
+            final CrystalUse use = crystalUses.get(p.getUniqueId());
+            if (use != null && now - use.at() <= CRYSTAL_USE_MILLIS && use.at() > latest
+                    && use.where().getWorld() == e.getLocation().getWorld() && use.where().distanceSquared(e.getLocation()) <= reach) {
+                latest = use.at();
+                clicked = p;
+            }
+        }
+        final Player placer = clicked != null ? clicked : nearest;
+        if (placer == null) {
+            e.setCancelled(true);
+            return;
+        }
+        CrystalPvp.recordCrystal(fight, crystal);
+        fight.stats().crystalPlaced(placer);
+    }
+
     /** Primed TNT in an arena during a fight: only from a TNT block placed in it that was just lit (see above). */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onEntitySpawn(final org.bukkit.event.entity.EntitySpawnEvent e) {
