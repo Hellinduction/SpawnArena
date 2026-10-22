@@ -698,7 +698,8 @@ public final class ArenaWizard {
     private static void finishNow(final Player player, final Session s, final File resetSchematic) {
         final Arena old = SpawnArena.arenas.of(s.name);
         if (old != null) {
-            final String problem = removeArena(old, false);
+            // Replaced by the same name: its leaderboard holograms still fit, so they stay
+            final String problem = removeArena(old, false, true);
             if (problem != null) {
                 tell(player, "<red>Can't replace it yet: " + problem);
                 return;
@@ -791,7 +792,7 @@ public final class ArenaWizard {
             return;
         }
         final boolean wipeStats = args[2].equalsIgnoreCase("stats");
-        final String problem = removeArena(arena, wipeStats);
+        final String problem = removeArena(arena, wipeStats, false);
         if (problem != null) {
             tell(player, "<red>Can't delete it: " + problem);
             return;
@@ -801,9 +802,9 @@ public final class ArenaWizard {
 
     /**
      * Removes an arena completely: from memory, its file, its WorldGuard region and its holograms (and its
-     * stats if asked). Returns why it couldn't, or null when done.
+     * stats if asked; its holograms are kept when it's only being set up again). Returns why it couldn't, or null when done.
      */
-    static String removeArena(final Arena arena, final boolean wipeStats) {
+    static String removeArena(final Arena arena, final boolean wipeStats, final boolean keepHolograms) {
         if (!arena.getFights().isEmpty())
             return "a fight is going on there. Wait for it to end (or /arenalock on).";
         CrystalPvp.forgetSnapshot(arena);
@@ -831,7 +832,7 @@ public final class ArenaWizard {
             }
         }
 
-        if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
+        if (!keepHolograms && Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
             LeaderboardHolograms.removeForArena(name);
         if (wipeStats)
             SpawnArena.statsManager.deleteArenaData(name);
