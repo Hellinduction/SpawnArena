@@ -227,6 +227,7 @@ public final class SavableArena extends Arena {
         this.setPodiumRewards(config.secondRewardMultiplier, config.secondRewardCooldownMinutes,
                 config.thirdRewardMultiplier, config.thirdRewardCooldownMinutes);
         this.setEgapCooldownSeconds(config.egapCooldownSeconds);
+        this.setDisplayName(config.displayName);
         return config.ffa && !wasFfa;
     }
 

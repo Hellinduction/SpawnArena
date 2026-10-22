@@ -63,6 +63,10 @@ public final class ArenaConfig {
             "fight, and never touches golden apples anywhere else. 0 = no cooldown."})
     public int egapCooldownSeconds = 0;
 
+    @Comment({"How players see this arena's name in messages, menus and holograms, e.g. CrystalPvP. Blank = worked out from",
+            "its name (crystalpvp shows as Crystalpvp). After changing it: /arenareload, then /arenaleaderboard update."})
+    public String displayName = "";
+
     @Comment({"Crystal PvP: fighters can place blocks and end crystals inside the arena's region, but can only",
             "break or blow up blocks placed during the fight. Everything placed is removed when the fight ends.",
             "The plugin lets fighters past WorldGuard itself, so the region's flags can stay as they are (build denied).",

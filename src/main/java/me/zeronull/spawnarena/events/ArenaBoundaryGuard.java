@@ -28,6 +28,9 @@ public final class ArenaBoundaryGuard implements Listener {
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onMove(final PlayerMoveEvent e) {
+        // Crystal arenas: glitching out, or even just a head poking up through the ceiling, is back to their spawn
+        if (this.crystalOutOfBounds(e))
+            return;
         if (sameBlock(e.getFrom(), e.getTo()))
             return;
 
@@ -60,6 +63,33 @@ public final class ArenaBoundaryGuard implements Listener {
             player.leaveVehicle();
             handleLeaving(player, fight, e.getFrom(), back -> FoliaUtils.teleport(player, back));
         }
+    }
+
+    /**
+     * A crystal fighter whose feet are out of the arena's region, or whose head is above its top (glitched up into or
+     * through the barrier ceiling), goes straight back to their spawn from the start of the match. Returns true if so.
+     */
+    private boolean crystalOutOfBounds(final PlayerMoveEvent e) {
+        final Player player = e.getPlayer();
+        final Fight fight = runningFight(player);
+        if (fight == null || !fight.getArena().isCrystalPvp())
+            return false;
+        final Arena arena = fight.getArena();
+        final Location to = e.getTo();
+        final Integer top = arena.regionTopY();
+        final boolean headOut = top != null && to.getY() + player.getHeight() > top + 1;
+        if (!headOut && arena.equals(SpawnArena.arenas.of(to)))
+            return false;
+        final Location spawn = fight.getSpawnOf(player);
+        if (spawn == null || !arena.equals(SpawnArena.arenas.of(spawn)))
+            return false; // nowhere safe to put them: the usual handling below
+        final Location back = spawn.clone();
+        back.setYaw(to.getYaw());
+        back.setPitch(to.getPitch());
+        e.setTo(back);
+        player.setFallDistance(0);
+        notify(player);
+        return true;
     }
 
     private void handleLeaving(final Player player, final Fight fight, final Location from, final Consumer<Location> moveBack) {

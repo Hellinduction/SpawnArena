@@ -88,6 +88,17 @@ public abstract class ArenaOptions {
         this.egapCooldownSeconds = Math.max(0, seconds);
     }
 
+    /** How players see the arena's name (blank: worked out from its name, e.g. "sumo" shows as "Sumo"). */
+    private volatile String displayName = "";
+
+    public String getDisplayName() {
+        return this.displayName;
+    }
+
+    public void setDisplayName(final String name) {
+        this.displayName = name == null ? "" : name.trim();
+    }
+
     public void setWinReward(final double amount, final int cooldownMinutes) {
         this.winReward = amount;
         this.winRewardCooldownMinutes = cooldownMinutes;

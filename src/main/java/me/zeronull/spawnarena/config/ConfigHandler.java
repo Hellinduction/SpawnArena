@@ -127,6 +127,7 @@ public class ConfigHandler {
             arena.setPodiumRewards(config.secondRewardMultiplier, config.secondRewardCooldownMinutes,
                     config.thirdRewardMultiplier, config.thirdRewardCooldownMinutes);
             arena.setEgapCooldownSeconds(config.egapCooldownSeconds);
+            arena.setDisplayName(config.displayName);
 
             arenas.add(arena);
         }

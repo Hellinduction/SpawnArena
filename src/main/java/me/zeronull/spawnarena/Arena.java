@@ -83,6 +83,10 @@ public abstract class Arena extends ArenaOptions {
 
     /** All-lowercase names are title cased ("sumo_pit" → "Sumo Pit"); any other casing is kept as typed. */
     public static String displayName(final String arena) {
+        // Set in the arena's file
+        final Arena found = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(arena);
+        if (found != null && !found.getDisplayName().isEmpty())
+            return found.getDisplayName();
         if (!arena.equals(arena.toLowerCase()))
             return arena;
 
@@ -240,6 +244,16 @@ public abstract class Arena extends ArenaOptions {
         if (a == null || b == null)
             return (a != null ? a : b).getBlockY();
         return Math.min(a.getBlockY(), b.getBlockY());
+    }
+
+    /** The top block layer of this arena's WorldGuard region (a crystal arena's barrier ceiling), or null without one. */
+    public Integer regionTopY() {
+        if (!ArenaUtils.WORLD_EDIT_SUPPORT || this.spawnPoint1 == null || this.spawnPoint1.getWorld() == null)
+            return null;
+        final com.sk89q.worldguard.protection.managers.RegionManager manager =
+                ArenaUtils.REGION_CONTAINER.get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(this.spawnPoint1.getWorld()));
+        final com.sk89q.worldguard.protection.regions.ProtectedRegion region = manager == null ? null : manager.getRegion(this.arenaName);
+        return region == null ? null : region.getMaximumPoint().y();
     }
 
     public String getArenaName() {
