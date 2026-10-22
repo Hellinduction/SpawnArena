@@ -497,6 +497,8 @@ public final class ArenaWizard {
      */
     /** Ground a fighter can dig through (or the bedrock under it), for finding how deep the arena's floor goes. */
     private static boolean isGround(final Material type) {
+        if (CrystalPvp.isDiggableType(type)) // whatever crystalDiggableBlocks lists
+            return true;
         return switch (type) {
             case DIRT, COARSE_DIRT, ROOTED_DIRT, GRASS_BLOCK, PODZOL, MYCELIUM, MUD, OBSIDIAN, CRYING_OBSIDIAN, BEDROCK,
                  OCHRE_FROGLIGHT, PEARLESCENT_FROGLIGHT, VERDANT_FROGLIGHT -> true;
@@ -720,6 +722,7 @@ public final class ArenaWizard {
                 // Otherwise WorldGuard wipes every crystal's blast before SpawnArena sees it. SpawnArena keeps the arena
                 // safe itself: only blocks placed in the fight, and the diggable floor, can be blown up
                 region.setFlag(com.sk89q.worldguard.protection.flags.Flags.OTHER_EXPLOSION, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
+                region.setFlag(com.sk89q.worldguard.protection.flags.Flags.TNT, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
             }
             regions.addRegion(region);
             regions.save();

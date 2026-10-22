@@ -163,9 +163,10 @@ public final class CrystalArenaListener implements Listener {
         final boolean fighter = CrystalPvp.isActiveFighter(arena, player);
         final Material type = clicked.getType();
 
-        // Anchors and beds: only ones placed during the fight, and remember who set them off
+        // Anchors and beds: only ones placed during the fight (in the open or down a hole they dug), and remember who
+        // set them off
         if (type == Material.RESPAWN_ANCHOR || Tag.BEDS.isTagged(type)) {
-            if (!fighter || CrystalPvp.isOriginal(arena, clicked)) {
+            if (!fighter || !CrystalPvp.canBreak(arena, clicked)) {
                 if (fighter || isOutsider(arena, player))
                     e.setCancelled(true);
                 return;
@@ -258,7 +259,7 @@ public final class CrystalArenaListener implements Listener {
         final Arena arena = CrystalPvp.arenaAt(e.getBlock());
         if (isCrystalFighter(player)) {
             final Arena own = SpawnArena.arenas.of(player);
-            e.setCancelled(CrystalPvp.isOriginal(own, e.getBlock()));
+            e.setCancelled(!CrystalPvp.canBreak(own, e.getBlock())); // what they poured, in the open or down a hole
             return;
         }
         if (arena != null && isOutsider(arena, player))
@@ -286,6 +287,7 @@ public final class CrystalArenaListener implements Listener {
             // Always let it go off (sound, particles, knockback): the list now only has blocks placed during
             // the fight, so the arena itself is safe even where WorldGuard denies explosions
             e.setCancelled(false);
+            e.setYield(0); // what a blast breaks drops nothing (digging still does)
         }
     }
 
@@ -296,6 +298,7 @@ public final class CrystalArenaListener implements Listener {
             // Always let it go off (sound, particles, knockback): the list now only has blocks placed during
             // the fight, so the arena itself is safe even where WorldGuard denies explosions
             e.setCancelled(false);
+            e.setYield(0); // what a blast breaks drops nothing (digging still does)
         }
     }
 
@@ -568,11 +571,34 @@ public final class CrystalArenaListener implements Listener {
         e.getBlocks().removeIf(state -> CrystalPvp.isOriginal(arena, state.getBlock()));
     }
 
-    /** No primed TNT in an arena during a fight, however it got there. */
+    /** TNT blocks lit in a fight (where the block was, and when), so the primed TNT that follows can appear. */
+    private final Map<BlockKey, Long> litTnt = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * TNT a fighter placed during the fight can be lit, any way at all (flint and steel, fire, redstone, another
+     * blast); its blast breaks only what a fighter could. The arena's own TNT can't be.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onTntPrime(final org.bukkit.event.block.TNTPrimeEvent e) {
+        final Block block = e.getBlock();
+        if (!this.duringFight(block.getLocation()))
+            return;
+        final Arena arena = CrystalPvp.arenaAt(block);
+        if (arena == null || !CrystalPvp.canBreak(arena, block)) { // TNT they placed, in the open or down a hole
+            e.setCancelled(true);
+            return;
+        }
+        litTnt.put(BlockKey.of(block), System.currentTimeMillis());
+    }
+
+    /** Primed TNT in an arena during a fight: only from a TNT block placed in it that was just lit (see above). */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onEntitySpawn(final org.bukkit.event.entity.EntitySpawnEvent e) {
-        if (e.getEntity() instanceof org.bukkit.entity.TNTPrimed && this.duringFight(e.getLocation()))
-            e.setCancelled(true);
+        if (!(e.getEntity() instanceof org.bukkit.entity.TNTPrimed) || !this.duringFight(e.getLocation()))
+            return;
+        final Long lit = litTnt.remove(BlockKey.of(e.getLocation().getBlock()));
+        if (lit == null || System.currentTimeMillis() - lit > 2_000)
+            e.setCancelled(true); // summoned, from a TNT minecart, a dispenser...
     }
 
     /** The arena's own item frames, paintings and armor stands stay as they are during a fight. */
@@ -664,6 +690,8 @@ public final class CrystalArenaListener implements Listener {
 
     /** Drops old anchor/bed uses and message cooldowns. */
     private void forget() {
+        final long tntCutoff = System.currentTimeMillis() - 2_000;
+        litTnt.values().removeIf(at -> at < tntCutoff);
         final long now = System.currentTimeMillis();
         explosiveBlockUses.values().removeIf(use -> now - use.at() > BLOCK_EXPLOSION_MEMORY_MILLIS);
         this.lastMessage.values().removeIf(at -> now - at > MESSAGE_COOLDOWN_MILLIS);

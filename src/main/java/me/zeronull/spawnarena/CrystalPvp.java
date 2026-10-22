@@ -211,7 +211,9 @@ public final class CrystalPvp {
      * own floor they're allowed to dig into ({@link #isDiggableFloor}).
      */
     public static boolean canBreak(final Arena arena, final Block block) {
-        return !isOriginal(arena, block) || isDiggableFloor(arena, block);
+        // In the diggable floor anything goes, dug ground or whatever was put back into a hole (it's all restored):
+        // otherwise obsidian placed in a hole they dug could never be broken again
+        return !isOriginal(arena, block) || (block.getType() != Material.BEDROCK && floorType(arena, block) != null);
     }
 
     /** Whether a fighter may place or pour into this spot: one that was empty when the fight started, or a hole they dug. */
@@ -253,6 +255,11 @@ public final class CrystalPvp {
 
     private static volatile java.util.List<String> diggableFrom;
     private static volatile java.util.Set<Material> diggable = java.util.EnumSet.noneOf(Material.class);
+
+    /** Whether this block type is in crystalDiggableBlocks (bedrock never is). */
+    public static boolean isDiggableType(final Material type) {
+        return diggable().contains(type);
+    }
 
     /** crystalDiggableBlocks as materials, worked out again whenever the setting changes. */
     private static java.util.Set<Material> diggable() {
@@ -409,7 +416,6 @@ public final class CrystalPvp {
             return world.getEnvironment() == World.Environment.NORMAL; // they'd set spawn points; bed bombs only elsewhere
         return switch (type) {
             case PISTON, STICKY_PISTON -> true; // could push the arena's own blocks
-            case TNT -> true;                   // can't be lit in a fight anyway (fire is blocked)
             // Fire TNT, armor stands, boats... with a button; a hopper could empty the arena's own containers
             case DISPENSER, DROPPER, CRAFTER, HOPPER -> true;
             default -> false;

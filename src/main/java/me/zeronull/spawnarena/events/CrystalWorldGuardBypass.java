@@ -54,8 +54,14 @@ public final class CrystalWorldGuardBypass implements Listener {
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onUse(final UseBlockEvent e) {
-        // Anchors, beds and anything else they placed themselves
-        if (fighterActingOn(e, e.getBlocks(), (arena, block) -> !CrystalPvp.isOriginal(arena, block)) != null)
+        // Placing TNT counts as using the block it's put against (WorldGuard checks TNT that way): CrystalArenaListener
+        // decides where it can go, as for any block
+        if (e.getEffectiveMaterial() == org.bukkit.Material.TNT && fighterActingOn(e, e.getBlocks(), null) != null) {
+            e.setAllowed(true);
+            return;
+        }
+        // Anchors, beds and anything else they placed themselves (down a hole they dug too)
+        if (fighterActingOn(e, e.getBlocks(), CrystalPvp::canBreak) != null)
             e.setAllowed(true);
     }
 
@@ -88,12 +94,22 @@ public final class CrystalWorldGuardBypass implements Listener {
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
     public void onSpawnEntity(final SpawnEntityEvent e) {
-        if (e.getEffectiveType() != EntityType.END_CRYSTAL)
+        final Arena arena = CrystalPvp.arenaAt(e.getTarget());
+        if (arena == null)
             return;
         final Player player = e.getCause().getFirstPlayer();
-        final Arena arena = CrystalPvp.arenaAt(e.getTarget());
-        if (player != null && arena != null && CrystalPvp.isActiveFighter(arena, player))
+        final EntityType type = e.getEffectiveType();
+        // Crystals and dropped items: a fighter's own, in their arena (CrystalArenaListener decides the rest).
+        // Primed TNT: only where it was placed during the fight, whoever or whatever lit it (CrystalArenaListener
+        // checks the same before it can appear)
+        if (((type == EntityType.END_CRYSTAL || type == EntityType.ITEM) && player != null && CrystalPvp.isActiveFighter(arena, player))
+                || (type == EntityType.TNT && CrystalPvp.activeFight(arena) != null && CrystalPvp.canBuild(arena, e.getTarget().getBlock())))
             e.setAllowed(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void quietSpawn(final SpawnEntityEvent e) {
+        quietForFighter(e);
     }
 
     @EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
