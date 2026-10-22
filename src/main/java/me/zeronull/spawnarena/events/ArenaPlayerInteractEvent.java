@@ -1,9 +1,6 @@
 package me.zeronull.spawnarena.events;
 
-import me.zeronull.spawnarena.Arena;
-import me.zeronull.spawnarena.Fight;
-import me.zeronull.spawnarena.FightState;
-import me.zeronull.spawnarena.SpawnArena;
+import me.zeronull.spawnarena.*;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -36,7 +33,10 @@ public final class ArenaPlayerInteractEvent implements Listener {
         }
 
         if (e.getAction() == Action.RIGHT_CLICK_BLOCK && (e.getClickedBlock().getState() instanceof InventoryHolder || e.getClickedBlock().getType() == Material.ENDER_CHEST)) {
-            e.setCancelled(true);
+            // Crystal fights: containers they placed themselves open (ArenaInventoryOpenEvent checks again)
+            if (!(arena.isCrystalPvp() && e.getClickedBlock().getState(false) instanceof InventoryHolder holder
+                    && CrystalPvp.canOpen(arena, holder.getInventory().getHolder(false))))
+                e.setCancelled(true);
             return;
         }
 

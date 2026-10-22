@@ -207,6 +207,17 @@ public final class CrystalPvp {
     }
 
     /**
+     * Whether a fighter may open this container: one put there during the fight (a shulker of gaps they brought, a
+     * chest...), never one of the arena's own and never an ender chest. A double chest needs both halves placed.
+     */
+    public static boolean canOpen(final Arena arena, final org.bukkit.inventory.InventoryHolder holder) {
+        if (holder instanceof org.bukkit.block.DoubleChest chest)
+            return canOpen(arena, chest.getLeftSide()) && canOpen(arena, chest.getRightSide());
+        return holder instanceof org.bukkit.block.Container container && container.getType() != Material.ENDER_CHEST
+                && activeFight(arena) != null && !isOriginal(arena, container.getBlock());
+    }
+
+    /**
      * Whether a fighter may break this block: one that wasn't there when the fight started, or part of the arena's
      * own floor they're allowed to dig into ({@link #isDiggableFloor}).
      */

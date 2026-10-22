@@ -1,9 +1,6 @@
 package me.zeronull.spawnarena.events;
 
-import me.zeronull.spawnarena.Arena;
-import me.zeronull.spawnarena.Fight;
-import me.zeronull.spawnarena.FightState;
-import me.zeronull.spawnarena.SpawnArena;
+import me.zeronull.spawnarena.*;
 import org.bukkit.entity.HumanEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -38,6 +35,10 @@ public final class ArenaInventoryOpenEvent implements Listener {
         if (fight.getState() == FightState.COUNTDOWN) {
             return;
         }
+
+        // Crystal fights: a container they placed themselves (not the arena's own, not an ender chest)
+        if (arena.isCrystalPvp() && CrystalPvp.canOpen(arena, e.getInventory().getHolder(false)))
+            return;
 
         e.setCancelled(true);
     }
