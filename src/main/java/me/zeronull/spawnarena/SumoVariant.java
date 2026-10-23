@@ -205,7 +205,7 @@ public enum SumoVariant {
             }
             case ARCHER -> {
                 final ItemStack bow = new ItemStack(Material.BOW);
-                enchant(bow, "punch", 1);
+                enchant(bow, "punch", 2);
                 enchant(bow, "infinity", 1);
                 bow.editMeta(meta -> meta.setUnbreakable(true));
                 player.getInventory().addItem(SlapFish.tag(bow), SlapFish.tag(new ItemStack(Material.ARROW)));
