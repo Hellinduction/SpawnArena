@@ -84,10 +84,15 @@ public class ArenaPlayerLeaveAreaEvent implements Listener {
         if (fight.isSpawnTeleport(player, event.getTo()))
             return;
 
-        final Material type = event.getTo().clone().add(0, 0.5, 0).getBlock().getType();
-        if (event.getCause() == TeleportCause.ENDER_PEARL && type.isSolid()) {
-            event.setCancelled(true);
-            player.getInventory().addItem(new ItemStack(Material.ENDER_PEARL, 1));
+        // A pearl landing where they wouldn't fit (into a wall, under a low ceiling) or just outside the arena: they
+        // go to the nearest spot in the arena where they do fit, close by, instead of the pearl being wasted
+        if (event.getCause() == TeleportCause.ENDER_PEARL) {
+            final org.bukkit.Location spot = nearestFreeSpot(player, arena, event.getTo());
+            if (spot == null) {
+                event.setCancelled(true);
+                player.getInventory().addItem(new ItemStack(Material.ENDER_PEARL, 1));
+            } else if (spot != event.getTo())
+                event.setTo(spot);
             return;
         }
 
@@ -100,11 +105,41 @@ public class ArenaPlayerLeaveAreaEvent implements Listener {
             return;
         }
 
-        // Anything else (pearls thrown before the fight that land after it starts, chorus fruit,
-        // portals, ...) must not carry a fighter out of the arena
+        // Anything else (chorus fruit, portals, ...) must not carry a fighter out of the arena
         event.setCancelled(true);
-        if (event.getCause() == TeleportCause.ENDER_PEARL)
-            player.getInventory().addItem(new ItemStack(Material.ENDER_PEARL, 1));
+    }
+
+    /** How far (in blocks) from where a pearl landed a free spot is looked for. */
+    private static final int PEARL_SEARCH = 3;
+
+    /**
+     * Where a fighter's pearl puts them: where it landed if they fit there and it's in their arena (head under a
+     * crystal arena's ceiling too), else the nearest such spot within {@link #PEARL_SEARCH} blocks, or null.
+     */
+    private static org.bukkit.Location nearestFreeSpot(final Player player, final Arena arena, final org.bukkit.Location landed) {
+        if (fits(player, arena, landed))
+            return landed;
+        final java.util.List<org.bukkit.Location> spots = new java.util.ArrayList<>();
+        for (int dx = -PEARL_SEARCH; dx <= PEARL_SEARCH; dx++)
+            for (int dy = -PEARL_SEARCH; dy <= PEARL_SEARCH; dy++)
+                for (int dz = -PEARL_SEARCH; dz <= PEARL_SEARCH; dz++) {
+                    final org.bukkit.Location spot = new org.bukkit.Location(landed.getWorld(), landed.getBlockX() + dx + 0.5,
+                            landed.getBlockY() + dy, landed.getBlockZ() + dz + 0.5, landed.getYaw(), landed.getPitch());
+                    if (spot.distanceSquared(landed) <= (PEARL_SEARCH + 0.5) * (PEARL_SEARCH + 0.5))
+                        spots.add(spot);
+                }
+        spots.sort(java.util.Comparator.comparingDouble((org.bukkit.Location l) -> l.distanceSquared(landed)));
+        for (final org.bukkit.Location spot : spots)
+            if (fits(player, arena, spot))
+                return spot;
+        return null;
+    }
+
+    private static boolean fits(final Player player, final Arena arena, final org.bukkit.Location loc) {
+        if (player.collidesAt(loc) || !arena.equals(SpawnArena.arenas.of(loc)))
+            return false;
+        final Integer top = arena.isCrystalPvp() ? arena.regionTopY() : null;
+        return top == null || loc.getY() + player.getHeight() <= top + 1;
     }
 
     @EventHandler
