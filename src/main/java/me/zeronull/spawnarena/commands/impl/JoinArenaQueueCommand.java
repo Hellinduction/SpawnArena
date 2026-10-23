@@ -70,8 +70,9 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         }
 
         if (args.length >= 2 && args[1].equalsIgnoreCase("menu")) {
-            // Already queued here: the menu shows which queue they're in and lets them leave or switch
-            final String problem = arena.queue.playerInQueue(player) ? null : cantJoin(player, arena);
+            // Already queued here: the menu shows which queue they're in and lets them leave or switch. A fight already
+            // running in the arena doesn't stop it opening (they can look, joining from it is still refused)
+            final String problem = arena.queue.playerInQueue(player) ? null : cantJoin(player, arena, false);
             if (problem != null) {
                 sender.sendMessage(ChatColor.RED + problem);
                 return true;
@@ -101,6 +102,11 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
 
     /** Why this player can't queue for this arena right now, or null if they can. */
     public static String cantJoin(final Player player, final Arena arena) {
+        return cantJoin(player, arena, true);
+    }
+
+    /** As {@link #cantJoin(Player, Arena)}; {@code busy} false leaves out a fight already running in a SINGLE arena. */
+    private static String cantJoin(final Player player, final Arena arena, final boolean busy) {
         if (!SpawnArena.settings.arenasOpen)
             return "The arenas are closed right now. Try again later!";
         if (!arena.isSetUp())
@@ -115,7 +121,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return "You can't join while in spectator mode.";
         if (SpawnArena.settings.queueMaxDistance > 0 && arena.distanceFrom(player.getLocation()) > SpawnArena.settings.queueMaxDistance)
             return "You are too far from that arena!";
-        if (!arena.queue.playerInQueue(player) && arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty())
+        if (busy && !arena.queue.playerInQueue(player) && arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty())
             return "There's already a fight in that arena. Wait for it to finish, then join!";
         return null;
     }

@@ -24,7 +24,8 @@ public enum SumoVariant {
     SNOWBALL("Snowball Fight", "snowballs"),
     ROD("Rod", "knockback fishing rod"),
     MOON("Moon Gravity", "jump high, fall slow"),
-    SHRINK("Shrinking Platform", "the edges fall away");
+    SHRINK("Shrinking Platform", "the edges fall away"),
+    COMBO("Combo", "no hit delay");
 
     public final String title;
     public final String hint;
@@ -193,7 +194,7 @@ public enum SumoVariant {
     /** Sets a fighter up for this variant (on their thread, after their own things are saved). */
     public void equip(final Player player, final Arena arena) {
         switch (this) {
-            case CLASSIC, ICE, SHRINK -> player.getInventory().addItem(SlapFish.create());
+            case CLASSIC, ICE, SHRINK, COMBO -> player.getInventory().addItem(SlapFish.create());
             case MOON -> {
                 player.getInventory().addItem(SlapFish.create());
                 // Long enough for any match; taken off with everything else when their own things are given back

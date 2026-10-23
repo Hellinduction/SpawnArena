@@ -36,8 +36,8 @@ public final class ArenaInventoryOpenEvent implements Listener {
             return;
         }
 
-        // Crystal fights: a container they placed themselves (not the arena's own, not an ender chest)
-        if (arena.isCrystalPvp() && CrystalPvp.canOpen(arena, e.getInventory().getHolder(false)))
+        // Crystal fights: a container or crafting table they placed themselves (not the arena's own, not an ender chest)
+        if (arena.isCrystalPvp() && CrystalPvp.canOpen(arena, e.getInventory()))
             return;
 
         e.setCancelled(true);

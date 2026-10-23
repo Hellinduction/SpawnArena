@@ -25,6 +25,10 @@ public class ArenaPreventCraftingSlot implements Listener {
             return;
         }
 
+        // A crafting table they placed in a crystal fight (it only opens for them if they did)
+        if (event.getView().getTopInventory().getType() == InventoryType.WORKBENCH)
+            return;
+
         event.setCancelled(true);
         player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cYou can't craft while in the arena!"));
     }
@@ -39,7 +43,7 @@ public class ArenaPreventCraftingSlot implements Listener {
         if (!SpawnArena.arenas.hasFighter(player))
             return;
 
-        if (event.getInventory() instanceof CraftingInventory) {
+        if (event.getInventory() instanceof CraftingInventory && event.getInventory().getType() != InventoryType.WORKBENCH) {
             for (int slot : event.getRawSlots()) {
                 if (slot > 0 && slot < 5) {
                     event.setCancelled(true);

@@ -41,6 +41,20 @@ public final class PlayerPreFightData {
     public PlayerPreFightData(Player player) {
         this.player = player;
         this.username = this.player.getName();
+        // Their own things on the cursor or in the crafting grid are kept with the rest (given back after the fight):
+        // whatever is in either when it ends is the fight's, and is thrown away
+        final ItemStack cursor = player.getItemOnCursor();
+        if (cursor != null && !cursor.getType().isAir()) {
+            this.extraItems.add(cursor.clone());
+            player.setItemOnCursor(null);
+        }
+        if (player.getOpenInventory().getTopInventory() instanceof org.bukkit.inventory.CraftingInventory grid
+                && grid.getType() == org.bukkit.event.inventory.InventoryType.CRAFTING) {
+            for (final ItemStack item : grid.getMatrix())
+                if (item != null && !item.getType().isAir())
+                    this.extraItems.add(item.clone());
+            grid.clear();
+        }
         contents = cloneItemStackArray(player.getInventory().getContents());
         armorContents = cloneItemStackArray(player.getInventory().getArmorContents());
         level = player.getLevel();
@@ -112,6 +126,12 @@ public final class PlayerPreFightData {
 
         ArenaPlayerConsumeEvent.PLAYER_FINISH_GAME_MAP.put(this.player.getUniqueId(), Instant.now().getEpochSecond());
 
+        // Whatever is on their cursor or in a crafting grid (theirs, or a crafting table they placed in a crystal fight)
+        // now came from the fight (both were emptied into their inventory before it was saved): closing the inventory
+        // would hand it back to them, or drop it if they're full
+        this.player.setItemOnCursor(null);
+        if (this.player.getOpenInventory().getTopInventory() instanceof org.bukkit.inventory.CraftingInventory grid)
+            grid.clear();
         this.player.closeInventory();
 
         // Queued from inside an arena? Don't send them back into it (another fight may be running there)

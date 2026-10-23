@@ -210,6 +210,17 @@ public final class CrystalPvp {
      * Whether a fighter may open this container: one put there during the fight (a shulker of gaps they brought, a
      * chest...), never one of the arena's own and never an ender chest. A double chest needs both halves placed.
      */
+    public static boolean canOpen(final Arena arena, final org.bukkit.inventory.Inventory inventory) {
+        // A crafting table has no inventory of its own: it's the table block they opened
+        if (inventory.getType() == org.bukkit.event.inventory.InventoryType.WORKBENCH) {
+            final Location at = inventory.getLocation();
+            return at != null && at.getBlock().getType() == Material.CRAFTING_TABLE && activeFight(arena) != null
+                    && !isOriginal(arena, at.getBlock());
+        }
+        return canOpen(arena, inventory.getHolder(false));
+    }
+
+    /** As {@link #canOpen(Arena, org.bukkit.inventory.Inventory)}, for a container's inventory holder. */
     public static boolean canOpen(final Arena arena, final org.bukkit.inventory.InventoryHolder holder) {
         if (holder instanceof org.bukkit.block.DoubleChest chest)
             return canOpen(arena, chest.getLeftSide()) && canOpen(arena, chest.getRightSide());

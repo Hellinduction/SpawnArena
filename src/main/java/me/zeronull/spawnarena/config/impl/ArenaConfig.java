@@ -82,7 +82,7 @@ public final class ArenaConfig {
     @Comment({"Random sumo (arenas where touching water loses): each match gets a random variant, the same for both sides:",
             "Classic (Slap Fish), Archer (Punch bow), Ice Rink (the floor turns to ice; only when one match has the arena",
             "to itself, or shown only to that match in MULTI: see sumoIceInMulti), Snowball Fight, Rod (knockback fishing rod),",
-            "Moon Gravity or Shrinking Platform (the edges fall away; SINGLE arenas only, not free-for-alls).",
+            "Moon Gravity, Shrinking Platform (the edges fall away; SINGLE arenas only, not free-for-alls) or Combo (no hit delay).",
             "Replaces giveKnockBackStick when on."})
     public boolean randomSumo = false;
 
