@@ -820,7 +820,7 @@ public class Fight {
     // ── Results ─────────────────────────────────────────────────────────────
 
     private void announceResult(final List<Player> winners, final List<Player> losers) {
-        final String arenaPart = "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " ";
+        final String arenaPart = "arena".equals(this.arena.getArenaName()) ? "" : Arena.displayName(this.arena.getArenaName()) + " ";
 
         // Hovering over the result shows the fight's stats (and, once it's worked out, everyone's Elo change)
         net.kyori.adventure.text.event.HoverEvent<Component> statsHover =
@@ -924,16 +924,25 @@ public class Fight {
      * The dramatic announcement when a long win streak gets ended, with a (harmless) lightning strike where
      * that player went down. Its thunder is vanilla's, so only players near enough to see it hear it.
      */
+    /** " (teamed with <names>)" for whoever else was on {@code loser}'s side, or nothing in a 1v1. */
+    private static Component partnerPart(final Player loser, final List<Player> losers) {
+        final List<Player> partners = losers.stream().filter(p -> !p.equals(loser)).toList();
+        return partners.isEmpty() ? Component.empty()
+                : Component.text(" (teamed with ").append(displayNames(partners)).append(Component.text(")"));
+    }
+
     private void announceStreakEnded(final Player loser, final int streak, final List<Player> winners, final List<Player> losers,
                                      final net.kyori.adventure.text.event.HoverEvent<Component> statsHover, final boolean selfOut,
                                      final List<Integer> winnerStreaks) {
         // Worded and coloured like the usual "X beat Y in the sumo arena!" result; only the headline and the streak stand out
         final Component message = MiniMessage.miniMessage().deserialize(selfOut
                         ? "<dark_red><bold>STREAK ENDED!</bold> <loser> took themselves out in the <arena>arena, losing their "
-                                + "<white><bold><streak></bold></white>-win streak. <winner> <wins><ws_str>!"
+                                + "<white><bold><streak></bold></white>-win streak<partner>. <winner> <wins><ws_str>!"
                         : "<dark_red><bold>STREAK ENDED!</bold> <winner> ended <loser><possessive> "
-                                + "<white><bold><streak></bold></white>-win streak in the <arena>arena<ws_str>!",
+                                + "<white><bold><streak></bold></white>-win streak<partner> in the <arena>arena<ws_str>!",
                 Placeholder.component("loser", loser.displayName()),
+                // 2v2: their teammate, " (teamed with Bot2)"
+                Placeholder.component("partner", partnerPart(loser, losers)),
                 // "Chris'" rather than "Chris's"
                 Placeholder.unparsed("possessive", Grammar.possessiveSuffix(loser.getName())),
                 Placeholder.component("winner", displayNames(winners)),
@@ -941,7 +950,7 @@ public class Fight {
                 Placeholder.unparsed("streak", String.valueOf(streak)),
                 // The winner's own streak, like the usual result message has
                 Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners)),
-                Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : this.arena.getArenaName() + " ")).hoverEvent(statsHover);
+                Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : Arena.displayName(this.arena.getArenaName()) + " ")).hoverEvent(statsHover);
 
         broadcast(message, winners, losers);
 
