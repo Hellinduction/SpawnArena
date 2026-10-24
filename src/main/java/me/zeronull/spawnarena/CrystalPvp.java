@@ -215,7 +215,7 @@ public final class CrystalPvp {
         if (inventory.getType() == org.bukkit.event.inventory.InventoryType.WORKBENCH) {
             final Location at = inventory.getLocation();
             return at != null && at.getBlock().getType() == Material.CRAFTING_TABLE && activeFight(arena) != null
-                    && !isOriginal(arena, at.getBlock());
+                    && placedInFight(arena, at.getBlock());
         }
         return canOpen(arena, inventory.getHolder(false));
     }
@@ -225,7 +225,20 @@ public final class CrystalPvp {
         if (holder instanceof org.bukkit.block.DoubleChest chest)
             return canOpen(arena, chest.getLeftSide()) && canOpen(arena, chest.getRightSide());
         return holder instanceof org.bukkit.block.Container container && container.getType() != Material.ENDER_CHEST
-                && activeFight(arena) != null && !isOriginal(arena, container.getBlock());
+                && activeFight(arena) != null && placedInFight(arena, container.getBlock());
+    }
+
+    /**
+     * Whether this block was put there during the fight: inside the arena, and not what was there when it started
+     * (a shulker put down where the floor was dug out counts too: that spot was dirt, not a shulker).
+     */
+    private static boolean placedInFight(final Arena arena, final Block block) {
+        if (!arena.equals(arenaAt(block)))
+            return false;
+        final Track track = TRACKS.get(arena);
+        final Snapshot snapshot = track == null ? null : track.snapshot;
+        final BlockData before = snapshot == null ? null : snapshot.at(block);
+        return before != null && before.getMaterial() != block.getType();
     }
 
     /**
@@ -493,6 +506,17 @@ public final class CrystalPvp {
     }
 
     /**
+     * Lit TNT and falling blocks still in the arena when it's put back: gone, so nothing goes off or lands in the next
+     * match (or on the floor that was just put back).
+     */
+    private static void removeLoose(final Arena arena, final org.bukkit.Chunk chunk) {
+        for (final Entity entity : chunk.getEntities())
+            if ((entity instanceof org.bukkit.entity.TNTPrimed || entity instanceof org.bukkit.entity.FallingBlock)
+                    && arena.equals(arenaAt(entity.getLocation())))
+                entity.remove();
+    }
+
+    /**
      * Puts this fight's arena back the way it was. Safe to call more than once, from any thread: each
      * crystal, item and block is dealt with on the thread that owns it (immediately on Paper). Done once the
      * returned future completes (the re-paste waits for it).
@@ -529,12 +553,18 @@ public final class CrystalPvp {
                 final Location at = new Location(world, p[0], snapshot.minY, p[2]);
                 if (!SpawnArena.INSTANCE.isEnabled()) {
                     // Shutting down: no other threads to hand work to, so it's all done here and now
-                    Threads.location(at, () -> setChanged(arena, world, snapshot, p, changedIn(world.getChunkAt(p[0] >> 4, p[2] >> 4)
-                            .getChunkSnapshot(false, false, false), snapshot, p)));
+                    Threads.location(at, () -> {
+                        removeLoose(arena, world.getChunkAt(p[0] >> 4, p[2] >> 4));
+                        setChanged(arena, world, snapshot, p, changedIn(world.getChunkAt(p[0] >> 4, p[2] >> 4)
+                                .getChunkSnapshot(false, false, false), snapshot, p));
+                    });
                     continue;
                 }
                 // Copy the chunk where it lives, find what changed off the server's threads, set only that back
-                pieces.add(Threads.supplyAt(at, () -> world.getChunkAt(p[0] >> 4, p[2] >> 4).getChunkSnapshot(false, false, false))
+                pieces.add(Threads.supplyAt(at, () -> {
+                            removeLoose(arena, world.getChunkAt(p[0] >> 4, p[2] >> 4));
+                            return world.getChunkAt(p[0] >> 4, p[2] >> 4).getChunkSnapshot(false, false, false);
+                        })
                         .thenApplyAsync(copy -> changedIn(copy, snapshot, p), OFF_THREAD)
                         .thenCompose(changed -> Threads.supplyAt(at, () -> {
                             setChanged(arena, world, snapshot, p, changed);
