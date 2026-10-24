@@ -42,12 +42,17 @@ public final class ArenaTeamPvPEvent implements Listener {
         e.setCancelled(false);
     }
 
-    /** No friendly fire between 2v2 teammates, whatever WorldGuard or other plugins allow. */
+    /**
+     * No friendly fire between 2v2 teammates, whatever WorldGuard or other plugins allow: hits, projectiles, and
+     * anything else a teammate is behind (a lingering potion's cloud, an explosion they set off...).
+     */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
-    public void onTeammateDamage(final EntityDamageByEntityEvent e) {
+    public void onTeammateDamage(final org.bukkit.event.entity.EntityDamageEvent e) {
         if (!(e.getEntity() instanceof Player defender)) return;
 
-        final Player attacker = resolveAttacker(e.getDamager());
+        Player attacker = e instanceof EntityDamageByEntityEvent byEntity ? resolveAttacker(byEntity.getDamager()) : null;
+        if (attacker == null && e.getDamageSource().getCausingEntity() != null)
+            attacker = resolveAttacker(e.getDamageSource().getCausingEntity());
         if (attacker == null || attacker.equals(defender)) return;
         if (!SpawnArena.arenas.hasActiveFight()) return;
 
