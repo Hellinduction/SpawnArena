@@ -127,7 +127,7 @@ public final class SettingsConfig {
     @Comment({"With LuckPerms: each arena's #1 on its Elo board gets this suffix (%arena% is the arena's name). Someone #1 in",
             "several arenas shows the one they got to first. Empty turns it off (and takes the suffixes off again).",
             "Colours are whatever your chat plugin reads in a LuckPerms suffix: &6 codes, or hex like &#FFD700."})
-    public String topEloSuffix = " &#FFD700&l#1 &#FFA62B%arena%";
+    public String topEloSuffix = " &#FFD700#1 &#FFA62B%arena%";
 
     @Comment("LuckPerms priority of that suffix: high, so it shows over any suffix a rank or other plugin gives")
     public int topEloSuffixPriority = 1000;
