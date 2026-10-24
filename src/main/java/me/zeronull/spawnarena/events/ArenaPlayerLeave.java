@@ -35,7 +35,12 @@ public class ArenaPlayerLeave implements Listener {
 
         // Their connection dropped (rather than them leaving): no loss, while they have lag-outs left today
         // (Not in a free-for-all: there, logging out is only a death if they were in combat)
-        final boolean laggedOut = !fight.isFfa()
+        // In arenas where touching water loses, only if they were standing on the platform when their game went quiet:
+        // someone already falling in could otherwise hold their game frozen until they're timed out for a draw
+        final long quiet = me.zeronull.spawnarena.LagOuts.quietMillis(player);
+        final boolean onPlatform = !arena.isDeathOnTouchLiquid() || quiet < 0
+                || ArenaTeleportGrace.onPlatformAt(player, arena, System.currentTimeMillis() - quiet);
+        final boolean laggedOut = !fight.isFfa() && onPlatform
                 && me.zeronull.spawnarena.LagOuts.looksLikeLagOut(event)
                 && fight.isFighter(player)
                 && me.zeronull.spawnarena.LagOuts.takeAllowance(player, fight);

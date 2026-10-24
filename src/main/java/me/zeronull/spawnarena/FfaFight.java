@@ -289,8 +289,16 @@ public final class FfaFight extends Fight {
 
     /** The spawn point furthest from everyone already fighting (either one when nobody is). */
     private Location pickSpawn() {
+        return this.pickSpawn(null);
+    }
+
+    /** As {@link #pickSpawn()}, not counting {@code except} (the one being placed) among those fighting. */
+    private Location pickSpawn(final Player except) {
         final Location a = this.arena.spawnPoint1, b = this.arena.spawnPoint2;
-        final List<Player> fighting = this.getFighters();
+        if (a == null || b == null)
+            return a != null ? a : b;
+        final List<Player> fighting = new ArrayList<>(this.getFighters());
+        fighting.remove(except);
         if (fighting.isEmpty())
             return java.util.concurrent.ThreadLocalRandom.current().nextBoolean() ? a : b;
         return nearestFighter(a, fighting) >= nearestFighter(b, fighting) ? a : b;
@@ -667,7 +675,10 @@ public final class FfaFight extends Fight {
                 });
     }
 
-    /** On the player's thread: if the arena came back around them, up to the nearest spot above where they fit. */
+    /**
+     * On the player's thread: if the arena came back around them, up to the nearest spot above where they fit, or (no
+     * room anywhere above, e.g. stuck in a wall) to the spawn point furthest from everyone else.
+     */
     private java.util.concurrent.CompletableFuture<Boolean> liftOut(final Player player) {
         if (!player.isOnline() || !this.alive.contains(player) || !player.collidesAt(player.getLocation()))
             return java.util.concurrent.CompletableFuture.completedFuture(false);
@@ -682,7 +693,13 @@ public final class FfaFight extends Fight {
                 return Threads.teleport(player, spot);
             }
         }
-        return java.util.concurrent.CompletableFuture.completedFuture(false);
+        final Location spawn = this.pickSpawn(player);
+        if (spawn == null)
+            return java.util.concurrent.CompletableFuture.completedFuture(false);
+        player.setFallDistance(0);
+        player.sendMessage(net.kyori.adventure.text.Component.text("You were stuck in the arena when it reset, so you were moved to a spawn point.",
+                net.kyori.adventure.text.format.NamedTextColor.YELLOW));
+        return Threads.teleport(player, spawn);
     }
 
     private void tellInside(final Component message, final Player except) {

@@ -811,6 +811,7 @@ public class Fight {
         try {
             FightGlow.remove(player);
             me.zeronull.spawnarena.events.EgapCooldown.clear(player);
+            me.zeronull.spawnarena.events.ArenaTeleportGrace.forgetSteps(player.getUniqueId()); // the next match starts afresh
             // The arrows stuck in them from the match (any they came in with stay, unless they've fallen out already)
             if (this.variant == SumoVariant.ARCHER && player.getArrowsInBody() > this.arrowsBefore.getOrDefault(player.getUniqueId(), 0))
                 player.setArrowsInBody(this.arrowsBefore.getOrDefault(player.getUniqueId(), 0));

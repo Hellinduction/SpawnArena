@@ -32,6 +32,79 @@ public final class ArenaTeleportGrace implements Listener {
      * fired (Folia), or when another plugin changes where one goes after we have.
      */
     private static final Map<UUID, Location> LAST_STEP = new ConcurrentHashMap<>();
+    /**
+     * When each fighter's last step came in; whether that step had them on solid ground (not in liquid); and when
+     * they were last on it (the step they left it). Standing still sends no steps, so it counts as still on the ground.
+     */
+    private static final Map<UUID, Long> LAST_STEP_AT = new ConcurrentHashMap<>();
+    private static final Map<UUID, Boolean> ON_GROUND = new ConcurrentHashMap<>();
+    private static final Map<UUID, Long> LAST_GROUNDED = new ConcurrentHashMap<>();
+    /**
+     * A save only if they stood on the ground this recently: someone already well on their way down (knocked off, or
+     * holding their game frozen while falling) isn't saved however their position then jumps.
+     */
+    private static final long GROUNDED_MILLIS = 1_200;
+    /** A jump between steps after the game sent nothing this long is a frozen or lagging game catching up, not a setback. */
+    private static final long FROZEN_GAP_MILLIS = 500;
+
+    /**
+     * For a lag-out where touching the liquid loses: whether, when their game went quiet ({@code at}), they were on the
+     * platform: on the ground at their last step, or just hopping (off it under HOP_MILLIS, no lower than the spawns'
+     * feet). Someone knocked off and on their way down when it went quiet wasn't.
+     */
+    public static boolean onPlatformAt(final Player player, final Arena arena, final long at) {
+        final UUID id = player.getUniqueId();
+        final Boolean grounded = ON_GROUND.get(id);
+        if (grounded == null || grounded)
+            return true; // on the ground at their last step (or no record: they haven't moved since they spawned)
+        final Long left = LAST_GROUNDED.get(id);
+        final Location last = LAST_STEP.get(id);
+        final Integer feet = arena.lowestSpawnY();
+        return left != null && at - left <= HOP_MILLIS && last != null && (feet == null || last.getY() >= feet - 0.5)
+                && groundBelow(last);
+    }
+
+    /** Solid ground (not liquid) a few blocks under this spot: above the platform, not over the water or lava. */
+    private static boolean groundBelow(final Location at) {
+        if (at.getWorld() == null || !at.isChunkLoaded() || !org.bukkit.Bukkit.isOwnedByCurrentRegion(at))
+            return true; // can't tell from here
+        for (int dy = 0; dy <= 4; dy++) {
+            final org.bukkit.block.Block block = at.getWorld().getBlockAt(at.getBlockX(), at.getBlockY() - dy, at.getBlockZ());
+            if (LiquidListener.inLiquid(block))
+                return false;
+            if (!block.isPassable())
+                return true;
+        }
+        return false;
+    }
+
+    private static final long HOP_MILLIS = 600;
+
+    /** Forgets their steps: they're out of the fight, or left or joined the server. */
+    public static void forgetSteps(final UUID id) {
+        LAST_STEP.remove(id);
+        LAST_STEP_AT.remove(id);
+        ON_GROUND.remove(id);
+        LAST_GROUNDED.remove(id);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void forgetOnQuit(final org.bukkit.event.player.PlayerQuitEvent e) {
+        forgetSteps(e.getPlayer().getUniqueId());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void forgetOnJoin(final org.bukkit.event.player.PlayerJoinEvent e) {
+        forgetSteps(e.getPlayer().getUniqueId());
+    }
+
+    /** Whether they stood on the ground within GROUNDED_MILLIS before {@code at} (true if we've no record to go by). */
+    public static boolean groundedShortlyBefore(final Player player, final long at) {
+        if (!Boolean.FALSE.equals(ON_GROUND.get(player.getUniqueId())))
+            return true; // on the ground at their last step (or no record)
+        final Long grounded = LAST_GROUNDED.get(player.getUniqueId());
+        return grounded == null || at - grounded <= GROUNDED_MILLIS;
+    }
     /** Moved further than this between two steps = teleported (knockback and falling move far less per step). */
     private static final double JUMP_SQUARED = 2.5 * 2.5;
     /** Until when a fighter's own ender pearl or chorus fruit may have moved them: those are their own doing. */
@@ -93,6 +166,8 @@ public final class ArenaTeleportGrace implements Listener {
         // A teleport we're told about isn't a jump between steps (only its cause decides whether there's a window)
         if (e.getTo() != null && runningFight(e.getPlayer()) != null)
             LAST_STEP.put(e.getPlayer().getUniqueId(), e.getTo().clone());
+        else
+            forgetSteps(e.getPlayer().getUniqueId()); // sent out of a fight (or never in one): a new one starts afresh
 
         final TeleportCause cause = e.getCause();
         if (cause != TeleportCause.PLUGIN && cause != TeleportCause.UNKNOWN)
@@ -107,7 +182,7 @@ public final class ArenaTeleportGrace implements Listener {
             return;
         // Only a teleport that put them in danger (or where we can't tell): one that left them somewhere safe isn't to
         // blame if they're knocked in afterwards
-        if (!intoDanger(fight, e.getTo()))
+        if (!intoDanger(fight, e.getTo()) || !groundedShortlyBefore(player, System.currentTimeMillis()))
             return;
 
         GRACE.put(player.getUniqueId(), new Grace(System.currentTimeMillis() + GRACE_MILLIS, safeSpot(fight, player, e.getFrom())));
@@ -120,7 +195,7 @@ public final class ArenaTeleportGrace implements Listener {
         final Player player = e.getPlayer();
         final Fight fight = runningFight(player);
         if (fight == null) {
-            LAST_STEP.remove(player.getUniqueId());
+            forgetSteps(player.getUniqueId());
             return;
         }
         // Our rescue is on its way: steps until they're there are from before it
@@ -131,8 +206,15 @@ public final class ArenaTeleportGrace implements Listener {
                 return;
             ARRIVING.remove(player.getUniqueId());
         }
-        noteJump(player, fight, e.getFrom());
+        final long now = System.currentTimeMillis();
+        final Long previous = LAST_STEP_AT.put(player.getUniqueId(), now);
+        if (previous == null || now - previous <= FROZEN_GAP_MILLIS)
+            noteJump(player, fight, e.getFrom());
         LAST_STEP.put(player.getUniqueId(), e.getTo().clone());
+        final boolean grounded = player.isOnGround() && !LiquidListener.inLiquid(e.getTo().getBlock());
+        final Boolean was = ON_GROUND.put(player.getUniqueId(), grounded);
+        if (grounded || !Boolean.FALSE.equals(was))
+            LAST_GROUNDED.put(player.getUniqueId(), now); // still on it, or this is the step they left it
     }
 
     /**
@@ -154,6 +236,8 @@ public final class ArenaTeleportGrace implements Listener {
             return; // the teleport event already opened one
         if (!intoDanger(fight, now))
             return; // moved somewhere safe: going in later is their own doing
+        if (!groundedShortlyBefore(player, System.currentTimeMillis()))
+            return; // already falling: on their way in anyway
         final Location safe = safeSpot(fight, player, last);
         if (safe != null)
             GRACE.put(id, new Grace(System.currentTimeMillis() + GRACE_MILLIS, safe));
