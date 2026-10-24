@@ -233,8 +233,10 @@ public final class FfaFight extends Fight {
         final int count;
         synchronized (this) {
             admitted = teleported && player.isOnline() && this.getState() == FightState.IN_FIGHT && arenasOpen() && this.joining.remove(player);
-            if (admitted)
+            if (admitted) {
                 this.alive.add(player);
+                this.fightingSince.put(player.getUniqueId(), System.currentTimeMillis());
+            }
             else
                 this.joining.remove(player);
             count = this.alive.size();
@@ -472,6 +474,7 @@ public final class FfaFight extends Fight {
             count = this.alive.size();
         }
         final UUID id = player.getUniqueId();
+        this.countFightTime(id);
         final List<UUID> credit = this.creditFor(player);
         this.lastCombat.remove(id);
         final int lostStreak = this.streaks.getOrDefault(id, 0);

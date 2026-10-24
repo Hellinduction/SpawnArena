@@ -36,6 +36,8 @@ public class Fight {
     private final boolean swapSides = java.util.concurrent.ThreadLocalRandom.current().nextBoolean();
     /** Players still in the match; eliminated players are restored and leave this set. */
     protected final Set<Player> alive = Collections.synchronizedSet(new LinkedHashSet<>());
+    /** When each fighter started fighting (the fight going live, or joining a free-for-all), for their fight time. */
+    protected final Map<UUID, Long> fightingSince = new java.util.concurrent.ConcurrentHashMap<>();
     protected final Map<UUID, PlayerPreFightData> preFightData = new java.util.concurrent.ConcurrentHashMap<>();
     /** Arrows already stuck in each player when they went in (Archer takes away only the match's own). */
     protected final Map<UUID, Integer> arrowsBefore = new java.util.concurrent.ConcurrentHashMap<>();
@@ -567,6 +569,9 @@ public class Fight {
                 return;
             this.fightState = FightState.IN_FIGHT;
         }
+        final long now = System.currentTimeMillis();
+        for (final Player p : this.getFighters())
+            this.fightingSince.put(p.getUniqueId(), now);
         this.stats.start();
         for (final Player p : this.getFighters())
             this.showFakeIce(p);
@@ -605,6 +610,7 @@ public class Fight {
                 return;
 
             this.eliminatedAt.put(player.getUniqueId(), player.getLocation().clone());
+            this.countFightTime(player.getUniqueId());
             team = getTeamOf(player);
             teamOut = team.stream().noneMatch(this.alive::contains);
             if (teamOut)
@@ -707,6 +713,16 @@ public class Fight {
     }
 
     /** Ends the match and restores everyone not yet restored (each on their own thread). */
+    /** Adds the time since they started fighting to their fight time in this arena (once: it's then forgotten). */
+    protected void countFightTime(final UUID id) {
+        final Long since = this.fightingSince.remove(id);
+        if (since == null || SpawnArena.statsManager == null)
+            return;
+        final long seconds = (System.currentTimeMillis() - since) / 1000;
+        final String arenaName = this.arena.getArenaName();
+        Threads.async(() -> SpawnArena.statsManager.addFightSeconds(id, arenaName, seconds));
+    }
+
     public void endFight() {
         synchronized (this) {
             if (this.fightState == FightState.OVER)
@@ -714,6 +730,8 @@ public class Fight {
             this.fightState = FightState.ENDING;
         }
 
+        for (final UUID id : new ArrayList<>(this.fightingSince.keySet()))
+            this.countFightTime(id);
         for (final Player p : this.getMembers()) {
             AnticheatExempt.remove(p.getUniqueId());
             ArenaProjectileDupeFix.discardProjectiles(p);

@@ -116,6 +116,8 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 sender.sendMessage(String.format("§6Stats for §e%s §6in §e%s§6: wins=§e%d §6losses=§e%d §6games=§e%d §6streak=§e%d §6best=§e%d §6elo=§e%d",
                         target.getName(), arena, wins, losses, wins + losses, streak, best, SpawnArena.statsManager.getElo(uuid, arena)));
                 sendLossesNote(sender);
+                sender.sendMessage("§6Time fighting here: §e" + me.zeronull.spawnarena.StatsManager.formatDuration(
+                        SpawnArena.statsManager.getField(uuid, arena, "fight_seconds")));
                 // Free-for-all, counted apart: shown for free-for-all arenas, or anywhere they've played one
                 final int ffaKills = SpawnArena.statsManager.getField(uuid, arena, "ffa_kills");
                 final int ffaDeaths = SpawnArena.statsManager.getField(uuid, arena, "ffa_deaths");

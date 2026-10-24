@@ -114,6 +114,7 @@ public final class LeaderboardHolograms {
             case "ffa_kills" -> "FFA Kills";
             case "ffa_deaths" -> "FFA Deaths";
             case "ffa_streak" -> "Best FFA Kill Streak";
+            case "playtime" -> "Time Fighting";
             default -> "Wins";
         };
     }

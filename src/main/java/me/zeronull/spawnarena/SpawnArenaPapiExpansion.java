@@ -44,7 +44,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         final boolean rank = params.startsWith("my_rank_");
         final String rest = params.substring(rank ? "my_rank_".length() : "my_value_".length());
         String stat = null;
-        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo"})
+        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "playtime"})
             if (rest.endsWith("_" + s)) { stat = s; break; }
         if (stat == null)
             return null;
@@ -55,7 +55,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             return "...";
         if (rank)
             return standing.rank() > 0 ? "#" + standing.rank() : "unranked";
-        return String.valueOf(standing.value());
+        return stat.equals("playtime") ? StatsManager.formatDuration(standing.value()) : String.valueOf(standing.value());
     }
 
     private List<StatsManager.LeaderboardEntry> cachedTop(String arena, String field) {
@@ -142,7 +142,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
                 final StatsManager.LeaderboardEntry entry = top.get(idx);
                 return switch (subType) {
                     case "player" -> entry.name();
-                    case "value" -> String.valueOf(entry.value());
+                    case "value" -> dbField.equals("fight_seconds") ? StatsManager.formatDuration(entry.value()) : String.valueOf(entry.value());
                     default -> null;
                 };
             }
@@ -256,6 +256,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             case "ffa_kills" -> "ffa_kills";
             case "ffa_deaths" -> "ffa_deaths";
             case "ffa_streak" -> "ffa_best_streak";
+            case "playtime" -> "fight_seconds";
             default -> null;
         };
     }

@@ -139,5 +139,5 @@ public final class SettingsConfig {
             "msg", "tell", "whisper", "w", "m", "t", "pm", "dm", "message", "r", "reply", "ignore", "unignore",
             "msgtoggle", "togglemsg",
             "kick", "ban", "tempban", "ipban", "banip", "tempipban", "mute", "tempmute", "ipmute", "tempipmute",
-            "warn", "unban", "unmute", "unwarn", "history", "checkban", "checkmute", "report", "helpop"));
+            "warn", "unban", "unmute", "unwarn", "history", "checkban", "checkmute", "checkwarn", "alts", "report", "helpop"));
 }

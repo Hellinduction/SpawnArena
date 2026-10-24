@@ -163,6 +163,9 @@ public class StatsManager {
             // Rated fights played, for eloMinGames (counted from when this column was added)
             if (!hasColumn(c, "arena_stats", "elo_games"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN elo_games INT NOT NULL DEFAULT 0");
+            // Seconds spent fighting there (counted from when this column was added)
+            if (!hasColumn(c, "arena_stats", "fight_seconds"))
+                s.execute("ALTER TABLE arena_stats ADD COLUMN fight_seconds INT NOT NULL DEFAULT 0");
             s.execute("CREATE TABLE IF NOT EXISTS arena_rewards (" +
                     "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
                     "uuid VARCHAR(36) NOT NULL, " +
@@ -1490,6 +1493,35 @@ public class StatsManager {
     }
 
     /** Upserts a single stat field. */
+    /** Adds time spent fighting in this arena (whole seconds; anything under one isn't counted). */
+    public void addFightSeconds(final UUID uuid, final String arena, final long seconds) {
+        if (seconds <= 0)
+            return;
+        ensure(uuid, arena);
+        final String sql = "UPDATE arena_stats SET fight_seconds = fight_seconds + ? WHERE server_id=" + sid + " AND uuid=? AND arena=?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setInt(1, (int) Math.min(Integer.MAX_VALUE, seconds));
+            ps.setString(2, uuid.toString());
+            ps.setString(3, arena.toLowerCase());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] addFightSeconds: " + e.getMessage());
+        }
+        invalidateLeaderboards();
+    }
+
+    /** "3h 12m", "45m", "20s" for a number of seconds. */
+    public static String formatDuration(final long seconds) {
+        if (seconds < 60)
+            return seconds + "s";
+        final long minutes = seconds / 60;
+        if (minutes < 60)
+            return minutes + "m";
+        final long hours = minutes / 60;
+        return hours + "h " + (minutes % 60) + "m";
+    }
+
     public void setField(UUID uuid, String arena, String field, int value) {
         ensure(uuid, arena);
         // A changed value counts as reached now, for leaderboard tie-breaks
@@ -1683,13 +1715,14 @@ public class StatsManager {
         props.setProperty("user", "sa");
         props.setProperty("password", "");
 
-        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses, ffa_kills, ffa_deaths, ffa_best_streak, ffa_kills_at, ffa_best_at, elo_games) " +
-                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses, ffa_kills, ffa_deaths, ffa_best_streak, ffa_kills_at, ffa_best_at, elo_games, fight_seconds) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak), " +
                 "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at), " +
                 "lost_streak = VALUES(lost_streak), lost_at = VALUES(lost_at), elo = VALUES(elo), elo_at = VALUES(elo_at), losses = VALUES(losses), " +
                 "ffa_kills = VALUES(ffa_kills), ffa_deaths = VALUES(ffa_deaths), ffa_best_streak = VALUES(ffa_best_streak), " +
-                "ffa_kills_at = VALUES(ffa_kills_at), ffa_best_at = VALUES(ffa_best_at), elo_games = VALUES(elo_games)";
+                "ffa_kills_at = VALUES(ffa_kills_at), ffa_best_at = VALUES(ffa_best_at), elo_games = VALUES(elo_games), " +
+                "fight_seconds = VALUES(fight_seconds)";
 
         int copied = 0;
         try (Connection h2 = new org.h2.Driver().connect(h2FileUrl() + ";IFEXISTS=TRUE", props);
@@ -1700,6 +1733,7 @@ public class StatsManager {
                      + (hasColumn(h2, "arena_stats", "elo") ? ", elo" : ", " + START_ELO + " AS elo") + reachedAtSelect(h2, "elo_at") + reachedAtSelect(h2, "losses")
                      + reachedAtSelect(h2, "ffa_kills") + reachedAtSelect(h2, "ffa_deaths") + reachedAtSelect(h2, "ffa_best_streak")
                      + reachedAtSelect(h2, "ffa_kills_at") + reachedAtSelect(h2, "ffa_best_at") + reachedAtSelect(h2, "elo_games")
+                     + reachedAtSelect(h2, "fight_seconds")
                      + " FROM arena_stats");
              Connection target = dataSource.getConnection()) {
 
@@ -1725,6 +1759,7 @@ public class StatsManager {
                     ps.setLong(17, rs.getLong("ffa_kills_at"));
                     ps.setLong(18, rs.getLong("ffa_best_at"));
                     ps.setInt(19, rs.getInt("elo_games"));
+                    ps.setInt(20, rs.getInt("fight_seconds"));
                     ps.addBatch();
                     if (++copied % 500 == 0)
                         ps.executeBatch();
