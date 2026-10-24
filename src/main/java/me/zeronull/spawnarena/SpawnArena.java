@@ -74,6 +74,7 @@ public class SpawnArena extends JavaPlugin {
 
         // Undo anything a crash left in crystal arenas, then keep the crash-safety file up to date
         CrystalPvp.restoreLeftovers();
+        TopEloSuffix.start();
         CrystalPvp.startSaving();
     }
 

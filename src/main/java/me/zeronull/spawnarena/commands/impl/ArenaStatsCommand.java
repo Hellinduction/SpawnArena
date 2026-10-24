@@ -162,6 +162,8 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 audit(sender, target, arena, field, old, value, "set");
                 sender.sendMessage(String.format("§aSet §e%s §afor §e%s §ain §e%s §ato §e%d",
                         stat, target.getName(), arena, value));
+                if (field.equals("elo"))
+                    me.zeronull.spawnarena.TopEloSuffix.refreshLater(); // may change who's #1
             }
             case "reset" -> {
                 // elo_games too: off the Elo board again until they've played enough rated games
@@ -176,6 +178,7 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 if (oldElo != me.zeronull.spawnarena.StatsManager.START_ELO)
                     audit(sender, target, arena, "elo", oldElo, me.zeronull.spawnarena.StatsManager.START_ELO, "reset");
                 sender.sendMessage(String.format("§aReset all stats for §e%s §ain §e%s", target.getName(), arena));
+                me.zeronull.spawnarena.TopEloSuffix.refreshLater();
             }
             default -> sender.sendMessage("§cUnknown subcommand. Use: get, set, reset, resetcooldown, payouts, log, rollback, players, migrate");
         }

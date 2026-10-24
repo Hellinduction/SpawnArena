@@ -13,6 +13,7 @@ softdepend:
   - TAB
   - Parkour
   - bunnyAC
+  - LuckPerms
 folia-supported: true
 
 commands:
