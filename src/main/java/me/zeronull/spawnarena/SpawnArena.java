@@ -156,6 +156,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("arenawins", new ArenaWinsCommand());
         this.registerCommand("leavearena", new me.zeronull.spawnarena.commands.impl.LeaveArenaCommand());
         this.registerCommand("arenadrop", new me.zeronull.spawnarena.commands.impl.ArenaDropCommand());
+        this.registerCommand("arenabuild", new me.zeronull.spawnarena.commands.impl.ArenaBuildCommand());
         this.registerCommand("arenabet", new me.zeronull.spawnarena.commands.impl.ArenaBetCommand());
         this.registerCommand("arenasetup", new me.zeronull.spawnarena.commands.impl.ArenaSetupCommand());
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {

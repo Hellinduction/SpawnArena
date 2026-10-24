@@ -724,6 +724,12 @@ public final class ArenaWizard {
                 // safe itself: only blocks placed in the fight, and the diggable floor, can be blown up
                 region.setFlag(com.sk89q.worldguard.protection.flags.Flags.OTHER_EXPLOSION, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
                 region.setFlag(com.sk89q.worldguard.protection.flags.Flags.TNT, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
+                // Dug dirt grows its grass back, and fighters get hungry (whatever the regions around it say)
+                region.setFlag(com.sk89q.worldguard.protection.flags.Flags.GRASS_SPREAD, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
+                // (not in WorldGuard's Flags class: found by name, and skipped on a WorldGuard without it)
+                if (com.sk89q.worldguard.WorldGuard.getInstance().getFlagRegistry().get("natural-hunger-drain")
+                        instanceof com.sk89q.worldguard.protection.flags.StateFlag hunger)
+                    region.setFlag(hunger, com.sk89q.worldguard.protection.flags.StateFlag.State.ALLOW);
             }
             regions.addRegion(region);
             regions.save();

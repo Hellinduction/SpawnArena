@@ -488,6 +488,10 @@ public final class CrystalArenaListener implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onSpread(final BlockSpreadEvent e) {
+        // Grass (and mycelium) growing back over dirt is fine: the arena is put back after the fight anyway
+        final Material grows = e.getNewState().getType();
+        if (grows == Material.GRASS_BLOCK || grows == Material.MYCELIUM)
+            return;
         if (this.duringFight(e.getBlock().getLocation()))
             e.setCancelled(true);
     }
@@ -743,7 +747,28 @@ public final class CrystalArenaListener implements Listener {
      * is on, and everyone but staff (to edit the arena) otherwise.
      */
     private static boolean isOutsider(final Arena arena, final Player player) {
+        if (me.zeronull.spawnarena.commands.impl.ArenaBuildCommand.isOn(player))
+            return false;
         return CrystalPvp.activeFight(arena) != null || !player.hasPermission(BUILD_BYPASS_PERMISSION);
+    }
+
+    /**
+     * Someone who isn't fighting there pearling into a crystal arena, or into its walls (it would leave them stuck in
+     * them): the pearl just stops. Done as it lands, as Folia doesn't fire teleport events.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onOutsiderPearl(final org.bukkit.event.entity.ProjectileHitEvent e) {
+        if (!(e.getEntity() instanceof org.bukkit.entity.EnderPearl pearl) || !(pearl.getShooter() instanceof Player player))
+            return;
+        final Location lands = pearl.getLocation();
+        final Arena arena = CrystalPvp.arenaNear(lands, 3);
+        if (arena == null || CrystalPvp.isActiveFighter(arena, player) || me.zeronull.spawnarena.commands.impl.ArenaBuildCommand.isOn(player))
+            return;
+        if (!arena.equals(CrystalPvp.arenaAt(lands)) && !player.collidesAt(lands))
+            return; // around it, somewhere they fit (on the spectators' deck...)
+        e.setCancelled(true);
+        pearl.remove();
+        me.zeronull.spawnarena.Threads.entity(player, () -> this.tell(player, "You can't pearl into the arena."));
     }
 
     private boolean duringFight(final Location loc) {

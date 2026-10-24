@@ -119,6 +119,12 @@ commands:
     permission: spawnarena.allowdropinfight
     permission-message: "§cYou don't have permission!"
 
+  arenabuild:
+    description: Switch arena build mode on or off for yourself (staff) - build in crystal arenas, drop items into arenas, open fighters' containers
+    usage: "/arenabuild"
+    permission: spawnarena.arenabuild
+    permission-message: "§cYou don't have permission!"
+
   leavearena:
     description: Leave a free-for-all arena (only out of combat)
     usage: "/leavearena"
@@ -184,4 +190,7 @@ permissions:
     default: true
   spawnarena.allowdropinfight:
     description: Can use /arenadrop to drop items in arena fights (off until they switch it on)
+    default: op
+  spawnarena.arenabuild:
+    description: Can use /arenabuild to build in crystal arenas, drop items into arenas and open fighters' containers (off until they switch it on)
     default: op

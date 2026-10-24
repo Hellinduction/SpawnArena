@@ -310,6 +310,16 @@ public final class CrystalPvp {
     // ── Queries ─────────────────────────────────────────────────────────────
 
     /** The crystal PvP arena whose region contains this location, or null. Cheap when there are none. */
+    /** The crystal arena whose region is within {@code margin} blocks of loc (so its walls count too), or null. */
+    public static Arena arenaNear(final Location loc, final int margin) {
+        if (loc == null || loc.getWorld() == null || SpawnArena.arenas == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
+            return null;
+        for (final Arena arena : SpawnArena.arenas)
+            if (arena.isCrystalPvp() && Regions.contains(arena, loc, margin))
+                return arena;
+        return null;
+    }
+
     public static Arena arenaAt(final Location loc) {
         if (loc == null || loc.getWorld() == null || SpawnArena.arenas == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
             return null;

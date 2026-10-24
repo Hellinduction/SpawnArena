@@ -124,9 +124,12 @@ public final class SettingsConfig {
             "anticheat checks at all for that match."})
     public boolean iceRinkAnticheatExempt = true;
 
-    @Comment({"Commands fighters can still use mid-fight (all others are blocked): messaging and the like. Each one's aliases",
-            "are allowed too (e.g. msg also lets through tell, w and whisper if the plugin that owns it registers them)."})
+    @Comment({"Commands fighters can still use mid-fight (all others are blocked): messaging, and staff punishing someone",
+            "(players without the permission just get the usual \"no permission\"). Each one's aliases are allowed too (e.g. msg",
+            "also lets through tell, w and whisper if the plugin that owns it registers them)."})
     public java.util.List<String> fightAllowedCommands = new java.util.ArrayList<>(java.util.List.of(
             "msg", "tell", "whisper", "w", "m", "t", "pm", "dm", "message", "r", "reply", "ignore", "unignore",
-            "msgtoggle", "togglemsg"));
+            "msgtoggle", "togglemsg",
+            "kick", "ban", "tempban", "ipban", "banip", "tempipban", "mute", "tempmute", "ipmute", "tempipmute",
+            "warn", "unban", "unmute", "unwarn", "history", "checkban", "checkmute", "report", "helpop"));
 }

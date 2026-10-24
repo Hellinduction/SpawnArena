@@ -18,6 +18,19 @@ public final class ArenaInventoryOpenEvent implements Listener {
 
         final Player player = (Player) humanEntity;
 
+        // Onlookers can't open anything in a crystal arena (containers fighters placed, crafting tables...): a fighter's
+        // things there are copies that go when the fight ends, so taking them out would be a dupe. Staff with
+        // /arenabuild on can
+        final org.bukkit.Location at = e.getInventory().getLocation();
+        if (at != null && at.getWorld() != null) {
+            final Arena there = CrystalPvp.arenaAt(at);
+            if (there != null && !CrystalPvp.isActiveFighter(there, player)
+                    && !me.zeronull.spawnarena.commands.impl.ArenaBuildCommand.isOn(player)) {
+                e.setCancelled(true);
+                return;
+            }
+        }
+
         if (!SpawnArena.arenas.hasActiveFight())
             return;
 
