@@ -40,6 +40,22 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             return true;
         }
 
+        // Combo on/off for any arena (from the next hit), from anywhere
+        if (args.length >= 2 && args[1].equalsIgnoreCase("combo")) {
+            final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
+            if (!(found instanceof SavableArena savable)) {
+                sender.sendMessage(ChatColor.RED + "That arena was not found.");
+                return true;
+            }
+            final boolean on = !savable.isCombo();
+            savable.setCombo(on);
+            savable.save(config -> config.combo = on);
+            sender.sendMessage(on
+                    ? ChatColor.GREEN + "Combo is on for " + savable.getArenaName() + ": no hit delay and softer knockback in every fight there."
+                    : ChatColor.YELLOW + "Combo is off for " + savable.getArenaName() + ".");
+            return true;
+        }
+
         // Free-for-all on/off works from anywhere, the console included
         if (args.length >= 2 && args[1].equalsIgnoreCase("ffa")) {
             final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
@@ -57,7 +73,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
         }
 
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa|random]"));
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa|random|combo]"));
             return true;
         }
 
@@ -146,7 +162,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             // "random" only for sumo arenas (or one that somehow has it on, to turn it off)
             final me.zeronull.spawnarena.Arena arena = SpawnArena.arenas.of(args[0]);
             final boolean sumo = arena != null && (arena.isDeathOnTouchLiquid() || arena.isRandomSumo());
-            return (sumo ? java.util.List.of("ffa", "random") : java.util.List.of("ffa")).stream()
+            return (sumo ? java.util.List.of("ffa", "random", "combo") : java.util.List.of("ffa", "combo")).stream()
                     .filter(o -> o.startsWith(args[1].toLowerCase())).toList();
         }
         return super.onTabComplete(sender, command, label, args);

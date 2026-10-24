@@ -12,6 +12,18 @@ public abstract class ArenaOptions {
     private volatile boolean ffa;
     private volatile boolean randomSumo;
 
+    private volatile boolean combo;
+
+    /** Combo rules for every fight here: no hit delay, softer knockback (see SumoCombo). */
+    public boolean isCombo() {
+        return this.combo;
+    }
+
+    public ArenaOptions setCombo(final boolean value) {
+        this.combo = value;
+        return this;
+    }
+
     public boolean isRandomSumo() {
         return this.randomSumo;
     }

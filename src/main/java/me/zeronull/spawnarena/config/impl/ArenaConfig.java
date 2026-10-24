@@ -86,6 +86,10 @@ public final class ArenaConfig {
             "Replaces giveKnockBackStick when on."})
     public boolean randomSumo = false;
 
+    @Comment({"Combo: every fight here has no hit delay (hits chain into combos) and softer knockback, like random sumo's",
+            "Combo variant. Toggle with /togglearenamode <arena> combo."})
+    public boolean combo = false;
+
     @Comment("Mode of the arena: SINGLE, MULTI")
     public String arenaMode = ArenaMode.SINGLE.toString();
 

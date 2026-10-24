@@ -32,8 +32,8 @@ commands:
     permission: spawnarena.createarena
     permission-message: "§cYou don't have permission!"
   togglearenamode:
-    description: Switch an arena between SINGLE and MULTI or free-for-all on and off with "ffa" (only while it's empty), or random sumo variants on and off with "random" (sumo arenas only, from the next match)
-    usage: "/togglearenamode <arena> [ffa|random]"
+    description: Switch an arena between SINGLE and MULTI or free-for-all on and off with "ffa" (only while it's empty), or random sumo variants on and off with "random" (sumo arenas only, from the next match), or combo (no hit delay, softer knockback) on and off with "combo"
+    usage: "/togglearenamode <arena> [ffa|random|combo]"
     permission: spawnarena.togglearenamode
     permission-message: "§cYou don't have permission!"
   setupfight:

@@ -162,7 +162,7 @@ public final class LagOuts implements Listener {
     }
 
     /** The player's netty channel, found by type (server internals, so not by name). */
-    private static Channel channelOf(final Player player) throws ReflectiveOperationException {
+    static Channel channelOf(final Player player) throws ReflectiveOperationException {
         final Object handle = player.getClass().getMethod("getHandle").invoke(player);
         final Object listener = fieldOfType(handle, "net.minecraft.server.network.ServerGamePacketListenerImpl");
         if (listener == null)

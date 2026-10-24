@@ -40,9 +40,10 @@ public class ArenaDropItemEvent implements Listener {
         final boolean awaitingRestore = me.zeronull.spawnarena.Fight.AWAITING_RESTORE.contains(player.getUniqueId());
 
         // Someone who isn't fighting (standing in a crystal arena's walls, at the edge of an arena...) can't drop their
-        // own things into it, unless they're staff with /arenabuild on
+        // own things into it, unless they're staff with /arenabuild or /arenadrop on
         if (!awaitingRestore && !SpawnArena.arenas.hasFighter(player) && intoArena(player)
-                && !me.zeronull.spawnarena.commands.impl.ArenaBuildCommand.isOn(player)) {
+                && !me.zeronull.spawnarena.commands.impl.ArenaBuildCommand.isOn(player)
+                && !me.zeronull.spawnarena.commands.impl.ArenaDropCommand.mayDropInFight(player)) {
             event.setCancelled(true);
             player.sendMessage(ChatColor.RED + "You can't drop items into the arena.");
             return;

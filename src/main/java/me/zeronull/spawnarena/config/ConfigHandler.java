@@ -122,6 +122,7 @@ public class ConfigHandler {
             arena.setCrystalPvp(config.crystalPvp);
             arena.setFfa(config.ffa);
             arena.setRandomSumo(config.randomSumo);
+            arena.setCombo(config.combo);
             arena.setWinReward(config.winReward, config.winRewardCooldownMinutes);
             arena.setLeaderReward(config.leaderRewardMultiplier, config.leaderRewardCooldownMinutes);
             arena.setPodiumRewards(config.secondRewardMultiplier, config.secondRewardCooldownMinutes,

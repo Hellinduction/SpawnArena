@@ -51,6 +51,7 @@ public class SpawnArena extends JavaPlugin {
         ProxyBridge.enable();
         FightGlow.cleanUpOnEnable();
         LagOuts.watchOnline();
+        MatchSounds.installOnline();
         // Bets held by fights that never finished (crash/shutdown) go back; a bit later, as the economy
         // plugin may register after this one
         Threads.globalLater(() -> {
@@ -116,6 +117,7 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new QueueMenuListener(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.ThrownTridents(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new LagOuts(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new MatchSounds(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new FightGlow(), this);
 
         if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
@@ -182,6 +184,7 @@ public class SpawnArena extends JavaPlugin {
         AnticheatExempt.stop();
         me.zeronull.spawnarena.config.ConfigHandler.getInstance().flushPreFights();
         LagOuts.unwatchAll();
+        MatchSounds.uninstallAll();
         if (statsManager != null) statsManager.close();
     }
 

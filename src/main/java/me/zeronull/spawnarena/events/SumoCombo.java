@@ -55,7 +55,7 @@ public final class SumoCombo implements Listener {
             return false;
         final Arena arena = SpawnArena.arenas.of(victim);
         final Fight fight = arena == null ? null : arena.getFight(victim);
-        return fight != null && fight.getVariant() == SumoVariant.COMBO && fight.getState() == FightState.IN_FIGHT
+        return fight != null && (fight.getVariant() == SumoVariant.COMBO || arena.isCombo()) && fight.getState() == FightState.IN_FIGHT
                 && fight.areOpponents(attacker, victim);
     }
 }
