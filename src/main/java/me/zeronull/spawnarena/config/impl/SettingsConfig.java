@@ -118,6 +118,11 @@ public final class SettingsConfig {
             "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud", "sand", "gravel", "netherrack", "obsidian", "stone",
             "coal_ore", "copper_ore", "iron_ore", "lapis_ore", "gold_ore", "redstone_ore", "diamond_ore", "emerald_ore"));
 
+    @Comment({"Crystal arenas in free-for-all: the arena is put back as it was every this many minutes while people are in",
+            "it (with a 10 second warning; anyone the floor comes back around is moved up to where they fit). 0 = only when",
+            "everyone has left."})
+    public int crystalFfaResetMinutes = 5;
+
     @Comment({"With bunnyAC installed: MULTI Ice Rink and Moon Gravity players are taken out of bunnyAC for their match (it",
             "flags the sliding, as it sees the real floor, and the moon jumps), and put back as soon as they're out.",
             "Staff-exempted players are left alone. Until bunnyAC can exempt players from single checks, this means no",
@@ -128,6 +133,10 @@ public final class SettingsConfig {
             "several arenas shows the one they got to first. Empty turns it off (and takes the suffixes off again).",
             "Colours are whatever your chat plugin reads in a LuckPerms suffix: &6 codes, or hex like &#FFD700."})
     public String topEloSuffix = " &#FFD700#1 &#FFA62B%arena%";
+
+    @Comment({"Also give the tag as a LuckPerms suffix (true), or only as the %spawnarena_top_elo% placeholder (false), to put",
+            "where you want it (e.g. TAB's tagsuffix/tabsuffix). A suffix gets picked up by every plugin that shows suffixes."})
+    public boolean topEloLuckPermsSuffix = false;
 
     @Comment("LuckPerms priority of that suffix: high, so it shows over any suffix a rank or other plugin gives")
     public int topEloSuffixPriority = 1000;

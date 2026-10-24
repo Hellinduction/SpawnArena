@@ -19,6 +19,13 @@ public final class TopEloSuffix {
     private static final Map<String, Holder> HOLDERS = new LinkedHashMap<>();
     /** Player -> the suffix SpawnArena gave them (exactly as given, so it can be removed). */
     private static final Map<UUID, String> GIVEN = new HashMap<>();
+    /** Player -> their #1 tag right now (what %spawnarena_top_elo% shows). */
+    private static final Map<UUID, String> TAGS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The #1 tag for this player (" #1 CrystalPvP" in topEloSuffix's colours), or "" if they're #1 nowhere. */
+    public static String tagOf(final UUID uuid) {
+        return TAGS.getOrDefault(uuid, "");
+    }
     private static volatile boolean loaded;
     private static volatile boolean warned;
 
@@ -37,7 +44,7 @@ public final class TopEloSuffix {
 
     private static synchronized void refresh() {
         try {
-            if (!luckPermsPresent() || SpawnArena.arenas == null || SpawnArena.statsManager == null)
+            if (SpawnArena.arenas == null || SpawnArena.statsManager == null)
                 return;
             load();
             final String format = SpawnArena.settings == null ? "" : SpawnArena.settings.topEloSuffix;
@@ -75,6 +82,18 @@ public final class TopEloSuffix {
                     }
                 }
 
+            TAGS.keySet().retainAll(wanted.keySet());
+            TAGS.putAll(wanted);
+
+            // As a LuckPerms suffix too, only if asked for (topEloLuckPermsSuffix): otherwise any given before come off
+            final boolean asSuffix = SpawnArena.settings != null && SpawnArena.settings.topEloLuckPermsSuffix && luckPermsPresent();
+            if (!asSuffix)
+                wanted.clear();
+            if (!luckPermsPresent()) {
+                if (changed)
+                    save();
+                return;
+            }
             final java.util.Set<UUID> everyone = new java.util.HashSet<>(GIVEN.keySet());
             everyone.addAll(wanted.keySet());
             for (final UUID uuid : everyone) {

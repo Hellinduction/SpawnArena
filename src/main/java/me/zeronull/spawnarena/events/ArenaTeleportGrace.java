@@ -105,6 +105,10 @@ public final class ArenaTeleportGrace implements Listener {
         final Fight fight = runningFight(player);
         if (fight == null || fight.isSpawnTeleport(player, e.getTo()))
             return;
+        // Only a teleport that put them in danger (or where we can't tell): one that left them somewhere safe isn't to
+        // blame if they're knocked in afterwards
+        if (!intoDanger(fight, e.getTo()))
+            return;
 
         GRACE.put(player.getUniqueId(), new Grace(System.currentTimeMillis() + GRACE_MILLIS, safeSpot(fight, player, e.getFrom())));
     }
@@ -148,9 +152,20 @@ public final class ArenaTeleportGrace implements Listener {
         final Grace open = GRACE.get(id);
         if (open != null && System.currentTimeMillis() <= open.until())
             return; // the teleport event already opened one
+        if (!intoDanger(fight, now))
+            return; // moved somewhere safe: going in later is their own doing
         final Location safe = safeSpot(fight, player, last);
         if (safe != null)
             GRACE.put(id, new Grace(System.currentTimeMillis() + GRACE_MILLIS, safe));
+    }
+
+    /** Whether being moved to {@code to} put them in or over lava (or losing water), or we can't read it to tell. */
+    private static boolean intoDanger(final Fight fight, final Location to) {
+        if (to == null || to.getWorld() == null)
+            return false;
+        if (!to.isChunkLoaded() || !org.bukkit.Bukkit.isOwnedByCurrentRegion(to))
+            return true;
+        return dangerAtOrBelow(fight.getArena(), to) || LiquidListener.inLiquid(to.getBlock());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

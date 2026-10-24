@@ -13,7 +13,6 @@ import org.bukkit.potion.PotionEffect;
 import org.json.JSONObject;
 
 import java.io.IOException;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -41,6 +40,8 @@ public final class PlayerPreFightData {
     public PlayerPreFightData(Player player) {
         this.player = player;
         this.username = this.player.getName();
+        // Eating something of their own as the fight starts: stopped, so it can't finish on the fight's things instead
+        player.clearActiveItem();
         // Their own things on the cursor or in the crafting grid are kept with the rest (given back after the fight):
         // whatever is in either when it ends is the fight's, and is thrown away
         final ItemStack cursor = player.getItemOnCursor();
@@ -124,7 +125,10 @@ public final class PlayerPreFightData {
         if (this.player == null || !this.player.isOnline())
             throw new IllegalStateException(String.format("Failed to restore PlayerPreFightData for %s because they were offline", this.username));
 
-        ArenaPlayerConsumeEvent.PLAYER_FINISH_GAME_MAP.put(this.player.getUniqueId(), Instant.now().getEpochSecond());
+        ArenaPlayerConsumeEvent.PLAYER_FINISH_GAME_MAP.put(this.player.getUniqueId(), System.currentTimeMillis());
+        // Eating (or drinking, or drawing a bow) when the fight ended: stopped, or it would finish on whatever of their
+        // own is in that slot once their things are back
+        this.player.clearActiveItem();
 
         // Whatever is on their cursor or in a crafting grid (theirs, or a crafting table they placed in a crystal fight)
         // now came from the fight (both were emptied into their inventory before it was saved): closing the inventory

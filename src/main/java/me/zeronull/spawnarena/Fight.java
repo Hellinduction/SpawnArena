@@ -122,7 +122,7 @@ public class Fight {
     protected void giveKit(final Player fighter) {
         if (this.variant != null)
             this.variant.equip(fighter, this.arena);
-        else if (this.arena.isGiveKnockBackStick())
+        else if (this.arena.isGiveKnockBackStick() && !this.arena.isCombo()) // combo arenas: fists
             fighter.getInventory().addItem(SlapFish.create());
         else
             return;

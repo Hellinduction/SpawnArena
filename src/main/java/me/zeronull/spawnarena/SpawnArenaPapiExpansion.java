@@ -78,6 +78,9 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
     public @Nullable String onPlaceholderRequest(Player player, @NotNull String params) {
         if (params.startsWith("reward_"))
             return reward(player, params.substring("reward_".length()));
+        // The #1 Elo tag: " #1 CrystalPvP" (legacy & / &#hex colours), or "" if they're #1 nowhere
+        if (params.equals("top_elo"))
+            return player == null ? "" : TopEloSuffix.tagOf(player.getUniqueId());
         if (params.startsWith("my_rank_") || params.startsWith("my_value_"))
             return standing(player, params);
         if (params.startsWith("queue_") || params.startsWith("matches_"))

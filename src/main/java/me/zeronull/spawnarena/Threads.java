@@ -124,6 +124,9 @@ public final class Threads {
 
         final CompletableFuture<Boolean> result = new CompletableFuture<>();
         final Runnable teleport = () -> {
+            // Whatever they were eating or drinking (or a bow they were drawing) stops: it mustn't finish after the
+            // teleport, when their inventory may have changed
+            player.clearActiveItem();
             if (!FOLIA) {
                 result.complete(player.teleport(to)); // Paper: instant, as it's always been
                 return;

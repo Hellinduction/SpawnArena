@@ -50,6 +50,17 @@ public final class CrystalArenaListener implements Listener {
 
     // ── Building ────────────────────────────────────────────────────────────
 
+    /**
+     * Spawners can't go down in a crystal arena at all, refused before any spawner plugin sees the place (they record
+     * placed spawners). onPlace below says why.
+     */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void noSpawners(final BlockPlaceEvent e) {
+        final Material type = e.getBlockPlaced().getType();
+        if ((type == Material.SPAWNER || type == Material.TRIAL_SPAWNER) && CrystalPvp.arenaAt(e.getBlockPlaced()) != null)
+            e.setCancelled(true);
+    }
+
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlace(final BlockPlaceEvent e) {
         final Block block = e.getBlockPlaced();

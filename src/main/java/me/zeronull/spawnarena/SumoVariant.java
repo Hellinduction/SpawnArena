@@ -193,10 +193,16 @@ public enum SumoVariant {
 
     /** Sets a fighter up for this variant (on their thread, after their own things are saved). */
     public void equip(final Player player, final Arena arena) {
+        // An arena with combo on (/togglearenamode <arena> combo) fights with fists: no Slap Fish from any variant
+        final boolean fish = !arena.isCombo();
         switch (this) {
-            case CLASSIC, ICE, SHRINK -> player.getInventory().addItem(SlapFish.create());
+            case CLASSIC, ICE, SHRINK -> {
+                if (fish)
+                    player.getInventory().addItem(SlapFish.create());
+            }
             case MOON -> {
-                player.getInventory().addItem(SlapFish.create());
+                if (fish)
+                    player.getInventory().addItem(SlapFish.create());
                 // Long enough for any match; taken off with everything else when their own things are given back
                 // As high as the arena has room for (a jump out of the top of it is a setback, which anticheats flag)
                 final int jump = moonJumpAmplifier(arena);

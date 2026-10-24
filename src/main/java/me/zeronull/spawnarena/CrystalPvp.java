@@ -463,6 +463,9 @@ public final class CrystalPvp {
             case PISTON, STICKY_PISTON -> true; // could push the arena's own blocks
             // Fire TNT, armor stands, boats... with a button; a hopper could empty the arena's own containers
             case DISPENSER, DROPPER, CRAFTER, HOPPER -> true;
+            // Spawner plugins (DonutSpawners, RoseStacker) keep their own record of a placed spawner, which the arena's
+            // reset would wipe without telling them; and it would fill the arena with mobs
+            case SPAWNER, TRIAL_SPAWNER -> true;
             default -> false;
         };
     }

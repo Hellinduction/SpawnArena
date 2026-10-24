@@ -43,6 +43,9 @@ public final class FfaFight extends Fight {
     /** Spawn protection, until it runs out or they attack (the value tells one protection from the next). */
     private final Map<UUID, Object> protectedPlayers = new ConcurrentHashMap<>();
     private volatile ScheduledTask ticker;
+    /** Crystal free-for-all: when the arena is next put back (crystalFfaResetMinutes), whether that's been warned of. */
+    private volatile long nextReset;
+    private volatile boolean resetWarned, resetting;
 
     private FfaFight(final Arena arena) {
         this.arena = arena;
@@ -152,6 +155,7 @@ public final class FfaFight extends Fight {
         Arena.ArenaUtils.kickOutLingeringPlayers(this.arena);
         if (this.arena.isCrystalPvp())
             this.arenaReady = CrystalPvp.takeSnapshot(this);
+        this.nextReset = System.currentTimeMillis() + resetMillis();
         this.pickVariant();
         this.ticker = Threads.globalTimer(task -> this.tick(), 20L, 20L);
     }
@@ -619,6 +623,68 @@ public final class FfaFight extends Fight {
     }
 
     /** To everyone in the session (fighting or on their way in) but {@code except}. */
+    private static long resetMillis() {
+        final int minutes = SpawnArena.settings == null ? 5 : SpawnArena.settings.crystalFfaResetMinutes;
+        return minutes <= 0 ? Long.MAX_VALUE / 2 : minutes * 60_000L;
+    }
+
+    /**
+     * Crystal free-for-all: a session can go on for as long as people keep joining, so every crystalFfaResetMinutes
+     * the arena is put back as it was (after a 10 second warning) with everyone still in it. Anyone the floor comes
+     * back around is moved straight up to the nearest spot they fit.
+     */
+    private void resetIfDue() {
+        if (!this.arena.isCrystalPvp() || this.resetting)
+            return;
+        final long now = System.currentTimeMillis();
+        if (!this.resetWarned && now >= this.nextReset - 10_000) {
+            this.resetWarned = true;
+            this.tellInside(MiniMessage.miniMessage().deserialize(
+                    "<yellow>The arena resets in 10 seconds: everything placed or dug, and dropped items, go back as they were."), null);
+        }
+        if (now < this.nextReset)
+            return;
+        this.resetting = true;
+        CrystalPvp.cleanup(this)
+                .thenCompose(ignored -> {
+                    final List<java.util.concurrent.CompletableFuture<Boolean>> moved = new ArrayList<>();
+                    for (final Player p : this.getFighters()) {
+                        final java.util.concurrent.CompletableFuture<Boolean> done = new java.util.concurrent.CompletableFuture<>();
+                        Threads.entity(p, () -> this.liftOut(p).whenComplete((ok, e) -> done.complete(true)));
+                        moved.add(done);
+                    }
+                    return java.util.concurrent.CompletableFuture.allOf(moved.toArray(new java.util.concurrent.CompletableFuture[0]));
+                })
+                .thenCompose(ignored -> CrystalPvp.takeSnapshot(this))
+                .whenComplete((ok, error) -> {
+                    if (error != null)
+                        SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.WARNING,
+                                "Couldn't reset crystal free-for-all " + this.arena.getArenaName(), error);
+                    this.nextReset = System.currentTimeMillis() + resetMillis();
+                    this.resetWarned = false;
+                    this.resetting = false;
+                    this.tellInside(MiniMessage.miniMessage().deserialize("<yellow>The arena has been reset."), null);
+                });
+    }
+
+    /** On the player's thread: if the arena came back around them, up to the nearest spot above where they fit. */
+    private java.util.concurrent.CompletableFuture<Boolean> liftOut(final Player player) {
+        if (!player.isOnline() || !this.alive.contains(player) || !player.collidesAt(player.getLocation()))
+            return java.util.concurrent.CompletableFuture.completedFuture(false);
+        final Location at = player.getLocation();
+        final Integer top = this.arena.regionTopY();
+        final int highest = top != null ? top : at.getWorld().getMaxHeight() - 2;
+        for (int y = at.getBlockY() + 1; y <= highest; y++) {
+            final Location spot = at.clone();
+            spot.setY(y);
+            if (!player.collidesAt(spot)) {
+                player.setFallDistance(0);
+                return Threads.teleport(player, spot);
+            }
+        }
+        return java.util.concurrent.CompletableFuture.completedFuture(false);
+    }
+
     private void tellInside(final Component message, final Player except) {
         for (final Player p : this.getMembers())
             if (!p.equals(except) && p.isOnline())
@@ -662,6 +728,7 @@ public final class FfaFight extends Fight {
     private void tick() {
         if (this.getState() != FightState.IN_FIGHT)
             return;
+        this.resetIfDue();
         final List<Player> fighting = this.getFighters();
         final int count = fighting.size();
         // MULTI Ice Rink: the fake ice again, in case anything showed them the real floor
