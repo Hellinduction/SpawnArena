@@ -453,13 +453,48 @@ public final class CrystalArenaListener implements Listener {
 
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPickup(final org.bukkit.event.entity.EntityPickupItemEvent e) {
-        final String arenaName = CrystalPvp.matchOf(e.getItem());
-        if (arenaName == null)
-            return;
-        final Arena arena = SpawnArena.arenas.of(arenaName);
-        if (!(e.getEntity() instanceof Player player) || arena == null
-                || !CrystalPvp.isLiveMatchItem(e.getItem()) || !CrystalPvp.isActiveFighter(arena, player))
+        if (CrystalPvp.matchOf(e.getItem()) != null && !(e.getEntity() instanceof Player player && mayPickUp(player, e.getItem())))
             e.setCancelled(true);
+    }
+
+    /**
+     * A match item of the fight they're in (even if a stacking plugin has since merged or replaced the item entity:
+     * the arena tag is what counts while its fight is on).
+     */
+    private static boolean mayPickUp(final Player player, final org.bukkit.entity.Item item) {
+        final String arenaName = CrystalPvp.matchOf(item);
+        final Arena arena = arenaName == null ? null : SpawnArena.arenas.of(arenaName);
+        return arena != null && CrystalPvp.activeFight(arena) != null && CrystalPvp.isActiveFighter(arena, player);
+    }
+
+    // ── The last word for a fighter's own things (another plugin's spawn protection mustn't get in the way) ──
+
+    /** Picking up their own fight's match items, whatever any other plugin said. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void pickupFinal(final org.bukkit.event.entity.EntityPickupItemEvent e) {
+        if (e.isCancelled() && e.getEntity() instanceof Player player && CrystalPvp.matchOf(e.getItem()) != null && mayPickUp(player, e.getItem()))
+            e.setCancelled(false);
+    }
+
+    /** Opening a container they placed in the fight (a regear shulker...), whatever any other plugin said. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void interactFinal(final PlayerInteractEvent e) {
+        if (e.getAction() != Action.RIGHT_CLICK_BLOCK || e.getClickedBlock() == null || e.useInteractedBlock() != org.bukkit.event.Event.Result.DENY)
+            return;
+        final Arena own = SpawnArena.arenas.of(e.getPlayer());
+        if (own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, e.getPlayer())
+                && e.getClickedBlock().getState(false) instanceof org.bukkit.inventory.InventoryHolder holder
+                && CrystalPvp.canOpen(own, holder.getInventory().getHolder(false)))
+            e.setUseInteractedBlock(org.bukkit.event.Event.Result.ALLOW);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void openFinal(final org.bukkit.event.inventory.InventoryOpenEvent e) {
+        if (!e.isCancelled() || !(e.getPlayer() instanceof Player player))
+            return;
+        final Arena own = SpawnArena.arenas.of(player);
+        if (own != null && own.isCrystalPvp() && CrystalPvp.isActiveFighter(own, player) && CrystalPvp.canOpen(own, e.getInventory()))
+            e.setCancelled(false);
     }
 
     /** Hoppers and hopper minecarts can't take match items either. */

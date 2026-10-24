@@ -514,7 +514,8 @@ public final class CrystalPvp {
      */
     private static void removeLoose(final Arena arena, final org.bukkit.Chunk chunk) {
         for (final Entity entity : chunk.getEntities())
-            if ((entity instanceof org.bukkit.entity.TNTPrimed || entity instanceof org.bukkit.entity.FallingBlock)
+            if ((entity instanceof org.bukkit.entity.TNTPrimed || entity instanceof org.bukkit.entity.FallingBlock
+                    || arena.getArenaName().equals(matchOf(entity))) // match items, even ones a stacking plugin replaced
                     && arena.equals(arenaAt(entity.getLocation())))
                 entity.remove();
     }
