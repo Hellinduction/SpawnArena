@@ -115,11 +115,18 @@ public final class SettingsConfig {
             "everything else). Only below the spawns' feet and under the open pit (never under a wall), and only inside",
             "the arena's region. Bedrock is never diggable, even if listed. Empty list = nothing of the floor can be dug."})
     public java.util.List<String> crystalDiggableBlocks = new java.util.ArrayList<>(java.util.List.of(
-            "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud", "sand", "gravel", "netherrack", "obsidian", "stone"));
+            "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud", "sand", "gravel", "netherrack", "obsidian", "stone",
+            "coal_ore", "copper_ore", "iron_ore", "lapis_ore", "gold_ore", "redstone_ore", "diamond_ore", "emerald_ore"));
 
     @Comment({"With bunnyAC installed: MULTI Ice Rink and Moon Gravity players are taken out of bunnyAC for their match (it",
             "flags the sliding, as it sees the real floor, and the moon jumps), and put back as soon as they're out.",
             "Staff-exempted players are left alone. Until bunnyAC can exempt players from single checks, this means no",
             "anticheat checks at all for that match."})
     public boolean iceRinkAnticheatExempt = true;
+
+    @Comment({"Commands fighters can still use mid-fight (all others are blocked): messaging and the like. Each one's aliases",
+            "are allowed too (e.g. msg also lets through tell, w and whisper if the plugin that owns it registers them)."})
+    public java.util.List<String> fightAllowedCommands = new java.util.ArrayList<>(java.util.List.of(
+            "msg", "tell", "whisper", "w", "m", "t", "pm", "dm", "message", "r", "reply", "ignore", "unignore",
+            "msgtoggle", "togglemsg"));
 }

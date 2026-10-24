@@ -104,7 +104,7 @@ public final class CrystalArenaListener implements Listener {
         e.setBuild(true);
         for (final BlockState state : replaced)
             CrystalPvp.recordPlaced(fight, state.getBlock(), state.getBlockData());
-    }
+    }Also sh
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onBreak(final BlockBreakEvent e) {

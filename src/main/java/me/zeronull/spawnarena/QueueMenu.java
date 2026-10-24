@@ -109,8 +109,46 @@ public final class QueueMenu implements InventoryHolder {
         // HIDE_ATTRIBUTES only takes effect when the item has explicit (here: no) attribute modifiers
         meta.setAttributeModifiers(com.google.common.collect.ImmutableMultimap.of());
         meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+        meta.getPersistentDataContainer().set(BUTTON, org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
         item.setItemMeta(meta);
         return item;
+    }
+
+    /** Marks this menu's buttons, so one that somehow ends up anywhere else can be recognised and removed. */
+    private static final org.bukkit.NamespacedKey BUTTON = new org.bukkit.NamespacedKey(SpawnArena.INSTANCE, "queue_menu_button");
+
+    public static boolean isButton(final ItemStack item) {
+        if (item == null || !item.hasItemMeta())
+            return false;
+        final ItemMeta meta = item.getItemMeta();
+        if (meta.getPersistentDataContainer().has(BUTTON, org.bukkit.persistence.PersistentDataType.BYTE))
+            return true;
+        // Ones made before they were marked: known by their own lore (or the blank-named filler pane)
+        if (!meta.hasItemFlag(ItemFlag.HIDE_ATTRIBUTES))
+            return false;
+        final net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer plain =
+                net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer.plainText();
+        if (item.getType() == Material.GRAY_STAINED_GLASS_PANE && meta.hasDisplayName() && plain.serialize(meta.displayName()).equals(" "))
+            return true;
+        final List<Component> lore = meta.lore();
+        if (lore == null)
+            return false;
+        for (final Component line : lore) {
+            final String text = plain.serialize(line);
+            if (text.startsWith("Matches in progress:") || text.equals("Joins whichever queue has"))
+                return true;
+        }
+        return false;
+    }
+
+    /** Takes any of this menu's buttons out of the player's inventory and off their cursor. */
+    public static void purge(final Player player) {
+        if (isButton(player.getItemOnCursor()))
+            player.setItemOnCursor(null);
+        final org.bukkit.inventory.PlayerInventory inv = player.getInventory();
+        for (int i = 0; i < inv.getSize(); i++)
+            if (isButton(inv.getItem(i)))
+                inv.setItem(i, null);
     }
 
     private static Component mm(final String text) {
