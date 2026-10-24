@@ -1,11 +1,6 @@
 package me.zeronull.spawnarena.events;
 
-import me.zeronull.spawnarena.Arena;
-import me.zeronull.spawnarena.Fight;
-import me.zeronull.spawnarena.FightState;
-import me.zeronull.spawnarena.SpawnArena;
-import me.zeronull.spawnarena.SumoVariant;
-import me.zeronull.spawnarena.Threads;
+import me.zeronull.spawnarena.*;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
