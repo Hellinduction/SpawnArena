@@ -306,6 +306,7 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§7Rolling back...");
         Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> {
             final int[] result = SpawnArena.statsManager.rollback(entries, performer, performerName);
+            me.zeronull.spawnarena.TopEloSuffix.refreshLater(); // an Elo change undone may change who's #1
             sender.sendMessage("§aRolled back §e" + me.zeronull.spawnarena.Grammar.count(result[0], "stat change")
                     + "§a made by §e" + actorLabel + "§a.");
             if (result[1] > 0)
