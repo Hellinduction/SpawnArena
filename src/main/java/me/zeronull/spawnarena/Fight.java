@@ -765,13 +765,14 @@ public class Fight {
 
         // Reset before the next match is started, so the paste isn't racing its countdown (and after the
         // crystal clean-up, so the two don't fight over the same blocks)
-        if (this.getArena() instanceof SavableArena savableArena && this.getArena().getArenaMode() == ArenaMode.SINGLE) {
+        // (A MULTI crystal arena's copy is one arena of its own: put back the same way)
+        if ((this.getArena() instanceof SavableArena || this.getArena() instanceof CrystalCopy) && this.getArena().getArenaMode() == ArenaMode.SINGLE) {
             final java.util.concurrent.CompletableFuture<Void> reset = cleaned.thenCompose(ignored -> {
                 try {
-                    return savableArena.resetArena();
+                    return this.getArena() instanceof CrystalCopy copy ? copy.resetArena() : ((SavableArena) this.getArena()).resetArena();
                 } catch (final Exception e) {
                     SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE,
-                            "Couldn't reset arena " + savableArena.getArenaName(), e);
+                            "Couldn't reset arena " + this.getArena(), e);
                     return java.util.concurrent.CompletableFuture.completedFuture(null);
                 }
             });

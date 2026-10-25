@@ -125,7 +125,8 @@ public final class CrystalPvp {
 
     /** The arena may have changed: its saved snapshot can't be used as a fallback any more. */
     public static void forgetSnapshot(final Arena arena) {
-        LAST_SNAPSHOTS.remove(arena.getArenaName().toLowerCase());
+        final String name = arena.getArenaName().toLowerCase();
+        LAST_SNAPSHOTS.keySet().removeIf(key -> key.equals(name) || key.startsWith(name + "#")); // its copies' too
     }
 
     /** Runs work off the server's threads (reading frozen chunk copies). */
@@ -167,7 +168,7 @@ public final class CrystalPvp {
                         snapshot.fill(copies.get(i).join(), p[0], p[1], p[2], p[3]);
                     }
                     track.snapshot = snapshot;
-                    LAST_SNAPSHOTS.put(arena.getArenaName().toLowerCase(), new LastSnapshot(snapshot, System.currentTimeMillis()));
+                    LAST_SNAPSHOTS.put(snapshotKey(arena), new LastSnapshot(snapshot, System.currentTimeMillis()));
                     return true;
                 }, OFF_THREAD)
                 .completeOnTimeout(false, 10, java.util.concurrent.TimeUnit.SECONDS)
@@ -178,9 +179,14 @@ public final class CrystalPvp {
                 .thenApply(ok -> ok || useLastSnapshot(arena, track));
     }
 
+    /** An arena's own key for its last snapshot: a MULTI crystal arena's copies each have theirs. */
+    private static String snapshotKey(final Arena arena) {
+        return arena.getArenaName().toLowerCase() + (arena instanceof CrystalCopy copy ? "#" + copy.index() : "");
+    }
+
     /** A fresh snapshot failed: falls back on the arena's last good one, if it can still be trusted. */
     private static boolean useLastSnapshot(final Arena arena, final Track track) {
-        final LastSnapshot last = LAST_SNAPSHOTS.get(arena.getArenaName().toLowerCase());
+        final LastSnapshot last = LAST_SNAPSHOTS.get(snapshotKey(arena));
         if (last == null || System.currentTimeMillis() - last.takenAt() > SNAPSHOT_FALLBACK_MILLIS)
             return false;
         track.snapshot = last.snapshot();
@@ -336,6 +342,9 @@ public final class CrystalPvp {
     public static Arena arenaAt(final Location loc) {
         if (loc == null || loc.getWorld() == null || SpawnArena.arenas == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
             return null;
+        final CrystalCopy copy = CrystalCopies.at(loc.getWorld());
+        if (copy != null)
+            return Regions.contains(copy, loc, 0) ? copy : null;
         for (final Arena arena : SpawnArena.arenas)
             if (arena.isCrystalPvp() && Regions.contains(arena, loc, 0))
                 return arena;
@@ -350,6 +359,9 @@ public final class CrystalPvp {
     public static boolean anyNear(final Location loc, final int margin) {
         if (loc == null || loc.getWorld() == null || SpawnArena.arenas == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
             return false;
+        final CrystalCopy copy = CrystalCopies.at(loc.getWorld());
+        if (copy != null)
+            return Regions.contains(copy, loc, margin);
         for (final Arena arena : SpawnArena.arenas)
             if (arena.isCrystalPvp() && Regions.contains(arena, loc, margin))
                 return true;

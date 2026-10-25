@@ -24,7 +24,7 @@ public final class ArenaMobSpawnGuard implements Listener {
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onSpawn(final CreatureSpawnEvent e) {
         if (!NATURAL.contains(e.getSpawnReason()) || SpawnArena.arenas == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT
-                || !e.getLocation().getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
+                || !Arena.isArenaWorld(e.getLocation().getWorld()))
             return;
         if (SpawnArena.arenas.of(e.getLocation()) != null)
             e.setCancelled(true);

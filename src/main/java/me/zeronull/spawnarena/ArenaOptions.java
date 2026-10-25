@@ -171,11 +171,17 @@ public abstract class ArenaOptions {
     }
 
     /**
-     * Crystal PvP arenas always run one fight at a time: blocks placed in one fight would show up in the other.
-     * Free-for-all arenas have one session that everyone joins.
+     * Free-for-all arenas have one session that everyone joins. Crystal PvP arenas run one fight at a time in the arena
+     * itself (blocks placed in one fight would show up in the other), unless they're MULTI where that's supported:
+     * then each match is fought in a copy of its own (CrystalCopies), each copy running one at a time.
      */
     public ArenaMode getArenaMode() {
-        return this.crystalPvp || this.ffa ? ArenaMode.SINGLE : this.arenaMode;
+        if (this.ffa)
+            return ArenaMode.SINGLE;
+        if (this.crystalPvp)
+            return this.arenaMode == ArenaMode.MULTI && CrystalCopies.supported() && !(this instanceof CrystalCopy)
+                    ? ArenaMode.MULTI : ArenaMode.SINGLE;
+        return this.arenaMode;
     }
 
     public boolean isFfa() {

@@ -228,6 +228,15 @@ public final class SavableArena extends Arena {
                 config.thirdRewardMultiplier, config.thirdRewardCooldownMinutes);
         this.setEgapCooldownSeconds(config.egapCooldownSeconds);
         this.setDisplayName(config.displayName);
+        // A MULTI crystal arena's copies follow: set up if it just became one, dropped if it no longer is
+        if (this.isCrystalPvp() && this.getArenaMode() == ArenaMode.MULTI) {
+            if (CrystalCopies.of(this).isEmpty())
+                Threads.global(() -> CrystalCopies.setUp(this, false));
+            else
+                CrystalCopies.sync(this);
+        } else if (!CrystalCopies.of(this).isEmpty() && CrystalCopies.of(this).stream().allMatch(copy -> copy.getFights().isEmpty())) {
+            CrystalCopies.retire(this);
+        }
         return config.ffa && !wasFfa;
     }
 
@@ -251,8 +260,17 @@ public final class SavableArena extends Arena {
      * straight away if the arena has no schematic.
      */
     public java.util.concurrent.CompletableFuture<Void> resetArena() {
+        return this.resetArena(null);
+    }
+
+    /** As {@link #resetArena()}, pasted in {@code world} instead (a MULTI crystal arena's copy), at the same spot. */
+    public java.util.concurrent.CompletableFuture<Void> resetArena(final org.bukkit.World world) {
         final ArenaConfig config = getArenaConfig(this.getConfigFile());
-        final Location loc = config.pasteLocation;
+        Location loc = config.pasteLocation;
+        if (loc != null && world != null) {
+            loc = loc.clone();
+            loc.setWorld(world);
+        }
 
         if (loc == null)
             return java.util.concurrent.CompletableFuture.completedFuture(null);

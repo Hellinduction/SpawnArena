@@ -106,7 +106,32 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
         }
 
         if (arena.isCrystalPvp()) {
-            sender.sendMessage(ChatColor.RED + "Crystal PvP arenas always run one fight at a time (SINGLE).");
+            if (!me.zeronull.spawnarena.CrystalCopies.supported()) {
+                sender.sendMessage(ChatColor.RED + "Crystal PvP arenas run one fight at a time (SINGLE) on this server: MULTI needs Paper or a fork of it (not Folia).");
+                return true;
+            }
+            if (arena.getArenaMode() == ArenaMode.MULTI) {
+                if (me.zeronull.spawnarena.CrystalCopies.of(arena).stream().anyMatch(copy -> !copy.getFights().isEmpty())) {
+                    sender.sendMessage(ChatColor.RED + "There are matches going on in " + arena.getArenaName() + "'s copies. Try again once they're over.");
+                    return true;
+                }
+                arena.setArenaMode(ArenaMode.SINGLE.name());
+                arena.save(config -> config.arenaMode = ArenaMode.SINGLE.name());
+                me.zeronull.spawnarena.CrystalCopies.retire(arena);
+                player.sendMessage(ChatColor.GREEN + "Set arena mode to 'SINGLE': matches are fought in the arena itself again, one at a time.");
+                return true;
+            }
+            final int matches = SpawnArena.settings == null ? 3 : SpawnArena.settings.crystalMultiMatches;
+            player.sendMessage(ChatColor.YELLOW + "Setting up " + matches + " copies of " + arena.getArenaName()
+                    + " (each in a world of its own) and copying the arena into them...");
+            me.zeronull.spawnarena.CrystalCopies.setUp(arena, true).whenComplete((ok, error) -> {
+                arena.setArenaMode(ArenaMode.MULTI.name());
+                arena.save(config -> config.arenaMode = ArenaMode.MULTI.name());
+                player.sendMessage(error == null
+                        ? ChatColor.GREEN + "Set arena mode to 'MULTI': up to " + me.zeronull.spawnarena.CrystalCopies.of(arena).size()
+                                + " matches at once, each in its own copy of the arena."
+                        : ChatColor.RED + "Couldn't set up the copies: " + error.getMessage());
+            });
             return true;
         }
 
@@ -171,7 +196,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
     private static String whyBusy(final SavableArena arena) {
         if (arena.isResetting())
             return "That arena is being reset.";
-        for (final me.zeronull.spawnarena.Fight fight : arena.getFights()) {
+        for (final me.zeronull.spawnarena.Fight fight : arena.allFights()) {
             if (fight instanceof me.zeronull.spawnarena.FfaFight ffa) {
                 final int in = ffa.getMembers().size();
                 return in > 0 ? me.zeronull.spawnarena.Grammar.count(in, "player") + " " + (in == 1 ? "is" : "are")

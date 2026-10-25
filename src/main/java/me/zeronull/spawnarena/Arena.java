@@ -15,6 +15,23 @@ import java.util.List;
 public abstract class Arena extends ArenaOptions {
     /** Loaded from settings.yml on enable. */
     public static volatile String SPAWN_WORLD = "Spawn";
+
+    /** The world arenas are in, or one of the worlds a MULTI crystal arena's matches are fought in. */
+    public static boolean isArenaWorld(final org.bukkit.World world) {
+        return world != null && (world.getName().equalsIgnoreCase(SPAWN_WORLD) || CrystalCopies.at(world) != null);
+    }
+
+    /**
+     * Where a new match here goes, or null if none can start now: this arena (empty, or MULTI), or for a MULTI crystal
+     * arena a free copy of it. Never a free-for-all or an arena being reset.
+     */
+    public Arena arenaForNewFight() {
+        if (this.isFfa() || this.isResetting())
+            return null;
+        if (this.isCrystalPvp() && this.getArenaMode() == ArenaMode.MULTI && CrystalCopies.supported() && !(this instanceof CrystalCopy))
+            return CrystalCopies.free(this);
+        return this.getFights().isEmpty() || this.getArenaMode() == ArenaMode.MULTI ? this : null;
+    }
     public ArenaQueue queue;
     /** True while a crystal arena is being pasted back after a fight: no fight starts in it until that's done. */
     private volatile boolean resetting;
@@ -47,6 +64,17 @@ public abstract class Arena extends ArenaOptions {
     }
     // Read from every player's thread on Folia
     private final List<Fight> fights = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** This arena's fights, and for a MULTI crystal arena those in its copies too. */
+    public List<Fight> allFights() {
+        final List<CrystalCopy> copies = CrystalCopies.of(this);
+        if (copies.isEmpty() || this instanceof CrystalCopy)
+            return this.fights;
+        final List<Fight> all = new ArrayList<>(this.fights);
+        for (final CrystalCopy copy : copies)
+            all.addAll(copy.getFights());
+        return all;
+    }
 
     /** True while a fight is actually inside the arena (not just counting down at spawn). */
     public boolean hasRunningFight() {
@@ -282,6 +310,9 @@ public abstract class Arena extends ArenaOptions {
     public boolean equals(final Object object) {
         if (!(object instanceof Arena))
             return false;
+        // A crystal arena's copies are each their own arena (same name, but their own fights)
+        if (this instanceof CrystalCopy || object instanceof CrystalCopy)
+            return this == object;
 
         final Arena arena = (Arena) object;
         return arena.getArenaName().equals(this.getArenaName());

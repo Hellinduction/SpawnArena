@@ -105,7 +105,8 @@ public class ArenaQueue {
         // someone has been skipped MAX_SKIPS times: then they go next, against the next-longest waiter.
         // The list is in join order, oldest first.
         final List<Player> solo = this.queues.get(FightMode.ONE_V_ONE);
-        if (solo.size() >= 2 && this.canStart()) {
+        final Arena soloArena = solo.size() >= 2 ? this.target() : null;
+        if (soloArena != null) {
             final Player overdue = solo.stream().filter(p -> this.skips.getOrDefault(p, 0) >= MAX_SKIPS).findFirst().orElse(null);
             final Player p1, p2;
             if (overdue != null) {
@@ -129,27 +130,28 @@ public class ArenaQueue {
             for (final Player waiting : skipped)
                 this.skips.merge(waiting, 1, Integer::sum);
 
-            new Fight().initiateFight(p1, p2, this.arena);
+            new Fight().initiateFight(p1, p2, soloArena);
         }
 
         // 2v2: the four who have waited longest, split into teams
         final List<Player> duo = this.queues.get(FightMode.TWO_V_TWO);
-        if (duo.size() >= 4 && this.canStart()) {
+        final Arena duoArena = duo.size() >= 4 ? this.target() : null;
+        if (duoArena != null) {
             final List<Player> four = new ArrayList<>(duo.subList(0, 4));
             for (final Player p : four) {
                 duo.remove(p);
                 PLAYER_QUEUE_MAP.remove(p);
             }
             final List<List<Player>> teams = TeamPicker.split(four);
-            new Fight().initiateTeamFight(teams.get(0), teams.get(1), this.arena);
+            new Fight().initiateTeamFight(teams.get(0), teams.get(1), duoArena);
         }
     }
 
-    private boolean canStart() {
+    /** Where a match can start right now (this arena, or a free copy of a MULTI crystal arena), or null. */
+    private Arena target() {
         // Under the arena's lock: the free-for-all setting can't be switched on part-way through
         synchronized (this.arena) {
-            return !this.arena.isFfa() && !this.arena.isResetting()
-                    && (this.arena.getFights().isEmpty() || this.arena.getArenaMode() == ArenaMode.MULTI);
+            return this.arena.arenaForNewFight();
         }
     }
 }

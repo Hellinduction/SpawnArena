@@ -57,7 +57,7 @@ public final class ArenaLockCommand implements CommandExecutor, TabCompleter {
                 dequeued++;
             }
 
-            for (final Fight fight : new ArrayList<>(arena.getFights())) {
+            for (final Fight fight : new ArrayList<>(arena.allFights())) {
                 if (fight instanceof me.zeronull.spawnarena.FfaFight ffa) {
                     ffaSentOut += ffa.closeAll("The arenas have been closed, so you were sent out of the free-for-all with your things.");
                     continue;

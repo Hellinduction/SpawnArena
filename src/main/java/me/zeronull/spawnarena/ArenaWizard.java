@@ -661,7 +661,7 @@ public final class ArenaWizard {
             tell(player, "<red>An arena called <white>" + s.name + "</white> was created meanwhile. Cancel and pick another name.");
             return;
         }
-        if (existing != null && !existing.getFights().isEmpty()) {
+        if (existing != null && !existing.allFights().isEmpty()) {
             tell(player, "<red>Can't replace it yet: a fight is going on there. Wait for it to end (or /arenalock on).");
             return;
         }
@@ -811,7 +811,7 @@ public final class ArenaWizard {
      * stats if asked; its holograms are kept when it's only being set up again). Returns why it couldn't, or null when done.
      */
     static String removeArena(final Arena arena, final boolean wipeStats, final boolean keepHolograms) {
-        if (!arena.getFights().isEmpty())
+        if (!arena.allFights().isEmpty())
             return "a fight is going on there. Wait for it to end (or /arenalock on).";
         CrystalPvp.forgetSnapshot(arena);
         final String name = arena.getArenaName();

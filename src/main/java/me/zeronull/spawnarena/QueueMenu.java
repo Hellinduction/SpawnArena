@@ -95,7 +95,7 @@ public final class QueueMenu implements InventoryHolder {
     }
 
     private static long matches(final Arena arena, final FightMode mode) {
-        return arena.getFights().stream().filter(f -> f.getMode() == mode).count();
+        return arena.allFights().stream().filter(f -> f.getMode() == mode).count();
     }
 
     private static ItemStack item(final Material material, final String name, final List<String> lore) {

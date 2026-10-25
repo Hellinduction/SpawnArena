@@ -30,7 +30,7 @@ public final class LiquidListener implements Listener, Runnable {
 
     /** Cheap checks first (moves come in constantly): only a fighter, in the arenas' world, during a fight, can lose to liquid. */
     private static boolean couldLose(final Player player) {
-        return player.getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD)
+        return Arena.isArenaWorld(player.getWorld())
                 && SpawnArena.arenas.hasActiveFight() && SpawnArena.arenas.hasFighter(player);
     }
 

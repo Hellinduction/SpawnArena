@@ -146,7 +146,12 @@ public final class DuelManager {
                     "<red><bold>NO STATS OR PAYOUTS</bold></red> <dark_gray>·</dark_gray> <green>Duel accepted! Fighting in </green><gold><arena></gold><green>.</green>",
                     Placeholder.unparsed("arena", arenaName)));
         }
-        new Fight().asDuel().initiateFight(requester, target, arena);
+        final Arena where = arena.arenaForNewFight(); // a free copy, for a MULTI crystal arena
+        if (where == null) {
+            target.sendMessage(ChatColor.RED + "Every copy of that arena has a match going on. Try again in a moment.");
+            return;
+        }
+        new Fight().asDuel().initiateFight(requester, target, where);
     }
 
     public static void deny(final Player target, final Player requester) {
@@ -245,6 +250,8 @@ public final class DuelManager {
             return "There's already a fight in that arena.";
         if (arena.isResetting())
             return "That arena is being reset. Try again in a moment.";
+        if (arena.arenaForNewFight() == null)
+            return "Every copy of that arena has a match going on. Try again in a moment.";
         return null;
     }
 }

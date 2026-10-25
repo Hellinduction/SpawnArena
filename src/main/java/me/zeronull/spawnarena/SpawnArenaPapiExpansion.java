@@ -169,7 +169,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
         if (parts[0].equals("queue"))
             return String.valueOf(mode == null ? arena.queue.size() : arena.queue.size(mode));
-        return String.valueOf(arena.getFights().stream().filter(f -> mode == null || f.getMode() == mode).count());
+        return String.valueOf(arena.allFights().stream().filter(f -> mode == null || f.getMode() == mode).count());
     }
 
     /** reward_cooldown_<arena>, reward_ready_<arena>, reward_amount_<arena>, reward_every_<arena> */

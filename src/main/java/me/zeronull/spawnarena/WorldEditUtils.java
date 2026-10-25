@@ -94,6 +94,39 @@ public final class WorldEditUtils {
         return session;
     }
 
+    /**
+     * Copies a box of blocks from one world into the same coordinates of another (a MULTI crystal arena's copies). The
+     * future completes once it's done, failed or not (failures are logged).
+     */
+    public static CompletableFuture<Void> copyBox(final org.bukkit.World from, final org.bukkit.World to, final BlockVector3 min, final BlockVector3 max) {
+        final CompletableFuture<Void> done = new CompletableFuture<>();
+        final Runnable copy = () -> {
+            try {
+                // Into a clipboard first, then pasted: the usual //copy, //paste way, which both WorldEdit and FAWE do reliably
+                final com.sk89q.worldedit.regions.CuboidRegion region = new com.sk89q.worldedit.regions.CuboidRegion(BukkitAdapter.adapt(from), min, max);
+                final com.sk89q.worldedit.extent.clipboard.BlockArrayClipboard clipboard = new com.sk89q.worldedit.extent.clipboard.BlockArrayClipboard(region);
+                clipboard.setOrigin(min);
+                try (EditSession source = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(from))) {
+                    final com.sk89q.worldedit.function.operation.ForwardExtentCopy op =
+                            new com.sk89q.worldedit.function.operation.ForwardExtentCopy(source, region, clipboard, min);
+                    op.setCopyingEntities(false);
+                    Operations.complete(op);
+                }
+                try (EditSession target = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(to))) {
+                    Operations.complete(new ClipboardHolder(clipboard).createPaste(target).to(min).ignoreAirBlocks(false).build());
+                }
+            } catch (final Exception e) {
+                SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Failed to copy " + min + " to " + max + " from " + from.getName() + " into " + to.getName(), e);
+            }
+            done.complete(null);
+        };
+        if (FAWE)
+            Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> copy.run());
+        else
+            Bukkit.getGlobalRegionScheduler().execute(SpawnArena.INSTANCE, copy);
+        return done;
+    }
+
     /** A paste that can be undone, and the box it covers in the world. */
     public record Paste(EditSession session, BlockVector3 min, BlockVector3 max) {}
 

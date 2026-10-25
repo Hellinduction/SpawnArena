@@ -42,7 +42,8 @@ public final class Arenas implements Iterable<Arena> {
     }
 
     public boolean hasActiveFight() {
-        return this.arenas.stream().anyMatch(arena -> !arena.getFights().isEmpty());
+        return this.arenas.stream().anyMatch(arena -> !arena.getFights().isEmpty())
+                || CrystalCopies.all().stream().anyMatch(copy -> !copy.getFights().isEmpty());
     }
 
     /**
@@ -89,6 +90,11 @@ public final class Arenas implements Iterable<Arena> {
 
             return arena;
         }
+        // Or fighting in a copy of a MULTI crystal arena
+        for (final CrystalCopy copy : CrystalCopies.all())
+            if (!copy.getFights().isEmpty() && !exclusions.contains(copy)
+                    && copy.getFights().stream().anyMatch(fight -> fight.isFighter(fighter)))
+                return copy;
 
         return null; // Unable to find arena
     }
@@ -121,6 +127,15 @@ public final class Arenas implements Iterable<Arena> {
     public Arena of(final Location loc) {
         final RegionQuery query = Arena.ArenaUtils.REGION_CONTAINER.createQuery();
         final ApplicableRegionSet regionSet = query.getApplicableRegions(BukkitAdapter.adapt(loc));
+
+        // In a copy's world: that copy, if it's inside its region
+        final CrystalCopy copy = CrystalCopies.at(loc.getWorld());
+        if (copy != null) {
+            for (final ProtectedRegion region : regionSet)
+                if (region.getId().equalsIgnoreCase(copy.getArenaName()))
+                    return copy;
+            return null;
+        }
 
 
         for (final Arena arena : this) {

@@ -111,6 +111,13 @@ public final class SettingsConfig {
             "which some anticheats may flag. Set to false and Ice Rink is never picked in MULTI arenas (SINGLE arenas use real ice)."})
     public boolean sumoIceInMulti = true;
 
+    @Comment({"Crystal arenas in MULTI mode (Paper/Leaf, not Folia): how many matches can run at once. Each is fought in a",
+            "full copy of the arena in a world of its own (spawnarena_<arena>_<n>), made with the Spawn world's settings."})
+    public int crystalMultiMatches = 3;
+
+    @Comment("How far around a MULTI crystal arena's region is copied for its matches (walls, deck, dome), in blocks each way")
+    public int crystalCopyMargin = 32;
+
     @Comment({"Crystal arenas: blocks fighters can dig out of the arena's own floor during a fight (put back afterwards, like",
             "everything else). Only below the spawns' feet and under the open pit (never under a wall), and only inside",
             "the arena's region. Bedrock is never diggable, even if listed. Empty list = nothing of the floor can be dug."})

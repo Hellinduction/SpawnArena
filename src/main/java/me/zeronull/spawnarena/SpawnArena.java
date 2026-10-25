@@ -73,6 +73,8 @@ public class SpawnArena extends JavaPlugin {
                 if (arena.isCrystalPvp())
                     getLogger().warning("Arena " + arena.getArenaName() + " has crystalPvp on, but WorldGuard isn't installed, so it can't be used.");
 
+        // MULTI crystal arenas' copies (their worlds must be there before a crash's leftovers can be undone in them)
+        CrystalCopies.startAll();
         // Undo anything a crash left in crystal arenas, then keep the crash-safety file up to date
         CrystalPvp.restoreLeftovers();
         TopEloSuffix.start();
@@ -193,7 +195,7 @@ public class SpawnArena extends JavaPlugin {
             return;
 
         for (final Arena arena : arenas) {
-            new ArrayList<>(arena.getFights()).forEach(fight -> {
+            new ArrayList<>(arena.allFights()).forEach(fight -> {
                 // Including fights still sending players in: some may already have been snapshotted
                 if (fight.getState() == FightState.IN_FIGHT || fight.getState() == FightState.PRE_FIGHT_START)
                     fight.endFight();

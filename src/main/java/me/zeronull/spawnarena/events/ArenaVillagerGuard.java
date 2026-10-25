@@ -33,8 +33,7 @@ public final class ArenaVillagerGuard implements Listener {
     }
 
     private static boolean inArena(final Location location) {
-        if (SpawnArena.arenas == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT || location.getWorld() == null
-                || !location.getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
+        if (SpawnArena.arenas == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT || !Arena.isArenaWorld(location.getWorld()))
             return false;
         return SpawnArena.arenas.of(location) != null;
     }
