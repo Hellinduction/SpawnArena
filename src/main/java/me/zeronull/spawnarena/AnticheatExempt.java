@@ -18,7 +18,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * MULTI Ice Rink: the ice is only shown to that match's players, so bunnyAC (which sees the real floor) flags them for
+ * Ice Rink and Moon Gravity players kept from being flagged by the anticheat, whichever is installed (both if both are):
+ * Vulcan's movement flags are simply cancelled for them (see {@link VulcanExempt}); bunnyAC, below.
+ *
+ * <p>MULTI Ice Rink: the ice is only shown to that match's players, so bunnyAC (which sees the real floor) flags them for
  * sliding; and it flags Moon Gravity's jumps too. Until bunnyAC can exempt players from single checks, they're taken out
  * of bunnyAC altogether for the match
  * ({@code acwhitelist}) and put back the moment they're out ({@code acunwhitelist}).
@@ -54,6 +57,7 @@ public final class AnticheatExempt {
     /** What to send next: {uuid, true = exempt / false = remove}. */
     private static final Deque<Object[]> COMMANDS = new ArrayDeque<>();
     private static volatile Appender appender;
+    private static volatile boolean warnedRefused;
 
     private AnticheatExempt() {}
 
@@ -150,6 +154,10 @@ public final class AnticheatExempt {
     /** A player starting a MULTI Ice Rink or a Moon Gravity match: out of bunnyAC until {@link #remove}. */
     public static void add(final Player player) {
         final UUID uuid = player.getUniqueId();
+        if (SpawnArena.settings != null && !SpawnArena.settings.iceRinkAnticheatExempt)
+            return;
+        // Whichever anticheat is installed (both if both are)
+        VulcanExempt.add(player);
         if (appender == null || !bunnyEnabled() || (SpawnArena.settings != null && !SpawnArena.settings.iceRinkAnticheatExempt)
                 || OURS.contains(uuid) || inBunnyList(uuid))
             return;
@@ -163,6 +171,7 @@ public final class AnticheatExempt {
 
     /** They're out of the match (or never made it in): back under bunnyAC. Does nothing for anyone SpawnArena didn't exempt. */
     public static void remove(final UUID uuid) {
+        VulcanExempt.remove(uuid);
         if (!OURS.contains(uuid) || REMOVING.containsKey(uuid))
             return;
         // An exemption still waiting to be sent, or sent but not confirmed yet, is simply dropped (its code runs out)
@@ -297,7 +306,16 @@ public final class AnticheatExempt {
         @Override
         public void append(final LogEvent event) {
             final String text = event.getMessage() == null ? null : event.getMessage().getFormattedMessage();
-            if (text == null || !text.contains("/bunnyac confirm"))
+            if (text == null)
+                return;
+            // bunnyAC refusing the console (its require-authenticated-admin setting): say so, once, rather than nothing
+            if (text.contains("Administrative access denied") && !AWAITING.isEmpty() && !warnedRefused) {
+                warnedRefused = true;
+                SpawnArena.INSTANCE.getLogger().warning("bunnyAC refused SpawnArena's exemption commands from the console, so Ice "
+                        + "Rink and Moon Gravity players aren't exempted from it. Set its 'security: require-authenticated-admin' "
+                        + "to false (in bunnyAC's panel if its config comes from there).");
+            }
+            if (!text.contains("/bunnyac confirm"))
                 return;
             final Matcher m = CONFIRM.matcher(text.replaceAll("§.", ""));
             if (!m.find())

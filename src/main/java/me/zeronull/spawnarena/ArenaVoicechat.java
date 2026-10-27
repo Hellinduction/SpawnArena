@@ -35,6 +35,37 @@ public final class ArenaVoicechat implements VoicechatPlugin {
         // Proximity voice (whispering and talking); group chat is static audio and stays untouched
         registration.registerEvent(EntitySoundPacketEvent.class, this::filter);
         registration.registerEvent(LocationalSoundPacketEvent.class, this::filter);
+        registration.registerEvent(de.maxhenkel.voicechat.api.events.MicrophonePacketEvent.class, this::relay);
+        CrystalView.voiceOn = true;
+    }
+
+    /**
+     * MULTI crystal arenas: fighters are in copies of the arena (other worlds) while their watchers are on spawn, so
+     * proximity chat can't reach between them by itself. What they say is passed on, from where they are, to those of
+     * the others close enough to hear (see {@link CrystalView#voiceRoute}). Not while they talk in a group.
+     */
+    private void relay(final de.maxhenkel.voicechat.api.events.MicrophonePacketEvent event) {
+        final VoicechatConnection sender = event.getSenderConnection();
+        if (sender == null || sender.isInGroup())
+            return;
+        final de.maxhenkel.voicechat.api.VoicechatServerApi api = event.getVoicechat();
+        CrystalView.voiceDistance = api.getVoiceChatDistance();
+        final CrystalView.VoiceRoute route = CrystalView.voiceRoute(sender.getPlayer().getUuid());
+        if (route == null)
+            return;
+        final boolean whisper = event.getPacket().isWhispering();
+        final double distance = whisper ? api.getVoiceChatDistance() / 2 : api.getVoiceChatDistance();
+        final de.maxhenkel.voicechat.api.packets.LocationalSoundPacket packet = event.getPacket().locationalSoundPacketBuilder()
+                .position(api.createPosition(route.x(), route.y(), route.z()))
+                .distance((float) distance)
+                .build();
+        for (final CrystalView.VoiceRoute.Ear ear : route.ears()) {
+            if (ear.distance() > distance)
+                continue;
+            final VoicechatConnection to = api.getConnectionOf(ear.player());
+            if (to != null && to.isConnected() && !to.isDisabled())
+                api.sendLocationalSoundPacketTo(to, packet);
+        }
     }
 
     private void filter(final SoundPacketEvent<?> event) {

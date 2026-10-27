@@ -308,37 +308,31 @@ public final class FightGlow implements Listener {
         }
 
         static synchronized void add(final Player fighter, final int colour) {
+            add(fighter.getName(), colour);
+        }
+
+        /** A player's name, or another entity's UUID */
+        static synchronized void add(final String entry, final int colour) {
             if (!ready())
                 return;
             try {
-                members(colour).add(fighter.getName());
+                members(colour).add(entry);
                 for (final Player viewer : Bukkit.getOnlinePlayers()) {
                     final BitSet has = CREATED.computeIfAbsent(viewer.getUniqueId(), k -> new BitSet());
                     if (has.get(colour)) {
-                        send(viewer, playerPacket.invoke(null, teams[colour], fighter.getName(), add));
+                        send(viewer, playerPacket.invoke(null, teams[colour], entry, add));
                     } else {
                         send(viewer, addOrModify.invoke(null, teams[colour], true));
                         has.set(colour);
                     }
                 }
             } catch (final ReflectiveOperationException | RuntimeException e) {
-                SpawnArena.INSTANCE.getLogger().warning("Couldn't colour " + fighter.getName() + "'s outline: " + e);
+                SpawnArena.INSTANCE.getLogger().warning("Couldn't colour " + entry + "'s outline: " + e);
             }
         }
 
         static synchronized void remove(final Player fighter, final int colour) {
-            if (!ready())
-                return;
-            try {
-                members(colour).remove(fighter.getName());
-                for (final Player viewer : Bukkit.getOnlinePlayers()) {
-                    final BitSet has = CREATED.get(viewer.getUniqueId());
-                    if (has != null && has.get(colour))
-                        send(viewer, playerPacket.invoke(null, teams[colour], fighter.getName(), remove));
-                }
-            } catch (final ReflectiveOperationException | RuntimeException e) {
-                SpawnArena.INSTANCE.getLogger().warning("Couldn't take " + fighter.getName() + "'s outline colour off: " + e);
-            }
+            remove(fighter.getName(), colour);
             // Leaving our team leaves them on none, client-side: if they're really on a team (another plugin's,
             // on the server scoreboard), have it sent out again
             final String name = fighter.getName();
@@ -354,6 +348,21 @@ public final class FightGlow implements Listener {
                     // no scoreboard (e.g. Folia): nothing to put back
                 }
             });
+        }
+
+        static synchronized void remove(final String entry, final int colour) {
+            if (!ready())
+                return;
+            try {
+                members(colour).remove(entry);
+                for (final Player viewer : Bukkit.getOnlinePlayers()) {
+                    final BitSet has = CREATED.get(viewer.getUniqueId());
+                    if (has != null && has.get(colour))
+                        send(viewer, playerPacket.invoke(null, teams[colour], entry, remove));
+                }
+            } catch (final ReflectiveOperationException | RuntimeException e) {
+                SpawnArena.INSTANCE.getLogger().warning("Couldn't take " + entry + "'s outline colour off: " + e);
+            }
         }
 
         /** A player who just joined: the colours of fights already running. */

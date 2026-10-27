@@ -91,20 +91,26 @@ public final class CrystalCopies {
                 existing.sync();
                 if (recopy && existing.getFights().isEmpty())
                     work.add(copyArena(real, spawn, existing.world()));
+                decorate(real, spawn, existing.world());
                 continue;
             }
             final String name = worldName(real, index);
             final boolean isNew = Bukkit.getWorld(name) == null && !new java.io.File(Bukkit.getWorldContainer(), name).exists();
-            final World world = createWorld(name, spawn);
+            final World world = createWorld(name, spawn, spawn.getBiome(real.spawnPoint1));
             if (world == null)
                 continue;
             matchSettings(world, spawn);
-            copyRegions(real, spawn, world);
+            try {
+                copyRegions(real, spawn, world);
+            } catch (final RuntimeException e) {
+                SpawnArena.INSTANCE.getLogger().log(Level.WARNING, "Couldn't copy the WorldGuard regions into " + name, e);
+            }
             final CrystalCopy copy = new CrystalCopy(real, world, index);
             copies.add(copy);
             BY_WORLD.put(world.getUID(), copy);
             if (recopy || isNew)
                 work.add(copyArena(real, spawn, world));
+            decorate(real, spawn, world);
         }
         copies.sort(Comparator.comparingInt(CrystalCopy::index));
         COPIES.put(real.getArenaName().toLowerCase(Locale.ROOT), List.copyOf(copies));
@@ -121,13 +127,62 @@ public final class CrystalCopies {
     public static void retire(final Arena real) {
         final List<CrystalCopy> copies = COPIES.remove(real.getArenaName().toLowerCase(Locale.ROOT));
         if (copies != null)
-            for (final CrystalCopy copy : copies)
+            for (final CrystalCopy copy : copies) {
                 BY_WORLD.remove(copy.world().getUID());
+                undecorate(copy.world());
+            }
+    }
+
+    /**
+     * The NPCs and this arena's leaderboard holograms in the copied area, copied into a copy (never saved: done again
+     * after every start). A few seconds later, once FancyNpcs and FancyHolograms have loaded theirs.
+     */
+    private static void decorate(final SavableArena real, final World spawn, final World world) {
+        final BlockVector3[] box = box(real, spawn);
+        if (box == null)
+            return;
+        Threads.globalLater(() -> {
+            if (!BY_WORLD.containsKey(world.getUID()))
+                return; // retired meanwhile
+            try {
+                if (Bukkit.getPluginManager().isPluginEnabled("FancyNpcs"))
+                    CrystalCopyNpcs.copy(spawn, world, box[0], box[1]);
+            } catch (final LinkageError | RuntimeException e) {
+                SpawnArena.INSTANCE.getLogger().warning("Couldn't copy NPCs into " + world.getName() + ": " + e);
+            }
+            try {
+                if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
+                    CrystalCopyHolograms.copy(real.getArenaName(), spawn, world, box[0], box[1]);
+            } catch (final LinkageError | RuntimeException e) {
+                SpawnArena.INSTANCE.getLogger().warning("Couldn't copy holograms into " + world.getName() + ": " + e);
+            }
+        }, 100L);
+    }
+
+    private static void undecorate(final World world) {
+        try {
+            if (Bukkit.getPluginManager().isPluginEnabled("FancyNpcs"))
+                CrystalCopyNpcs.removeFrom(world);
+        } catch (final LinkageError | RuntimeException ignored) {
+            // FancyNpcs gone: so are its NPCs
+        }
+        try {
+            if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
+                CrystalCopyHolograms.removeFrom(world);
+        } catch (final LinkageError | RuntimeException ignored) {
+            // FancyHolograms gone: so are its holograms
+        }
+    }
+
+    /** On shutdown: the copied NPCs and holograms go (they're never saved anyway). */
+    public static void undecorateAll() {
+        for (final CrystalCopy copy : BY_WORLD.values())
+            undecorate(copy.world());
     }
 
     // ── The worlds ──────────────────────────────────────────────────────────
 
-    private static World createWorld(final String name, final World like) {
+    private static World createWorld(final String name, final World like, final org.bukkit.block.Biome biome) {
         final World existing = Bukkit.getWorld(name);
         if (existing != null)
             return existing;
@@ -135,6 +190,7 @@ public final class CrystalCopies {
             return new WorldCreator(name)
                     .environment(like.getEnvironment())
                     .generator(new Empty())
+                    .biomeProvider(new OneBiome(biome)) // the copied box gets the real biomes; the rest, the arena's
                     .generateStructures(false)
                     .keepSpawnLoaded(net.kyori.adventure.util.TriState.FALSE) // nothing's around its spawn: don't hold the server up loading it
                     .createWorld();
@@ -146,6 +202,25 @@ public final class CrystalCopies {
 
     /** Nothing at all: the arena is copied in. */
     private static final class Empty extends org.bukkit.generator.ChunkGenerator {}
+
+    /** The same biome everywhere (the world's own seed would give every copy different grass and water colours). */
+    private static final class OneBiome extends org.bukkit.generator.BiomeProvider {
+        private final org.bukkit.block.Biome biome;
+
+        OneBiome(final org.bukkit.block.Biome biome) {
+            this.biome = biome;
+        }
+
+        @Override
+        public org.bukkit.block.Biome getBiome(final org.bukkit.generator.WorldInfo info, final int x, final int y, final int z) {
+            return this.biome;
+        }
+
+        @Override
+        public java.util.List<org.bukkit.block.Biome> getBiomes(final org.bukkit.generator.WorldInfo info) {
+            return java.util.List.of(this.biome);
+        }
+    }
 
     /** Everything about the Spawn world that matters to a fight. */
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -170,18 +245,39 @@ public final class CrystalCopies {
         world.setSpawnLocation(spawn.getSpawnLocation().getBlockX(), spawn.getSpawnLocation().getBlockY(), spawn.getSpawnLocation().getBlockZ());
     }
 
-    /** The box copied: the arena's region, widened by crystalCopyMargin each way (walls, deck, dome). */
-    private static BlockVector3[] box(final SavableArena real, final World spawn) {
+    /**
+     * The box copied: a WorldGuard region called "&lt;arena&gt;_copy" if there is one (exactly what belongs to the arena:
+     * walls, deck, dome, and nothing of spawn around it), otherwise the arena's region widened by crystalCopyMargin each
+     * way.
+     */
+    static BlockVector3[] box(final SavableArena real, final World spawn) {
         final RegionManager manager = Arena.ArenaUtils.REGION_CONTAINER.get(BukkitAdapter.adapt(spawn));
-        final ProtectedRegion region = manager == null ? null : manager.getRegion(real.getArenaName());
-        if (region == null)
+        if (manager == null)
             return null;
-        final int margin = SpawnArena.settings == null ? 32 : Math.max(0, SpawnArena.settings.crystalCopyMargin);
-        final BlockVector3 min = region.getMinimumPoint(), max = region.getMaximumPoint();
         final int lowest = spawn.getMinHeight(), highest = spawn.getMaxHeight() - 1;
+        BlockVector3 min, max;
+        final ProtectedRegion area = manager.getRegion(real.getArenaName() + "_copy");
+        if (area != null) {
+            min = area.getMinimumPoint();
+            max = area.getMaximumPoint();
+        } else {
+            final ProtectedRegion region = manager.getRegion(real.getArenaName());
+            if (region == null)
+                return null;
+            final int margin = SpawnArena.settings == null ? 32 : Math.max(0, SpawnArena.settings.crystalCopyMargin);
+            min = region.getMinimumPoint().subtract(margin, margin, margin);
+            max = region.getMaximumPoint().add(margin, margin, margin);
+        }
+        // Always the spot watchers are sent to (/arenawatch, the arena's exit) and the floor under it, so nobody
+        // watching a match up close lands in the void
+        final org.bukkit.Location deck = real.exitLocation;
+        if (deck != null && spawn.equals(deck.getWorld())) {
+            min = min.getMinimum(BlockVector3.at(deck.getBlockX() - 3, deck.getBlockY() - 3, deck.getBlockZ() - 3));
+            max = max.getMaximum(BlockVector3.at(deck.getBlockX() + 3, deck.getBlockY() + 3, deck.getBlockZ() + 3));
+        }
         return new BlockVector3[]{
-                BlockVector3.at(min.x() - margin, Math.max(lowest, min.y() - margin), min.z() - margin),
-                BlockVector3.at(max.x() + margin, Math.min(highest, max.y() + margin), max.z() + margin)};
+                BlockVector3.at(min.x(), Math.max(lowest, min.y()), min.z()),
+                BlockVector3.at(max.x(), Math.min(highest, max.y()), max.z())};
     }
 
     private static CompletableFuture<Void> copyArena(final SavableArena real, final World spawn, final World world) {
@@ -208,7 +304,13 @@ public final class CrystalCopies {
         for (final ProtectedRegion region : from.getRegions().values()) {
             final ProtectedRegion copy;
             if (region.getId().equals(ProtectedRegion.GLOBAL_REGION)) {
-                to.getRegion(ProtectedRegion.GLOBAL_REGION).setFlags(new HashMap<>(region.getFlags()));
+                // A new world has no global region until something makes one
+                ProtectedRegion global = to.getRegion(ProtectedRegion.GLOBAL_REGION);
+                if (global == null) {
+                    global = new com.sk89q.worldguard.protection.regions.GlobalProtectedRegion(ProtectedRegion.GLOBAL_REGION);
+                    to.addRegion(global);
+                }
+                global.setFlags(new HashMap<>(region.getFlags()));
                 continue;
             }
             if (area.getIntersectingRegions(List.of(region)).isEmpty() && !region.getId().equalsIgnoreCase(real.getArenaName()))

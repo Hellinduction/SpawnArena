@@ -110,10 +110,11 @@ public final class WorldEditUtils {
                     final com.sk89q.worldedit.function.operation.ForwardExtentCopy op =
                             new com.sk89q.worldedit.function.operation.ForwardExtentCopy(source, region, clipboard, min);
                     op.setCopyingEntities(false);
+                    op.setCopyingBiomes(true); // the grass, water and sky colours
                     Operations.complete(op);
                 }
                 try (EditSession target = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(to))) {
-                    Operations.complete(new ClipboardHolder(clipboard).createPaste(target).to(min).ignoreAirBlocks(false).build());
+                    Operations.complete(new ClipboardHolder(clipboard).createPaste(target).to(min).ignoreAirBlocks(false).copyBiomes(true).build());
                 }
             } catch (final Exception e) {
                 SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Failed to copy " + min + " to " + max + " from " + from.getName() + " into " + to.getName(), e);

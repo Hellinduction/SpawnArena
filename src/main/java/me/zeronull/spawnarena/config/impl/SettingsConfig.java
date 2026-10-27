@@ -16,6 +16,10 @@ public final class SettingsConfig {
             "being removed from the queue. Also cancels a fight that's still counting down. 0 disables it."})
     public double queueMaxDistance = 64;
 
+    @Comment({"Players this close to an arena (in its world, in blocks) see its match results in chat even with /arenawins off.",
+            "0 = /arenawins off hides them everywhere."})
+    public int winsNearbyDistance = 64;
+
     @Comment({"Broadcast fight results to the whole server. When false, only the winner and loser see them.",
             "Toggle in game with /arenaannounce"})
     public boolean broadcastWins = true;
@@ -115,8 +119,23 @@ public final class SettingsConfig {
             "full copy of the arena in a world of its own (spawnarena_<arena>_<n>), made with the Spawn world's settings."})
     public int crystalMultiMatches = 3;
 
-    @Comment("How far around a MULTI crystal arena's region is copied for its matches (walls, deck, dome), in blocks each way")
+    @Comment({"How far around a MULTI crystal arena's region is copied for its matches (walls, deck, dome), in blocks each way.",
+            "Not used when there's a WorldGuard region called <arena>_copy (e.g. crystal_copy): then exactly that is copied."})
     public int crystalCopyMargin = 32;
+
+    @Comment({"MULTI crystal arenas: players on spawn see every match at once in the real arena (fighters as mannequins, blocks",
+            "changed in any match, the newest change winning). Around each fighter their own match's blocks always show:",
+            "this many blocks out to the sides..."})
+    public int crystalViewBubbleRadius = 3;
+
+    @Comment("...this many below their feet...")
+    public int crystalViewBubbleBelow = 2;
+
+    @Comment("...and this many above their head.")
+    public int crystalViewBubbleAbove = 2;
+
+    @Comment("How far from a MULTI crystal arena players on spawn see its matches, in blocks")
+    public int crystalViewDistance = 96;
 
     @Comment({"Crystal arenas: blocks fighters can dig out of the arena's own floor during a fight (put back afterwards, like",
             "everything else). Only below the spawns' feet and under the open pit (never under a wall), and only inside",
@@ -130,10 +149,12 @@ public final class SettingsConfig {
             "everyone has left."})
     public int crystalFfaResetMinutes = 5;
 
-    @Comment({"With bunnyAC installed: MULTI Ice Rink and Moon Gravity players are taken out of bunnyAC for their match (it",
-            "flags the sliding, as it sees the real floor, and the moon jumps), and put back as soon as they're out.",
-            "Staff-exempted players are left alone. Until bunnyAC can exempt players from single checks, this means no",
-            "anticheat checks at all for that match."})
+    @Comment({"MULTI Ice Rink and Moon Gravity players aren't flagged by the anticheat for their match (it flags the sliding,",
+            "as it sees the real floor, and the moon jumps), whichever is installed (found by itself):",
+            "Vulcan: only its movement checks are turned off for them; combat and the rest keep working.",
+            "bunnyAC: they're taken out of it altogether for the match and put back as soon as they're out (staff-exempted",
+            "players are left alone). bunnyAC must let the console run its admin commands (security:",
+            "require-authenticated-admin: false), or it refuses and nobody is exempted."})
     public boolean iceRinkAnticheatExempt = true;
 
     @Comment({"With LuckPerms: each arena's #1 on its Elo board gets this suffix (%arena% is the arena's name). Someone #1 in",

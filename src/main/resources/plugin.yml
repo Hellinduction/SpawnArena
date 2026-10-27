@@ -10,6 +10,9 @@ softdepend:
   - WorldGuard
   - PlaceholderAPI
   - FancyHolograms
+  - FancyNpcs
+  - bunnyAC
+  - Vulcan
   - TAB
   - Parkour
   - bunnyAC
@@ -92,6 +95,12 @@ commands:
     permission: spawnarena.setarenaexit
     permission-message: "§cYou don't have permission!"
 
+  arenawatch:
+    description: Watch a MULTI crystal arena's matches (the viewing arena, or one match up close) - for an NPC to run
+    usage: "/arenawatch <arena>"
+    permission: spawnarena.arenawatch
+    permission-message: "§cYou don't have permission!"
+
   arenaduel:
     description: Accept, deny or cancel duel requests, or toggle receiving them (shift-right-click a player near an arena to send one)
     usage: "/arenaduel accept|deny|cancel <player> | toggle"
@@ -133,6 +142,9 @@ commands:
     permission-message: "§cYou don't have permission!"
 
 permissions:
+  spawnarena.arenawatch:
+    description: Open the menu to watch a MULTI crystal arena's matches (/arenawatch)
+    default: true
   spawnarena.arenastats.rollback:
     description: Roll back stat changes made by a staff member (/arenastats rollback)
     default: op

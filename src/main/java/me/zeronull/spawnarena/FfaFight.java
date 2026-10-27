@@ -589,7 +589,7 @@ public final class FfaFight extends Fight {
         final String where = Arena.displayName(arenaName);
         if (lostStreak >= every) {
             final Player ender = killersHere.isEmpty() ? null : killersHere.get(0);
-            broadcast(MiniMessage.miniMessage().deserialize(ender == null
+            broadcast(this.getArena(), MiniMessage.miniMessage().deserialize(ender == null
                             ? "<dark_red><bold>STREAK ENDED!</bold> <victim> took themselves out in the <arena> free-for-all, losing their "
                                     + "<white><bold><streak></bold></white> kill streak."
                             : "<dark_red><bold>STREAK ENDED!</bold> <killer> ended <victim><possessive> "
@@ -603,7 +603,7 @@ public final class FfaFight extends Fight {
         for (final Map.Entry<UUID, Integer> e : newStreaks.entrySet()) {
             final Player killer = Bukkit.getPlayer(e.getKey());
             if (killer != null && e.getValue() >= every && e.getValue() % every == 0)
-                broadcast(MiniMessage.miniMessage().deserialize(
+                broadcast(this.getArena(), MiniMessage.miniMessage().deserialize(
                         "<gold><bold>KILL STREAK!</bold></gold> <yellow><killer></yellow> <gold>is on a <white><bold><streak></bold></white> "
                                 + "kill streak in the <arena> free-for-all!",
                         Placeholder.component("killer", killer.displayName()),

@@ -907,7 +907,7 @@ public class Fight {
         }
 
         if (endedStreaks.isEmpty()) {
-            broadcast(MiniMessage.miniMessage().deserialize(selfOut
+            broadcast(this.getArena(), MiniMessage.miniMessage().deserialize(selfOut
                             ? "<dark_red><loser> took themselves out in the <arena>arena, <winner> <wins><ws_str>!"
                             : "<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
                     Placeholder.component("winner", displayNames(winners)),
@@ -973,7 +973,7 @@ public class Fight {
                 Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners)),
                 Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : Arena.displayName(this.arena.getArenaName()) + " ")).hoverEvent(statsHover);
 
-        broadcast(message, winners, losers);
+        broadcast(this.getArena(), message, winners, losers);
 
         final Location where = this.eliminatedAt.getOrDefault(loser.getUniqueId(), loser.getLocation());
         if (where == null || where.getWorld() == null)
@@ -1054,9 +1054,10 @@ public class Fight {
 
     /**
      * Fighters always see their own result; everyone else only if broadcasting is on and they haven't
-     * opted out (/arenawins). Returns the players who received it.
+     * opted out (/arenawins), or are near the arena (in its world, within winsNearbyDistance), opted out or not.
+     * Returns the players who received it.
      */
-    static List<Player> broadcast(final Component message, final List<Player> winners, final List<Player> losers) {
+    static List<Player> broadcast(final Arena arena, final Component message, final List<Player> winners, final List<Player> losers) {
         final Set<Player> fighters = new HashSet<>(winners);
         fighters.addAll(losers);
         final List<Player> received = new ArrayList<>();
@@ -1072,6 +1073,13 @@ public class Fight {
 
         Bukkit.getConsoleSender().sendMessage(message);
 
+        // Watching the arena: they see it even with /arenawins off
+        for (final Player p : Bukkit.getOnlinePlayers())
+            if (!fighters.contains(p) && !WinMessagePrefs.wantsWinMessages(p) && isNear(arena, p)) {
+                p.sendMessage(message);
+                received.add(p);
+            }
+
         // With the Velocity bridge, the whole network sees it (everyone but the fighters, who already have)
         if (ProxyBridge.broadcast(message, new ArrayList<>(received), received))
             return received;
@@ -1082,6 +1090,17 @@ public class Fight {
                 received.add(p);
             }
         return received;
+    }
+
+    /** In the arena's world (or the world of one of its copies' matches) and close to it. */
+    private static boolean isNear(final Arena arena, final Player player) {
+        final int range = SpawnArena.settings == null ? 64 : SpawnArena.settings.winsNearbyDistance;
+        if (arena == null || range <= 0)
+            return false;
+        final Arena real = arena instanceof CrystalCopy copy ? copy.real() : arena;
+        if (arena instanceof CrystalCopy copy && player.getWorld().equals(copy.world()))
+            return true;
+        return real.distanceFrom(player.getLocation()) <= range;
     }
 
     // ── Spawns ──────────────────────────────────────────────────────────────

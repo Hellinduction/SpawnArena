@@ -75,6 +75,7 @@ public class SpawnArena extends JavaPlugin {
 
         // MULTI crystal arenas' copies (their worlds must be there before a crash's leftovers can be undone in them)
         CrystalCopies.startAll();
+        CrystalView.start();
         // Undo anything a crash left in crystal arenas, then keep the crash-safety file up to date
         CrystalPvp.restoreLeftovers();
         TopEloSuffix.start();
@@ -128,6 +129,10 @@ public class SpawnArena extends JavaPlugin {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaSpectatorGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaBoundaryGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.CrystalArenaListener(), this);
+            if (CrystalCopies.supported()) {
+                Bukkit.getServer().getPluginManager().registerEvents(new CrystalView(), this);
+                Bukkit.getServer().getPluginManager().registerEvents(new WatchMenu.Events(), this);
+            }
             // Uses WorldGuard's internal events; if a WorldGuard update changes them, crystal arenas still work
             // (fighters just see WorldGuard's "can't place" messages unless the region allows building)
             try {
@@ -164,6 +169,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("arenabuild", new me.zeronull.spawnarena.commands.impl.ArenaBuildCommand());
         this.registerCommand("arenabet", new me.zeronull.spawnarena.commands.impl.ArenaBetCommand());
         this.registerCommand("arenasetup", new me.zeronull.spawnarena.commands.impl.ArenaSetupCommand());
+        this.registerCommand("arenawatch", new WatchMenu.WatchCommand());
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             ArenaWizard.startTimeouts();
             // Undo pastes from arena setups that never finished (the server stopped mid-setup)
@@ -182,6 +188,10 @@ public class SpawnArena extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        CrystalView.stop();
+        if (CrystalCopies.supported())
+            WatchMenu.sendEveryoneBack();
+        CrystalCopies.undecorateAll();
         this.shutdownArenas();
         AnticheatExempt.stop();
         me.zeronull.spawnarena.config.ConfigHandler.getInstance().flushPreFights();

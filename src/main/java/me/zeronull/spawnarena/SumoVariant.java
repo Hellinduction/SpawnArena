@@ -25,7 +25,8 @@ public enum SumoVariant {
     ROD("Rod", "knockback fishing rod"),
     MOON("Moon Gravity", "jump high, fall slow"),
     SHRINK("Shrinking Platform", "the edges fall away"),
-    COMBO("Combo", "fists, no hit delay");
+    COMBO("Combo", "fists, no hit delay"),
+    SPEAR("Spear", "lunge into them");
 
     public final String title;
     public final String hint;
@@ -219,6 +220,15 @@ public enum SumoVariant {
             }
             case SNOWBALL -> player.getInventory().addItem(SlapFish.tag(new ItemStack(Material.SNOWBALL, 16))); // never runs out
             case COMBO -> { } // fists only
+            case SPEAR -> {
+                final ItemStack spear = new ItemStack(Material.IRON_SPEAR);
+                enchant(spear, "lunge", 3);
+                enchant(spear, "knockback", 1); // a jab only pushes them back with Knockback on it
+                spear.editMeta(meta -> meta.setUnbreakable(true));
+                player.getInventory().addItem(SlapFish.tag(spear));
+                // Lunging costs hunger, and can't be done once it's low: kept full for the whole match
+                player.addPotionEffect(new PotionEffect(PotionEffectType.SATURATION, 20 * 60 * 20, 0, false, false, false));
+            }
             case ROD -> {
                 final ItemStack rod = new ItemStack(Material.FISHING_ROD);
                 enchant(rod, "knockback", 1);
