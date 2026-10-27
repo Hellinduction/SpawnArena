@@ -44,7 +44,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         final boolean rank = params.startsWith("my_rank_");
         final String rest = params.substring(rank ? "my_rank_".length() : "my_value_".length());
         String stat = null;
-        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "playtime"})
+        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "playtime", "kdr", "wlr"})
             if (rest.endsWith("_" + s)) { stat = s; break; }
         if (stat == null)
             return null;
@@ -55,7 +55,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             return "...";
         if (rank)
             return standing.rank() > 0 ? "#" + standing.rank() : "unranked";
-        return stat.equals("playtime") ? StatsManager.formatDuration(standing.value()) : String.valueOf(standing.value());
+        return shown(field, standing.value());
     }
 
     private List<StatsManager.LeaderboardEntry> cachedTop(String arena, String field) {
@@ -98,6 +98,18 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
                     return null;
                 final String arena = String.join("_", java.util.Arrays.copyOfRange(parts, 2, parts.length));
                 return String.valueOf(SpawnArena.statsManager.getField(player.getUniqueId(), arena, field));
+            }
+
+            // Ratios and losses: kdr_<arena> (free-for-all K/D), wlr_<arena> (W/L), losses_<arena>
+            if (player != null && (type.equals("kdr") || type.equals("wlr") || type.equals("losses"))) {
+                final String arena = String.join("_", java.util.Arrays.copyOfRange(parts, 1, parts.length));
+                final UUID uuid = player.getUniqueId();
+                final StatsManager stats = SpawnArena.statsManager;
+                return switch (type) {
+                    case "kdr" -> StatsManager.ratio(stats.getField(uuid, arena, "ffa_kills"), stats.getField(uuid, arena, "ffa_deaths"));
+                    case "wlr" -> StatsManager.ratio(stats.getWins(uuid, arena), stats.getLosses(uuid, arena));
+                    default -> String.valueOf(stats.getLosses(uuid, arena));
+                };
             }
 
             // Personal stats: wins_<arena>, streak_<arena>, best_streak_<arena>
@@ -145,7 +157,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
                 final StatsManager.LeaderboardEntry entry = top.get(idx);
                 return switch (subType) {
                     case "player" -> entry.name();
-                    case "value" -> dbField.equals("fight_seconds") ? StatsManager.formatDuration(entry.value()) : String.valueOf(entry.value());
+                    case "value" -> shown(dbField, entry.value());
                     default -> null;
                 };
             }
@@ -260,7 +272,18 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             case "ffa_deaths" -> "ffa_deaths";
             case "ffa_streak" -> "ffa_best_streak";
             case "playtime" -> "fight_seconds";
+            case "kdr" -> "kdr";
+            case "wlr" -> "wlr";
             default -> null;
         };
+    }
+
+    /** How a board's value shows: time for playtime, two decimals for the ratios, else the number. */
+    private static String shown(final String field, final int value) {
+        if (field.equals("fight_seconds"))
+            return StatsManager.formatDuration(value);
+        if (StatsManager.isRatio(field))
+            return StatsManager.formatRatio(value);
+        return String.valueOf(value);
     }
 }

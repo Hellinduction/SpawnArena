@@ -113,8 +113,9 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 final int streak = SpawnArena.statsManager.getWinStreak(uuid, arena);
                 final int best = SpawnArena.statsManager.getBestWinStreak(uuid, arena);
                 final int losses = SpawnArena.statsManager.getLosses(uuid, arena);
-                sender.sendMessage(String.format("§6Stats for §e%s §6in §e%s§6: wins=§e%d §6losses=§e%d §6games=§e%d §6streak=§e%d §6best=§e%d §6elo=§e%d",
-                        target.getName(), arena, wins, losses, wins + losses, streak, best, SpawnArena.statsManager.getElo(uuid, arena)));
+                sender.sendMessage(String.format("§6Stats for §e%s §6in §e%s§6: wins=§e%d §6losses=§e%d §6W/L=§e%s §6games=§e%d §6streak=§e%d §6best=§e%d §6elo=§e%d",
+                        target.getName(), arena, wins, losses, me.zeronull.spawnarena.StatsManager.ratio(wins, losses), wins + losses, streak, best,
+                        SpawnArena.statsManager.getElo(uuid, arena)));
                 sendLossesNote(sender);
                 sender.sendMessage("§6Time fighting here: §e" + me.zeronull.spawnarena.StatsManager.formatDuration(
                         SpawnArena.statsManager.getField(uuid, arena, "fight_seconds")));
@@ -125,7 +126,7 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 if (ffaKills > 0 || ffaDeaths > 0 || (found != null && found.isFfa()))
                     sender.sendMessage(String.format("§6Free-for-all: kills=§e%d §6deaths=§e%d §6best kill streak=§e%d §6K/D=§e%s",
                             ffaKills, ffaDeaths, SpawnArena.statsManager.getField(uuid, arena, "ffa_best_streak"),
-                            ffaDeaths == 0 ? String.valueOf(ffaKills) : String.format("%.2f", ffaKills / (double) ffaDeaths)));
+                            me.zeronull.spawnarena.StatsManager.ratio(ffaKills, ffaDeaths)));
                 final double[] made = SpawnArena.statsManager.getMoneyMade(uuid, arena);
                 sender.sendMessage(String.format("§6Money made: §e%s §6here · §e%s §6in all arenas",
                         me.zeronull.spawnarena.StatsManager.formatMoney(made[0]), me.zeronull.spawnarena.StatsManager.formatMoney(made[1])));

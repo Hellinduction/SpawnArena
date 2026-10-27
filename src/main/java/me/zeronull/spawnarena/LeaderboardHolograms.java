@@ -115,6 +115,8 @@ public final class LeaderboardHolograms {
             case "ffa_deaths" -> "FFA Deaths";
             case "ffa_streak" -> "Best FFA Kill Streak";
             case "playtime" -> "Time Fighting";
+            case "kdr" -> "K/D";
+            case "wlr" -> "W/L";
             default -> "Wins";
         };
     }
@@ -276,7 +278,7 @@ public final class LeaderboardHolograms {
             return null;
         // spawnarena_lb_<arena>_<stat>_<4 digits>
         final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
-        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo"}) {
+        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "playtime", "kdr", "wlr"}) {
             if (rest.endsWith("_" + s)) {
                 final String arena = resolveArena(rest.substring(0, rest.length() - s.length() - 1));
                 return arena == null ? null : new String[]{arena, s};

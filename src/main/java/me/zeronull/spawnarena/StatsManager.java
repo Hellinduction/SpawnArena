@@ -1349,6 +1349,11 @@ public class StatsManager {
 
     /** Who a board may list: FFA boards only those who've played FFA, Elo boards only those with enough rated fights. */
     private static String boardFilter(final String field, final String alias) {
+        final int ratioMin = SpawnArena.settings == null ? 20 : Math.max(0, SpawnArena.settings.ratioMinGames);
+        if (field.equals("kdr"))
+            return " AND " + alias + "ffa_kills + " + alias + "ffa_deaths >= " + Math.max(1, ratioMin);
+        if (field.equals("wlr"))
+            return " AND " + alias + "wins + " + alias + "losses >= " + Math.max(1, ratioMin);
         if (field.startsWith("ffa_"))
             return " AND (" + alias + "ffa_kills > 0 OR " + alias + "ffa_deaths > 0)";
         if (field.equals("elo") && eloMinGames() > 0)
@@ -1363,6 +1368,33 @@ public class StatsManager {
 
     public int getBestWinStreak(UUID uuid, String arena) {
         return getField(uuid, arena, "best_win_streak");
+    }
+
+    /**
+     * The SQL for a board's value: a column, or for the ratio boards K/D ("kdr": free-for-all kills / deaths) and W/L
+     * ("wlr": wins / losses) the ratio times 100, as a whole number (shown with two decimals, see {@link #formatRatio}).
+     * With none lost yet, the ratio is just the kills or wins.
+     */
+    static String column(final String field) {
+        return switch (field) {
+            case "kdr" -> "(CASE WHEN ffa_deaths = 0 THEN ffa_kills * 100 ELSE FLOOR(ffa_kills * 100 / ffa_deaths) END)";
+            case "wlr" -> "(CASE WHEN losses = 0 THEN wins * 100 ELSE FLOOR(wins * 100 / losses) END)";
+            default -> field;
+        };
+    }
+
+    public static boolean isRatio(final String field) {
+        return field.equals("kdr") || field.equals("wlr");
+    }
+
+    /** A ratio board's value (times 100) as shown: 1.50 */
+    public static String formatRatio(final long hundredths) {
+        return String.format(java.util.Locale.ROOT, "%.2f", hundredths / 100.0);
+    }
+
+    /** A ratio as shown, worked out from its two counts: kills and deaths, or wins and losses. */
+    public static String ratio(final int good, final int bad) {
+        return bad == 0 ? String.valueOf(good) : String.format(java.util.Locale.ROOT, "%.2f", good / (double) bad);
     }
 
     public int getField(UUID uuid, String arena, String field) {
@@ -1608,8 +1640,8 @@ public class StatsManager {
     private java.util.Map<UUID, Standing> fetchRanks(final String arena, final String field) {
         final String reachedAt = reachedAtColumn(field);
         final String listed = boardFilter(field, "");
-        final String sql = "SELECT uuid, " + field + " AS v, " + (listed.isEmpty() ? "1" : "CASE WHEN 1=1" + listed + " THEN 1 ELSE 0 END")
-                + " AS listed FROM arena_stats WHERE server_id=" + sid + " AND arena=? ORDER BY " + field + " DESC"
+        final String sql = "SELECT uuid, " + column(field) + " AS v, " + (listed.isEmpty() ? "1" : "CASE WHEN 1=1" + listed + " THEN 1 ELSE 0 END")
+                + " AS listed FROM arena_stats WHERE server_id=" + sid + " AND arena=? ORDER BY v DESC"
                 + (reachedAt != null ? ", " + reachedAt + " ASC" : "") + ", uuid ASC";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
@@ -1658,8 +1690,8 @@ public class StatsManager {
         final String reachedAt = reachedAtColumn(field);
         final String tieBreak = reachedAt != null ? ", " + reachedAt + " ASC" : "";
         final String played = boardFilter(field, "");
-        final String sql = "SELECT uuid, " + field + " FROM arena_stats " +
-                "WHERE server_id=" + sid + " AND arena=?" + played + " ORDER BY " + field + " DESC" + tieBreak + ", uuid ASC LIMIT ?";
+        final String sql = "SELECT uuid, " + column(field) + " AS v FROM arena_stats " +
+                "WHERE server_id=" + sid + " AND arena=?" + played + " ORDER BY v DESC" + tieBreak + ", uuid ASC LIMIT ?";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             ps.setString(1, arena.toLowerCase());
@@ -1667,7 +1699,7 @@ public class StatsManager {
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     final UUID uuid = UUID.fromString(rs.getString("uuid"));
-                    final int value = rs.getInt(field);
+                    final int value = rs.getInt("v");
                     // Our own names first; one we don't know yet is looked up in the background
                     final String name = nameOf(uuid);
                     entries.add(new LeaderboardEntry(uuid, name != null ? name : "...", value));

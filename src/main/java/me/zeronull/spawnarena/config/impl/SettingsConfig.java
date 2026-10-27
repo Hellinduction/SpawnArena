@@ -44,6 +44,10 @@ public final class SettingsConfig {
             "unranked until then), so winning a couple and never playing again can't top it. 0 = everyone shows."})
     public int eloMinGames = 5;
 
+    @Comment({"K/D (free-for-all kills / deaths) and W/L (wins / losses) leaderboards only list players with at least this many",
+            "kills + deaths (K/D) or games (W/L) in that arena, so someone who's 1-0 can't top them. 0 = everyone shows."})
+    public int ratioMinGames = 20;
+
     @Comment({"Don't pay win rewards when the winner and loser have ever connected from the same IP address.",
             "IPs are stored hashed. Local/LAN addresses are ignored."})
     public boolean blockSameIpRewards = true;

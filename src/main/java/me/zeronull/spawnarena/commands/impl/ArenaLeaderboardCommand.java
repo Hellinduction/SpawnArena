@@ -28,7 +28,7 @@ import java.util.List;
  */
 public final class ArenaLeaderboardCommand implements CommandExecutor, TabCompleter {
 
-    private static final List<String> STATS = List.of("wins", "streak", "best_streak", "elo", "ffa_kills", "ffa_deaths", "ffa_streak", "playtime");
+    private static final List<String> STATS = List.of("wins", "streak", "best_streak", "elo", "ffa_kills", "ffa_deaths", "ffa_streak", "playtime", "kdr", "wlr");
     private static final String SPAWN_PERMISSION = "spawnarena.arenaleaderboard.spawn";
     public static final int MAX_LIMIT = 25;
 
@@ -284,6 +284,8 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             case "ffa_deaths" -> "FFA Deaths";
             case "ffa_streak" -> "Best FFA Kill Streak";
             case "playtime" -> "Time Fighting";
+            case "kdr" -> "K/D";
+            case "wlr" -> "W/L";
             default -> "Wins";
         };
     }
@@ -298,6 +300,8 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             case "ffa_deaths" -> "ffa_deaths";
             case "ffa_streak" -> "ffa_best_streak";
             case "playtime" -> "fight_seconds";
+            case "kdr" -> "kdr";
+            case "wlr" -> "wlr";
             default -> null;
         };
     }
