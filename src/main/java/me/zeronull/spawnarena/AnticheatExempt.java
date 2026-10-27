@@ -2,8 +2,7 @@ package me.zeronull.spawnarena;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
-import org.apache.logging.log4j.core.appender.AbstractAppender;
-import org.apache.logging.log4j.core.config.Property;
+import org.apache.logging.log4j.core.filter.AbstractFilter;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
@@ -56,7 +55,8 @@ public final class AnticheatExempt {
     private static final Map<UUID, String> CODES = new ConcurrentHashMap<>();
     /** What to send next: {uuid, true = exempt / false = remove}. */
     private static final Deque<Object[]> COMMANDS = new ArrayDeque<>();
-    private static volatile Appender appender;
+    /** Reads (and hides) bunnyAC's confirm lines for our requests; null while exemptions are off. */
+    private static volatile ConfirmFilter appender;
     private static volatile boolean warnedRefused;
 
     private AnticheatExempt() {}
@@ -97,12 +97,12 @@ public final class AnticheatExempt {
             return;
         }
         try {
-            final Appender a = new Appender();
-            a.start();
-            ((org.apache.logging.log4j.core.Logger) LogManager.getRootLogger()).addAppender(a);
-            appender = a;
+            final ConfirmFilter f = new ConfirmFilter();
+            f.start();
+            rootConfig().addFilter(f);
+            appender = f;
         } catch (final Throwable e) {
-            SpawnArena.INSTANCE.getLogger().log(Level.WARNING, "Couldn't watch the console for bunnyAC's confirmations; "
+            SpawnArena.INSTANCE.getLogger().log(Level.WARNING, "Couldn't read bunnyAC's confirmations off the console; "
                     + "Ice Rink players in MULTI arenas won't be exempted from it", e);
             return;
         }
@@ -133,7 +133,7 @@ public final class AnticheatExempt {
     }
 
     private static void end() {
-        final Appender a = appender;
+        final ConfirmFilter a = appender;
         if (a == null)
             return;
         for (final UUID uuid : new ArrayList<>(OURS)) {
@@ -147,7 +147,7 @@ public final class AnticheatExempt {
             }
         }
         appender = null;
-        ((org.apache.logging.log4j.core.Logger) LogManager.getRootLogger()).removeAppender(a);
+        rootConfig().removeFilter(a);
         a.stop();
     }
 
@@ -297,17 +297,22 @@ public final class AnticheatExempt {
         }
     }
 
-    /** Reads bunnyAC's confirm line off the console, for the players we asked about; the code is sent back by the pump. */
-    private static final class Appender extends AbstractAppender {
-        Appender() {
-            super("SpawnArena-bunnyAC-confirm", null, null, true, Property.EMPTY_ARRAY);
-        }
+    /** The console's root logger config: every line on the console and in the log files goes through it. */
+    private static org.apache.logging.log4j.core.config.LoggerConfig rootConfig() {
+        return ((org.apache.logging.log4j.core.LoggerContext) LogManager.getContext(false)).getConfiguration().getRootLogger();
+    }
 
+    /**
+     * Reads bunnyAC's confirm line off the console, for the players we asked about (the code is sent back by the pump),
+     * and keeps that line out of the console and the log files: a code that's never shown can't be used by anyone else.
+     * Every other line, staff's own confirmations included, goes through as normal.
+     */
+    private static final class ConfirmFilter extends AbstractFilter {
         @Override
-        public void append(final LogEvent event) {
+        public Result filter(final LogEvent event) {
             final String text = event.getMessage() == null ? null : event.getMessage().getFormattedMessage();
             if (text == null)
-                return;
+                return Result.NEUTRAL;
             // bunnyAC refusing the console (its require-authenticated-admin setting): say so, once, rather than nothing
             if (text.contains("Administrative access denied") && !AWAITING.isEmpty() && !warnedRefused) {
                 warnedRefused = true;
@@ -316,19 +321,22 @@ public final class AnticheatExempt {
                         + "to false (in bunnyAC's panel if its config comes from there).");
             }
             if (!text.contains("/bunnyac confirm"))
-                return;
+                return Result.NEUTRAL;
             final Matcher m = CONFIRM.matcher(text.replaceAll("§.", ""));
             if (!m.find())
-                return;
+                return Result.NEUTRAL;
             final UUID uuid;
             try {
                 uuid = UUID.fromString(m.group(2));
             } catch (final IllegalArgumentException e) {
-                return;
+                return Result.NEUTRAL;
             }
             // Only the ones we asked for, and only the action we asked for (never a confirmation meant for staff)
-            if (AWAITING.remove(uuid, m.group(1).equals("exempt")))
+            if (AWAITING.remove(uuid, m.group(1).equals("exempt"))) {
                 CODES.put(uuid, m.group(3));
+                return Result.DENY;
+            }
+            return Result.NEUTRAL;
         }
     }
 }
