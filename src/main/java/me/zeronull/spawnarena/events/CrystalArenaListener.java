@@ -9,6 +9,7 @@ import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
+import org.bukkit.entity.minecart.ExplosiveMinecart;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -196,7 +197,28 @@ public final class CrystalArenaListener implements Listener {
             return;
         }
 
-        if (e.getItem() == null || e.getItem().getType() != Material.END_CRYSTAL)
+        // Cart PvP: a TNT minecart onto a rail, and flint and steel where a fighter could place a block (WorldGuard
+        // checks both when the item is used). Fire never spreads or burns anything (see onIgnite and onBurn)
+        final Material held = e.getItem() == null ? null : e.getItem().getType();
+        if (held == Material.TNT_MINECART || held == Material.FLINT_AND_STEEL) {
+            if (!fighter) {
+                if (isOutsider(arena, player))
+                    e.setCancelled(true);
+                return;
+            }
+            final boolean allowed = held == Material.TNT_MINECART
+                    ? Tag.RAILS.isTagged(type)
+                    : canLight(arena, clicked, clicked.getRelative(e.getBlockFace()));
+            if (allowed) {
+                // A denied block use (WorldGuard) stops a cart being put on the rail; clicking a rail itself does nothing
+                if (held == Material.TNT_MINECART)
+                    e.setUseInteractedBlock(Event.Result.ALLOW);
+                e.setUseItemInHand(Event.Result.ALLOW);
+            }
+            return;
+        }
+
+        if (held != Material.END_CRYSTAL)
             return;
         if (!fighter) {
             if (isOutsider(arena, player))
@@ -227,7 +249,15 @@ public final class CrystalArenaListener implements Listener {
             return;
         }
 
-        // Only end crystals: boats, minecarts, armor stands etc. could carry items or blocks out
+        // TNT minecarts (cart PvP): removed when the fight ends like crystals, crash-safe too
+        if (e.getEntity() instanceof ExplosiveMinecart) {
+            e.setCancelled(false);
+            CrystalPvp.recordCrystal(arena.getFight(player), e.getEntity());
+            noteCartPlacer(e.getEntity(), player);
+            return;
+        }
+
+        // Otherwise only end crystals: boats, other minecarts, armor stands etc. could carry items or blocks out
         if (!(e.getEntity() instanceof EnderCrystal)) {
             e.setCancelled(true);
             this.tell(player, "You can't place that in this arena.");
@@ -360,6 +390,12 @@ public final class CrystalArenaListener implements Listener {
             return;
         }
 
+        // The fight's TNT minecarts: same rules (Paper reports some cart damage here too)
+        if (victim instanceof ExplosiveMinecart && CrystalPvp.arenaAt(victim.getLocation()) != null) {
+            e.setCancelled(!mayHarmCart(victim, e instanceof EntityDamageByEntityEvent byEntity ? byEntity.getDamager() : null));
+            return;
+        }
+
         if (e.getCause() != EntityDamageEvent.DamageCause.ENTITY_EXPLOSION
                 && e.getCause() != EntityDamageEvent.DamageCause.BLOCK_EXPLOSION)
             return;
@@ -397,6 +433,12 @@ public final class CrystalArenaListener implements Listener {
         final Entity causing = e.getDamageSource().getCausingEntity();
         if (causing != null)
             return playerBehind(causing);
+        // A TNT minecart's blast: whoever placed it
+        final Entity direct = e.getDamageSource().getDirectEntity();
+        if (direct instanceof ExplosiveMinecart) {
+            final CartPlacer placer = cartPlacers.get(direct.getUniqueId());
+            return placer == null ? null : Bukkit.getPlayer(placer.player());
+        }
 
         if (where == null)
             return null;
@@ -512,10 +554,61 @@ public final class CrystalArenaListener implements Listener {
             e.setCancelled(true);
     }
 
+    /**
+     * Fire only from a fighter's flint and steel, where they could place a block (it's put back after the fight).
+     * Nothing else lights in a fight: no spreading, lava, lightning...
+     */
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onIgnite(final BlockIgniteEvent e) {
-        if (this.duringFight(e.getBlock().getLocation()))
-            e.setCancelled(true);
+        if (!this.duringFight(e.getBlock().getLocation()))
+            return;
+        final Arena arena = CrystalPvp.arenaAt(e.getBlock());
+        final boolean allowed = e.getCause() == BlockIgniteEvent.IgniteCause.FLINT_AND_STEEL && e.getPlayer() != null
+                && arena != null && CrystalPvp.isActiveFighter(arena, e.getPlayer()) && CrystalPvp.canBuild(arena, e.getBlock());
+        e.setCancelled(!allowed);
+    }
+
+    /** Flint and steel on this block face: fire goes in a spot a fighter could build in, and lights only their own TNT, candles... */
+    private static boolean canLight(final Arena arena, final Block clicked, final Block fireSpot) {
+        final Material type = clicked.getType();
+        if (type == Material.TNT || type == Material.CAMPFIRE || type == Material.SOUL_CAMPFIRE
+                || Tag.CANDLES.isTagged(type) || Tag.CANDLE_CAKES.isTagged(type))
+            return CrystalPvp.canBreak(arena, clicked);
+        return arena.equals(CrystalPvp.arenaAt(fireSpot)) && CrystalPvp.canBuild(arena, fireSpot);
+    }
+
+    // ── TNT minecarts ───────────────────────────────────────────────────────
+
+    /** Who placed each TNT minecart (and when), so its blast counts as theirs: kill credit, and no teammate damage. */
+    private record CartPlacer(UUID player, long at) {}
+    private static final Map<UUID, CartPlacer> cartPlacers = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long CART_MEMORY_MILLIS = 15 * 60_000;
+
+    private static void noteCartPlacer(final Entity cart, final Player player) {
+        final long now = System.currentTimeMillis();
+        cartPlacers.values().removeIf(p -> now - p.at() > CART_MEMORY_MILLIS);
+        cartPlacers.put(cart.getUniqueId(), new CartPlacer(player.getUniqueId(), now));
+    }
+
+    /** A fight's own TNT minecart can be hit, broken or set off by its fighters and its blasts; the arena's own carts and outsiders can't. */
+    private static boolean mayHarmCart(final Entity cart, final Entity attacker) {
+        final Arena arena = CrystalPvp.arenaAt(cart.getLocation());
+        if (arena == null || !CrystalPvp.isPlacedCrystal(arena, cart))
+            return arena == null || CrystalPvp.activeFight(arena) == null;
+        final Player player = attacker == null ? null : playerBehind(attacker);
+        return player == null ? !(attacker instanceof Player) : CrystalPvp.isActiveFighter(arena, player);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onCartDamage(final org.bukkit.event.vehicle.VehicleDamageEvent e) {
+        if (e.getVehicle() instanceof ExplosiveMinecart && CrystalPvp.arenaAt(e.getVehicle().getLocation()) != null)
+            e.setCancelled(!mayHarmCart(e.getVehicle(), e.getAttacker()));
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onCartBreak(final org.bukkit.event.vehicle.VehicleDestroyEvent e) {
+        if (e.getVehicle() instanceof ExplosiveMinecart && CrystalPvp.arenaAt(e.getVehicle().getLocation()) != null)
+            e.setCancelled(!mayHarmCart(e.getVehicle(), e.getAttacker()));
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
