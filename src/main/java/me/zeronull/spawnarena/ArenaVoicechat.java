@@ -17,10 +17,17 @@ import org.bukkit.entity.Player;
  */
 public final class ArenaVoicechat implements VoicechatPlugin {
 
+    /**
+     * Voice chat can't unregister a plugin, so after a reload (PlugMan) it keeps calling this copy, whose jar is closed:
+     * every class it hasn't loaded yet fails. Off once SpawnArena disables, or on the first such failure.
+     */
+    private static volatile boolean active;
+
     public static void register() {
         final BukkitVoicechatService service = Bukkit.getServicesManager().load(BukkitVoicechatService.class);
         if (service == null)
             return;
+        active = true;
         service.registerPlugin(new ArenaVoicechat());
         SpawnArena.INSTANCE.getLogger().info("Hooked into Simple Voice Chat: separate fights in the same arena can't hear each other.");
     }
@@ -44,7 +51,21 @@ public final class ArenaVoicechat implements VoicechatPlugin {
      * proximity chat can't reach between them by itself. What they say is passed on, from where they are, to those of
      * the others close enough to hear (see {@link CrystalView#voiceRoute}). Not while they talk in a group.
      */
+    public static void unregister() {
+        active = false;
+    }
+
     private void relay(final de.maxhenkel.voicechat.api.events.MicrophonePacketEvent event) {
+        if (!active)
+            return;
+        try {
+            relay0(event);
+        } catch (final LinkageError | IllegalStateException e) {
+            active = false;
+        }
+    }
+
+    private void relay0(final de.maxhenkel.voicechat.api.events.MicrophonePacketEvent event) {
         final VoicechatConnection sender = event.getSenderConnection();
         if (sender == null || sender.isInGroup())
             return;
@@ -69,6 +90,16 @@ public final class ArenaVoicechat implements VoicechatPlugin {
     }
 
     private void filter(final SoundPacketEvent<?> event) {
+        if (!active)
+            return;
+        try {
+            filter0(event);
+        } catch (final LinkageError | IllegalStateException e) {
+            active = false;
+        }
+    }
+
+    private void filter0(final SoundPacketEvent<?> event) {
         final Player sender = bukkitPlayer(event.getSenderConnection());
         final Player receiver = bukkitPlayer(event.getReceiverConnection());
         if (sender != null && receiver != null && hiddenFromEachOther(sender, receiver))

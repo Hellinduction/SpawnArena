@@ -188,6 +188,7 @@ public class SpawnArena extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        ArenaVoicechat.unregister();
         CrystalView.stop();
         if (CrystalCopies.supported())
             WatchMenu.sendEveryoneBack();
