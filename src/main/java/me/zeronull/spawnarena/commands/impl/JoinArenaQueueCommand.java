@@ -109,6 +109,8 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
     private static String cantJoin(final Player player, final Arena arena, final boolean busy) {
         if (!SpawnArena.settings.arenasOpen)
             return "The arenas are closed right now. Try again later!";
+        if (arena.isLocked())
+            return "That arena is closed right now. Try again later!";
         if (!arena.isSetUp())
             return "That arena has not been fully setup!";
         if (SpawnArena.arenas.isInQueue(player, arena.queue))

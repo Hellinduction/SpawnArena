@@ -82,6 +82,8 @@ public final class FfaFight extends Fight {
     public static String cantJoin(final Player player, final Arena arena) {
         if (SpawnArena.settings != null && !SpawnArena.settings.arenasOpen)
             return "The arenas are closed right now. Try again later!";
+        if (arena.isLocked())
+            return "That arena is closed right now. Try again later!";
         if (!arena.isFfa())
             return "That arena isn't a free-for-all.";
         if (!arena.isSetUp())
@@ -185,11 +187,7 @@ public final class FfaFight extends Fight {
     }
 
     private boolean stillJoining(final Player player) {
-        return player.isOnline() && this.getState() == FightState.IN_FIGHT && this.joining.contains(player) && arenasOpen();
-    }
-
-    private static boolean arenasOpen() {
-        return SpawnArena.settings == null || SpawnArena.settings.arenasOpen;
+        return player.isOnline() && this.getState() == FightState.IN_FIGHT && this.joining.contains(player) && this.arena.isOpen();
     }
 
     /** On the player's thread: saves everything they have, sets them up and teleports them in. */
@@ -236,7 +234,7 @@ public final class FfaFight extends Fight {
         final boolean admitted;
         final int count;
         synchronized (this) {
-            admitted = teleported && player.isOnline() && this.getState() == FightState.IN_FIGHT && arenasOpen() && this.joining.remove(player);
+            admitted = teleported && player.isOnline() && this.getState() == FightState.IN_FIGHT && this.arena.isOpen() && this.joining.remove(player);
             if (admitted) {
                 this.alive.add(player);
                 this.fightingSince.put(player.getUniqueId(), System.currentTimeMillis());

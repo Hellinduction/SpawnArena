@@ -72,8 +72,8 @@ commands:
     permission-message: "§cYou don't have permission!"
 
   arenalock:
-    description: Close or open the arenas (no new queues or fights while closed; closing sends everyone out of free-for-alls)
-    usage: "/arenalock [on|off]"
+    description: Close or open all arenas or one (no new queues or fights while closed; closing sends everyone out of free-for-alls)
+    usage: "/arenalock [arena] [on|off]"
     permission: spawnarena.arenalock
     permission-message: "§cYou don't have permission!"
 

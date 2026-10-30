@@ -28,6 +28,10 @@ public final class SettingsConfig {
             "Toggle in game with /arenalock (e.g. close before reloading the plugin)"})
     public volatile boolean arenasOpen = true;
 
+    @Comment({"Arenas closed on their own, by name, whatever arenasOpen says. Fights already running there always finish.",
+            "Toggle in game with /arenalock <arena>"})
+    public volatile java.util.List<String> lockedArenas = new java.util.ArrayList<>();
+
     @Comment({"Currency symbol for short reward amounts like \"$5k\". Leave empty to copy it from the",
             "economy plugin's own formatting (falls back to \"$\" if there's no economy)."})
     public String currencySymbol = "";

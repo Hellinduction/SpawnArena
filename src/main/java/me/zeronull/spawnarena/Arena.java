@@ -109,6 +109,16 @@ public abstract class Arena extends ArenaOptions {
         return target;
     }
 
+    /** Whether new fights can start here: neither /arenalock nor /arenalock <arena> has closed it. */
+    public boolean isOpen() {
+        return SpawnArena.settings == null || (SpawnArena.settings.arenasOpen && !this.isLocked());
+    }
+
+    /** Closed on its own by /arenalock <arena>. */
+    public boolean isLocked() {
+        return SpawnArena.settings != null && SpawnArena.settings.lockedArenas.contains(this.getArenaName());
+    }
+
     /** All-lowercase names are title cased ("sumo_pit" → "Sumo Pit"); any other casing is kept as typed. */
     public static String displayName(final String arena) {
         // Set in the arena's file

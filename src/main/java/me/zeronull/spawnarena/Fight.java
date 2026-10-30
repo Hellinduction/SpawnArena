@@ -372,7 +372,7 @@ public class Fight {
         if (!this.cancelFight())
             return false; // already started or ended (another thread got there first)
 
-        final boolean requeue = !this.duel && (SpawnArena.settings == null || SpawnArena.settings.arenasOpen);
+        final boolean requeue = !this.duel && this.arena.isOpen();
         for (final Player p : others)
             p.sendMessage(ChatColor.RED + messageForOthers + (requeue ? ChatColor.GRAY + " You've been put back in the queue." : ""));
 

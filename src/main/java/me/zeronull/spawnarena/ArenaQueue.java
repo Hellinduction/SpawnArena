@@ -98,7 +98,7 @@ public class ArenaQueue {
     }
 
     public synchronized void tryStartFight() {
-        if (SpawnArena.settings != null && !SpawnArena.settings.arenasOpen)
+        if (!this.arena.isOpen())
             return;
 
         // 1v1: the two most recent joiners fight (so friends who queue together face each other), unless

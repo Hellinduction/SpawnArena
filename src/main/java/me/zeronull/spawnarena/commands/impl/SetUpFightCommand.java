@@ -52,6 +52,10 @@ public final class SetUpFightCommand extends ArenaTabComplete implements Command
             sender.sendMessage(ChatColor.RED + "That arena was not found.");
             return true;
         }
+        if (arena.isLocked()) {
+            sender.sendMessage(ChatColor.RED + "That arena is closed. Open it with /arenalock " + arena.getArenaName() + " off first.");
+            return true;
+        }
         if (!arena.isSetUp()) {
             sender.sendMessage(ChatColor.RED + "That arena has not been fully setup!");
             return true;
