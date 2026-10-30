@@ -102,7 +102,7 @@ public final class FightGlow implements Listener {
                 fighter.setGlowing(true);
                 fighter.getPersistentDataContainer().set(markKey(), PersistentDataType.BYTE, (byte) 1);
                 GLOWING.put(fighter.getUniqueId(), colour);
-                colour(fighter, colour);
+                colour(fighter, colour, fight);
             });
         }
     }
@@ -154,6 +154,7 @@ public final class FightGlow implements Listener {
         // Fights already running: their colours, for this client
         if (!GLOWING.isEmpty() && !TabColours.usable())
             PacketTeams.showRunningTo(joined);
+        SideTeams.showRunningTo(joined);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)
@@ -163,7 +164,16 @@ public final class FightGlow implements Listener {
 
     // ── colouring ───────────────────────────────────────────────────────────
 
-    private static void colour(final Player fighter, final int colour) {
+    private static boolean sides() {
+        return SpawnArena.settings == null || SpawnArena.settings.fightGlowSides;
+    }
+
+    private static void colour(final Player fighter, final int colour, final Fight fight) {
+        // Green for your side, red for theirs, as you see it; the fight's colour for everyone else
+        if (sides() && SideTeams.ready()) {
+            SideTeams.show(fighter, fight, COLOURS[colour]);
+            return;
+        }
         if (TabColours.usable()) {
             TabColours.colour(fighter, COLOURS[colour]);
             return;
@@ -172,6 +182,10 @@ public final class FightGlow implements Listener {
     }
 
     private static void uncolour(final Player fighter, final int colour) {
+        if (SideTeams.isShown(fighter.getUniqueId())) {
+            SideTeams.hide(fighter);
+            return;
+        }
         if (TabColours.usable()) {
             TabColours.uncolour(fighter);
             return;

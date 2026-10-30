@@ -101,6 +101,11 @@ public final class SettingsConfig {
             "matches apart. Fighters see it too (it shows through walls)."})
     public boolean fightGlow = true;
 
+    @Comment({"With fightGlow: fighters see their own side green and the other side red (name and outline), sent only to",
+            "them; everyone else sees the fight's colour. Their name tag keeps its rank prefix. false = everyone sees",
+            "the fight's colour."})
+    public boolean fightGlowSides = true;
+
     @Comment({"Free-for-all arenas: seconds after hitting or being hit by another player that someone counts as in combat.",
             "They can't /leavearena until it runs out, logging out or teleporting away in combat counts as dying, and",
             "everyone who hit a player in this window gets the kill."})

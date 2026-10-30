@@ -188,7 +188,14 @@ public class SpawnArena extends JavaPlugin {
 
     @Override
     public void onDisable() {
-        ArenaVoicechat.unregister();
+        // Only when Simple Voice Chat is there: the hook's class can't even load without it
+        if (Bukkit.getPluginManager().getPlugin("voicechat") != null) {
+            try {
+                ArenaVoicechat.unregister();
+            } catch (final LinkageError ignored) {
+                // its API went away first: nothing of ours left to stop
+            }
+        }
         CrystalView.stop();
         if (CrystalCopies.supported())
             WatchMenu.sendEveryoneBack();
