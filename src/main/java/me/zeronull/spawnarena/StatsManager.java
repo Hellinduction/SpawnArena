@@ -1998,5 +1998,20 @@ public class StatsManager {
         }
 
         dataSource.close();
+
+        // The pool refills itself in the background: a connection it opened between the SHUTDOWN and close() above
+        // reopens the database, and with DB_CLOSE_DELAY=-1 it then stays open (and the file locked) for good, so the
+        // next load of the plugin can't open it. Shut it once more, directly, now that the pool is gone.
+        if (!mysql) {
+            final java.util.Properties props = new java.util.Properties();
+            props.setProperty("user", "sa");
+            props.setProperty("password", "");
+            try (Connection c = new org.h2.Driver().connect(h2Url() + ";IFEXISTS=TRUE", props);
+                 Statement s = c.createStatement()) {
+                s.execute("SHUTDOWN");
+            } catch (SQLException e) {
+                // Already closed, as it should be (or closed by the SHUTDOWN itself)
+            }
+        }
     }
 }
