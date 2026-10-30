@@ -15,6 +15,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityResurrectEvent;
+import org.bukkit.event.player.PlayerAnimationEvent;
+import org.bukkit.event.player.PlayerAnimationType;
 import org.bukkit.event.player.PlayerItemConsumeEvent;
 
 /** Fills in each running fight's FightStats (the hover card on the result message). */
@@ -44,12 +46,13 @@ public final class FightStatsListener implements Listener {
         final double amount = Math.max(0, Math.min(e.getFinalDamage(), victim.getHealth() + victim.getAbsorptionAmount()));
 
         Player attacker = null;
-        boolean hit = false, crit = false;
+        boolean hit = false, melee = false, crit = false;
         if (e instanceof EntityDamageByEntityEvent byEntity) {
             final Entity damager = byEntity.getDamager();
             if (damager instanceof Player p) {
                 attacker = p;
                 hit = true;
+                melee = true;
                 crit = byEntity.isCritical();
             } else if (damager instanceof Projectile projectile && projectile.getShooter() instanceof Player p) {
                 attacker = p;
@@ -67,7 +70,16 @@ public final class FightStatsListener implements Listener {
         if (attacker != null && !fight.areOpponents(attacker, victim))
             attacker = null;
         fight.onHurt(attacker, victim);
-        fight.stats().damage(attacker, victim, amount, hit, crit);
+        fight.stats().damage(attacker, victim, amount, hit, melee, crit);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSwing(final PlayerAnimationEvent e) {
+        if (e.getAnimationType() != PlayerAnimationType.ARM_SWING)
+            return;
+        final Fight fight = fightOf(e.getPlayer());
+        if (fight != null)
+            fight.stats().swung(e.getPlayer());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

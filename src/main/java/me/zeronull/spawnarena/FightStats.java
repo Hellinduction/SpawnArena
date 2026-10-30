@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.DoubleAdder;
 public final class FightStats {
     private static final class Line {
         final DoubleAdder dealt = new DoubleAdder(), taken = new DoubleAdder();
-        final AtomicInteger hits = new AtomicInteger(), crits = new AtomicInteger(), crystals = new AtomicInteger(),
+        final AtomicInteger hits = new AtomicInteger(), melee = new AtomicInteger(), swings = new AtomicInteger(), crits = new AtomicInteger(), crystals = new AtomicInteger(),
                 anchors = new AtomicInteger(), totems = new AtomicInteger(), gapples = new AtomicInteger();
         /** The other side hit or hurt them at some point (sumo knockback counts) */
         volatile boolean touched;
@@ -40,7 +40,7 @@ public final class FightStats {
     }
 
     /** {@code amount} of health {@code victim} lost; {@code attacker} (if any, and an opponent) dealt it. */
-    public void damage(final Player attacker, final Player victim, final double amount, final boolean hit, final boolean crit) {
+    public void damage(final Player attacker, final Player victim, final double amount, final boolean hit, final boolean melee, final boolean crit) {
         this.of(victim).taken.add(amount);
         if (attacker == null || attacker.equals(victim))
             return;
@@ -49,6 +49,8 @@ public final class FightStats {
         line.dealt.add(amount);
         if (hit)
             line.hits.incrementAndGet();
+        if (melee)
+            line.melee.incrementAndGet();
         if (crit)
             line.crits.incrementAndGet();
     }
@@ -63,6 +65,7 @@ public final class FightStats {
         return true;
     }
 
+    public void swung(final Player player) { this.of(player).swings.incrementAndGet(); }
     public void crystalPlaced(final Player player) { this.of(player).crystals.incrementAndGet(); }
     public void anchorSetOff(final Player player) { this.of(player).anchors.incrementAndGet(); }
     public void totemPopped(final Player player) { this.of(player).totems.incrementAndGet(); }
@@ -107,6 +110,11 @@ public final class FightStats {
             if (line.hits.get() > 0 || !damageOn)
                 parts.add("hits <white>" + line.hits.get() + "</white>"
                         + (damageOn && line.crits.get() > 0 ? " (<white>" + line.crits.get() + "</white> crits)" : ""));
+            // Melee only (an arrow isn't a swing), and not in crystal PvP, where most swings break crystals and blocks
+            if (!crystal && line.swings.get() > 0) {
+                parts.add("swings <white>" + line.swings.get() + "</white>");
+                parts.add("accuracy <white>" + Math.min(100, Math.round(line.melee.get() * 100.0 / line.swings.get())) + "%</white>");
+            }
             if (crystal && line.crystals.get() > 0) parts.add("crystals <white>" + line.crystals.get() + "</white>");
             if (crystal && line.anchors.get() > 0) parts.add("anchors <white>" + line.anchors.get() + "</white>");
             if (line.totems.get() > 0) parts.add("totems <white>" + line.totems.get() + "</white>");
