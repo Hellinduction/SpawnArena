@@ -67,6 +67,15 @@ public class Fight {
     /** Random sumo: this match's variant (null when the arena doesn't use random sumo). */
     protected volatile SumoVariant variant;
 
+    /** Set up by staff (/setupfight): wins, losses and streaks count, Elo doesn't. */
+    private boolean unranked;
+
+    /** No Elo change for this match (staff set it up); call before it starts. */
+    public Fight unranked() {
+        this.unranked = true;
+        return this;
+    }
+
     public SumoVariant getVariant() {
         return this.variant;
     }
@@ -893,7 +902,7 @@ public class Fight {
             for (final Player winner : winners)
                 winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName));
 
-            final Map<UUID, int[]> elo = SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
+            final Map<UUID, int[]> elo = this.unranked ? Map.of() : SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
             TopEloSuffix.refreshLater(); // a new #1 gets their suffix straight away
             for (final Player p : this.getMembers()) {
                 final int[] change = elo.get(p.getUniqueId());
