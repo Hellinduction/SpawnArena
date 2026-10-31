@@ -67,6 +67,14 @@ final class SideTeams {
         }
     }
 
+    /**
+     * A name that sorts right where their TAB team did: TAB's name with a "~" after it (never TAB's own name: its team is
+     * removed in the background, and a client sent a team that already exists disconnects).
+     */
+    private static String sortsLike(final String tabTeam) {
+        return (tabTeam.length() < 16 ? tabTeam : tabTeam.substring(0, 15)) + "~";
+    }
+
     private static String teamName(final UUID fighter) {
         return "sa_side_" + fighter.toString().substring(0, 8);
     }
@@ -103,8 +111,10 @@ final class SideTeams {
     static void show(final Player fighter, final Fight fight, final NamedTextColor colour) {
         if (!ready())
             return;
+        // Named after their TAB team (TAB sorts the tab list by team name), so they keep their place in it
+        final String tabTeam = Tab.teamName(fighter);
         final Component[] ends = Tab.pause(fighter);
-        final Shown shown = new Shown(fight, colour, teamName(fighter.getUniqueId()), ends[0], ends[1]);
+        final Shown shown = new Shown(fight, colour, tabTeam != null ? sortsLike(tabTeam) : teamName(fighter.getUniqueId()), ends[0], ends[1]);
         SHOWN.put(fighter.getUniqueId(), shown);
         final UUID id = fighter.getUniqueId();
         final String name = fighter.getName();
@@ -170,6 +180,7 @@ final class SideTeams {
         private static boolean checked;
         private static Object api;
         private static Method getPlayer, getNameTagManager, pause, resume, prefix, suffix;
+        private static Method getSortingManager, forcedTeam, originalTeam;
 
         private static synchronized boolean ready() {
             if (checked)
@@ -188,6 +199,14 @@ final class SideTeams {
                 pause = nameTags.getMethod("pauseTeamHandling", tabPlayer);
                 resume = nameTags.getMethod("resumeTeamHandling", tabPlayer);
                 prefix = nameTags.getMethod("getOriginalReplacedPrefix", tabPlayer);
+                try {
+                    final Class<?> sorting = Class.forName("me.neznamy.tab.api.tablist.SortingManager", true, loader);
+                    getSortingManager = apiClass.getMethod("getSortingManager");
+                    forcedTeam = sorting.getMethod("getForcedTeamName", tabPlayer);
+                    originalTeam = sorting.getMethod("getOriginalTeamName", tabPlayer);
+                } catch (final ReflectiveOperationException | LinkageError ignored) {
+                    getSortingManager = null; // an older TAB: the side teams just don't keep the sort order
+                }
                 suffix = nameTags.getMethod("getOriginalReplacedSuffix", tabPlayer);
                 final Object found = apiClass.getMethod("getInstance").invoke(null);
                 if (getNameTagManager.invoke(found) != null)
@@ -213,6 +232,23 @@ final class SideTeams {
             } catch (final ReflectiveOperationException | RuntimeException e) {
                 SpawnArena.INSTANCE.getLogger().warning("Couldn't pause TAB's team for " + fighter.getName() + ": " + e);
                 return new Component[2];
+            }
+        }
+
+        /** The name of TAB's team for them (what it sorts the tab list by), or null. */
+        static String teamName(final Player fighter) {
+            if (!ready() || getSortingManager == null)
+                return null;
+            try {
+                final Object player = getPlayer.invoke(api, fighter.getUniqueId());
+                final Object sorting = getSortingManager.invoke(api);
+                if (player == null || sorting == null)
+                    return null;
+                final String forced = (String) forcedTeam.invoke(sorting, player);
+                final String name = forced != null ? forced : (String) originalTeam.invoke(sorting, player);
+                return name == null || name.isEmpty() ? null : name;
+            } catch (final ReflectiveOperationException | RuntimeException e) {
+                return null;
             }
         }
 
