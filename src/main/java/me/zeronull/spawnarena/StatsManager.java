@@ -163,6 +163,10 @@ public class StatsManager {
             // Rated fights played, for eloMinGames (counted from when this column was added)
             if (!hasColumn(c, "arena_stats", "elo_games"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN elo_games INT NOT NULL DEFAULT 0");
+            // When they first and last played there (a win, loss, or free-for-all kill or death)
+            for (final String column : new String[]{"first_played", "last_played"})
+                if (!hasColumn(c, "arena_stats", column))
+                    s.execute("ALTER TABLE arena_stats ADD COLUMN " + column + " BIGINT NOT NULL DEFAULT 0");
             // Seconds spent fighting there (counted from when this column was added)
             if (!hasColumn(c, "arena_stats", "fight_seconds"))
                 s.execute("ALTER TABLE arena_stats ADD COLUMN fight_seconds INT NOT NULL DEFAULT 0");
@@ -280,6 +284,18 @@ public class StatsManager {
                 s.execute("INSERT INTO arena_matches (server_id, arena, matches) SELECT server_id, arena, SUM(wins) FROM arena_stats"
                         + " WHERE server_id=" + sid + " GROUP BY server_id, arena HAVING SUM(wins) > 0");
                 setMeta(c, "matches_checked", "1");
+            }
+            // Last played, for stats from before it was stored: the newest time any of their stats changed. First played
+            // can't be known for those; played_since says when it started being stored
+            if (getMeta(c, "played_checked") == null) {
+                // first_played -1: played before it was stored, so their next game isn't taken for their first
+                s.execute("UPDATE arena_stats SET last_played = GREATEST(streak_at, wins_at, lost_at, elo_at, ffa_kills_at), first_played = -1"
+                        + " WHERE server_id=" + sid + " AND last_played = 0 AND first_played = 0");
+                try (ResultSet rs = s.executeQuery("SELECT 1 FROM arena_stats WHERE server_id=" + sid + " LIMIT 1")) {
+                    if (rs.next())
+                        setMeta(c, "played_since", String.valueOf(System.currentTimeMillis()));
+                }
+                setMeta(c, "played_checked", "1");
             }
             // Match time from before it was counted: half of what the fighters spent (exact for 1v1; a 2v2 counted twice)
             if (getMeta(c, "match_seconds_checked") == null) {
@@ -1440,6 +1456,7 @@ public class StatsManager {
     /** Records a win. Returns the new win streak. */
     public int recordWin(Player player, String arena) {
         ensure(player.getUniqueId(), arena);
+        played(player.getUniqueId(), arena);
         // MySQL applies SET assignments left to right (later ones see earlier results), H2 doesn't,
         // so everything that reads the old win_streak / best_win_streak comes before they're changed.
         final String sql = "UPDATE arena_stats SET " +
@@ -1469,6 +1486,7 @@ public class StatsManager {
     /** Ends their streak, keeping what it was (if they had one) as their last lost streak. */
     public void recordLoss(Player player, String arena) {
         ensure(player.getUniqueId(), arena);
+        played(player.getUniqueId(), arena);
         // The streak is read before it's zeroed: lost_streak and lost_at come first (MySQL applies SETs in order)
         final String sql = "UPDATE arena_stats SET lost_streak = CASE WHEN win_streak > 0 THEN win_streak ELSE lost_streak END, "
                 + "lost_at = CASE WHEN win_streak > 0 THEN ? ELSE lost_at END, win_streak = 0, streak_at = ?, losses = losses + 1 "
@@ -1494,6 +1512,7 @@ public class StatsManager {
     /** A free-for-all kill; {@code streak} is their kill streak now, counting this one. Call off the main thread. */
     public void recordFfaKill(final UUID uuid, final String arena, final int streak) {
         ensure(uuid, arena);
+        played(uuid, arena);
         // The best streak (and when it was reached) is read before it's raised: MySQL applies SETs in order
         final String sql = "UPDATE arena_stats SET ffa_best_at = CASE WHEN ? > ffa_best_streak THEN ? ELSE ffa_best_at END, "
                 + "ffa_best_streak = GREATEST(ffa_best_streak, ?), ffa_kills = ffa_kills + 1, ffa_kills_at = ? "
@@ -1517,6 +1536,7 @@ public class StatsManager {
     /** A free-for-all death. Call off the main thread. */
     public void recordFfaDeath(final UUID uuid, final String arena) {
         ensure(uuid, arena);
+        played(uuid, arena);
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement("UPDATE arena_stats SET ffa_deaths = ffa_deaths + 1 WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
             ps.setString(1, uuid.toString());
@@ -1804,6 +1824,48 @@ public class StatsManager {
     }
 
     /** Inserts a default row if none exists. */
+    /** They just played here: their first time (if it's not known yet) and their last. */
+    private void played(final UUID uuid, final String arena) {
+        final long now = System.currentTimeMillis();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("UPDATE arena_stats SET first_played = CASE WHEN first_played = 0 THEN ? ELSE first_played END,"
+                     + " last_played = ? WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
+            ps.setLong(1, now);
+            ps.setLong(2, now);
+            ps.setString(3, uuid.toString());
+            ps.setString(4, arena.toLowerCase());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] played: " + e.getMessage());
+        }
+    }
+
+    /** {first played, last played} here (0 = never played; first -1 = before it was stored). */
+    public long[] getPlayed(final UUID uuid, final String arena) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT first_played, last_played FROM arena_stats WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? new long[]{rs.getLong(1), rs.getLong(2)} : new long[]{0, 0};
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getPlayed: " + e.getMessage());
+            return new long[]{0, 0};
+        }
+    }
+
+    /** When first/last played started being stored on this server, if it had stats from before then (else 0). */
+    public long getPlayedSince() {
+        try (Connection c = dataSource.getConnection()) {
+            final String v = getMeta(c, "played_since");
+            return v == null ? 0 : Long.parseLong(v);
+        } catch (SQLException | NumberFormatException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getPlayedSince: " + e.getMessage());
+            return 0;
+        }
+    }
+
     private void ensure(UUID uuid, String arena) {
         // INSERT IGNORE works on MySQL and on H2 in MODE=MySQL
         final String sql = "INSERT IGNORE INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak) " +
@@ -1889,14 +1951,14 @@ public class StatsManager {
         props.setProperty("user", "sa");
         props.setProperty("password", "");
 
-        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses, ffa_kills, ffa_deaths, ffa_best_streak, ffa_kills_at, ffa_best_at, elo_games, fight_seconds) " +
-                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
+        final String upsert = "INSERT INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak, streak_at, wins_at, best_at, lost_streak, lost_at, elo, elo_at, losses, ffa_kills, ffa_deaths, ffa_best_streak, ffa_kills_at, ffa_best_at, elo_games, fight_seconds, first_played, last_played) " +
+                "VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE " +
                 "wins = VALUES(wins), win_streak = VALUES(win_streak), best_win_streak = VALUES(best_win_streak), " +
                 "streak_at = VALUES(streak_at), wins_at = VALUES(wins_at), best_at = VALUES(best_at), " +
                 "lost_streak = VALUES(lost_streak), lost_at = VALUES(lost_at), elo = VALUES(elo), elo_at = VALUES(elo_at), losses = VALUES(losses), " +
                 "ffa_kills = VALUES(ffa_kills), ffa_deaths = VALUES(ffa_deaths), ffa_best_streak = VALUES(ffa_best_streak), " +
                 "ffa_kills_at = VALUES(ffa_kills_at), ffa_best_at = VALUES(ffa_best_at), elo_games = VALUES(elo_games), " +
-                "fight_seconds = VALUES(fight_seconds)";
+                "fight_seconds = VALUES(fight_seconds), first_played = VALUES(first_played), last_played = VALUES(last_played)";
 
         int copied = 0;
         try (Connection h2 = new org.h2.Driver().connect(h2FileUrl() + ";IFEXISTS=TRUE", props);
@@ -1907,7 +1969,7 @@ public class StatsManager {
                      + (hasColumn(h2, "arena_stats", "elo") ? ", elo" : ", " + START_ELO + " AS elo") + reachedAtSelect(h2, "elo_at") + reachedAtSelect(h2, "losses")
                      + reachedAtSelect(h2, "ffa_kills") + reachedAtSelect(h2, "ffa_deaths") + reachedAtSelect(h2, "ffa_best_streak")
                      + reachedAtSelect(h2, "ffa_kills_at") + reachedAtSelect(h2, "ffa_best_at") + reachedAtSelect(h2, "elo_games")
-                     + reachedAtSelect(h2, "fight_seconds")
+                     + reachedAtSelect(h2, "fight_seconds") + reachedAtSelect(h2, "first_played") + reachedAtSelect(h2, "last_played")
                      + " FROM arena_stats");
              Connection target = dataSource.getConnection()) {
 
@@ -1934,6 +1996,8 @@ public class StatsManager {
                     ps.setLong(18, rs.getLong("ffa_best_at"));
                     ps.setInt(19, rs.getInt("elo_games"));
                     ps.setInt(20, rs.getInt("fight_seconds"));
+                    ps.setLong(21, rs.getLong("first_played"));
+                    ps.setLong(22, rs.getLong("last_played"));
                     ps.addBatch();
                     if (++copied % 500 == 0)
                         ps.executeBatch();

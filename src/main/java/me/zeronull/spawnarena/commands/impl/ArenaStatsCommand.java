@@ -29,6 +29,21 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
     private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "resetcooldown", "payouts", "players", "log", "rollback", "migrate");
     private static final String ROLLBACK_PERMISSION = "spawnarena.arenastats.rollback";
 
+    /** "3 Nov 2026 (2d ago)". */
+    private static String when(final long at) {
+        final int minutes = (int) ((System.currentTimeMillis() - at) / 60_000);
+        return new java.text.SimpleDateFormat("d MMM yyyy").format(new java.util.Date(at))
+                + " (" + (minutes < 1 ? "just now" : me.zeronull.spawnarena.StatsManager.formatMinutes(minutes) + " ago") + ")";
+    }
+
+    /** Their first time, or for stats from before it was stored, "before" the day it started being. */
+    private static String firstPlayed(final long[] played) {
+        if (played[0] > 0)
+            return when(played[0]);
+        final long since = SpawnArena.statsManager.getPlayedSince();
+        return since > 0 ? "before " + new java.text.SimpleDateFormat("d MMM yyyy").format(new java.util.Date(since)) : "unknown";
+    }
+
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd,
                              @NotNull String label, String[] args) {
@@ -77,11 +92,13 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 final String name = a.getArenaName();
                 final int wins = SpawnArena.statsManager.getWins(uuid, name);
                 final int losses = SpawnArena.statsManager.getLosses(uuid, name);
-                sender.sendMessage(String.format("§7- §e%s§7: wins=§e%d §7losses=§e%d §7games=§e%d §7streak=§e%d §7best=§e%d §7elo=§e%d", name,
+                final long[] played = SpawnArena.statsManager.getPlayed(uuid, name);
+                sender.sendMessage(String.format("§7- §e%s§7: wins=§e%d §7losses=§e%d §7games=§e%d §7streak=§e%d §7best=§e%d §7elo=§e%d%s", name,
                         wins, losses, wins + losses,
                         SpawnArena.statsManager.getWinStreak(uuid, name),
                         SpawnArena.statsManager.getBestWinStreak(uuid, name),
-                        SpawnArena.statsManager.getElo(uuid, name)));
+                        SpawnArena.statsManager.getElo(uuid, name),
+                        played[1] > 0 ? " §7first=§e" + firstPlayed(played) + " §7last=§e" + when(played[1]) : ""));
             }
             sendLossesNote(sender);
             return true;
@@ -119,6 +136,9 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                 sendLossesNote(sender);
                 sender.sendMessage("§6Time fighting here: §e" + me.zeronull.spawnarena.StatsManager.formatDuration(
                         SpawnArena.statsManager.getField(uuid, arena, "fight_seconds")));
+                final long[] played = SpawnArena.statsManager.getPlayed(uuid, arena);
+                if (played[1] > 0)
+                    sender.sendMessage("§6First played: §e" + firstPlayed(played) + " §6· Last played: §e" + when(played[1]));
                 // Free-for-all, counted apart: shown for free-for-all arenas, or anywhere they've played one
                 final int ffaKills = SpawnArena.statsManager.getField(uuid, arena, "ffa_kills");
                 final int ffaDeaths = SpawnArena.statsManager.getField(uuid, arena, "ffa_deaths");
