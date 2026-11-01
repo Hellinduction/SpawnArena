@@ -469,8 +469,12 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
                     matches.add(new StatsManager.LoggedMatch(Long.parseLong(p[0]), p[1].toLowerCase(),
                             List.of(p[2].split(",")), List.of(p[3].split(",")), p[4].equals("1")));
                 }
-                for (final String line : SpawnArena.statsManager.importLoggedMatches(matches, arenas, apply))
+                final List<String> report = SpawnArena.statsManager.importLoggedMatches(matches, arenas, apply);
+                for (final String line : report)
                     sender.sendMessage(line);
+                // Kept next to the file: a record of what was (or would be) done
+                java.nio.file.Files.write(new java.io.File(folder, file.getName() + (apply ? ".applied" : ".dry-run") + ".txt").toPath(),
+                        report.stream().map(l -> l.replaceAll("§.", "")).toList());
                 if (!apply)
                     sender.sendMessage("§eNothing changed yet. Run §6/arenastats importlog " + file.getName() + " confirm§e to apply it (only once).");
             } catch (final Exception e) {
