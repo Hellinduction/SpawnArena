@@ -21,7 +21,7 @@ public class PlayerLeaveSpawn implements Listener {
             return;
         }
 
-        SpawnArena.arenas.fromQueued(player).queue.removePlayer(player);
+        SpawnArena.arenas.fromQueued(player).queue.leave(player, "left spawn");
         player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cYou've been removed from arena queue. You must stay in spawn to stay in queue."));
     }
 }

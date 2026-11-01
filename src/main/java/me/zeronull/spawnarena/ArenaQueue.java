@@ -38,6 +38,27 @@ public class ArenaQueue {
         PLAYER_QUEUE_MAP.remove(player);
     }
 
+    /**
+     * Takes a player out of the queue for a reason ("teleported away", "left the queue"...), telling everyone still
+     * waiting in the same queue who left and how many are waiting now.
+     */
+    public void leave(final Player player, final String why) {
+        final List<Player> others;
+        final int left;
+        synchronized (this) {
+            final FightMode mode = this.modeOf(player);
+            if (mode == null)
+                return;
+            this.removePlayer(player);
+            others = new ArrayList<>(this.queues.get(mode));
+            left = others.size();
+        }
+        for (final Player p : others)
+            if (p.isOnline())
+                p.sendMessage(org.bukkit.ChatColor.YELLOW + player.getName() + " " + why + ", so they're out of the "
+                        + this.arena.getArenaName() + " queue. " + org.bukkit.ChatColor.GRAY + left + " waiting now, including you.");
+    }
+
     /** Players waiting across all modes. */
     public synchronized int size() {
         int total = 0;

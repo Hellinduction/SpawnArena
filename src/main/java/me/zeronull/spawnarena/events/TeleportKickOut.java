@@ -32,7 +32,7 @@ public class TeleportKickOut implements Listener {
                 continue;
             ArenaQueue queue = arena.queue;
             if(arena.queue.playerInQueue(player)) {
-                arena.queue.removePlayer(player);
+                arena.queue.leave(player, "teleported away");
                 player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cYou were kicked out of the queue as you teleported!"));
             }
 

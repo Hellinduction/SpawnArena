@@ -25,7 +25,7 @@ public final class QueueDistanceListener implements Listener {
 
         final ArenaQueue queue = ArenaQueue.PLAYER_QUEUE_MAP.get(player);
         if (queue != null && queue.playerInQueue(player) && tooFar(queue.getArena(), to)) {
-            queue.removePlayer(player);
+            queue.leave(player, "went too far from the arena");
             player.sendMessage(ChatColor.RED + "You've been removed from the arena queue for going too far from the arena.");
             return;
         }
@@ -49,7 +49,7 @@ public final class QueueDistanceListener implements Listener {
         final Player player = e.getPlayer();
         final ArenaQueue queue = ArenaQueue.PLAYER_QUEUE_MAP.get(player);
         if (queue != null && queue.playerInQueue(player)) {
-            queue.removePlayer(player);
+            queue.leave(player, "went into spectator mode");
             player.sendMessage(ChatColor.RED + "You've been removed from the arena queue for going into spectator mode.");
             return;
         }
@@ -61,6 +61,33 @@ public final class QueueDistanceListener implements Listener {
             return;
         player.sendMessage(ChatColor.RED + "You were removed from the fight for going into spectator mode.");
         fight.cancelBecause(player, player.getName() + " went into spectator mode, so the fight was cancelled.");
+    }
+
+    /**
+     * Once a second, everyone waiting in a queue is checked where they are (on their own thread): out of spawn or too far
+     * from the arena, they're taken out. Catches what the events don't, like a teleport on Folia, which fires none.
+     */
+    public static void startSweep() {
+        Threads.globalTimer(task -> {
+            for (final java.util.Map.Entry<Player, ArenaQueue> e : ArenaQueue.PLAYER_QUEUE_MAP.entrySet()) {
+                final Player player = e.getKey();
+                final ArenaQueue queue = e.getValue();
+                if (player.isOnline())
+                    Threads.entity(player, () -> sweep(player, queue));
+            }
+        }, 20L, 20L);
+    }
+
+    private static void sweep(final Player player, final ArenaQueue queue) {
+        if (SpawnArena.settings == null || !queue.playerInQueue(player))
+            return;
+        if (!Arena.isSpawnWorld(player.getWorld())) {
+            queue.leave(player, "left spawn");
+            player.sendMessage(ChatColor.RED + "You've been removed from the arena queue. You must stay in spawn to stay in queue.");
+        } else if (SpawnArena.settings.queueMaxDistance > 0 && queue.getArena().distanceFrom(player.getLocation()) > SpawnArena.settings.queueMaxDistance) {
+            queue.leave(player, "went too far from the arena");
+            player.sendMessage(ChatColor.RED + "You've been removed from the arena queue for going too far from the arena.");
+        }
     }
 
     private boolean tooFar(final Arena arena, final Location loc) {

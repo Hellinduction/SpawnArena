@@ -29,6 +29,7 @@ public class SpawnArena extends JavaPlugin {
         settings = ConfigHandler.getInstance().getSettingsConfig();
         Arena.setSpawnWorlds(settings.spawnWorlds);
         Bukkit.getPluginManager().registerEvents(new QueueDistanceListener(), this);
+        QueueDistanceListener.startSweep();
 
         try {
             statsManager = new StatsManager(this, ConfigHandler.getInstance().getDatabaseConfig());

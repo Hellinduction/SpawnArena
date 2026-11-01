@@ -87,7 +87,7 @@ public final class SetUpFightCommand extends ArenaTabComplete implements Command
 
         for (final Player p : players) {
             if (SpawnArena.arenas.isInQueue(p))
-                SpawnArena.arenas.fromQueued(p).queue.removePlayer(p);
+                SpawnArena.arenas.fromQueued(p).queue.leave(p, "was put into a fight by staff");
         }
 
         if (arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty()) {

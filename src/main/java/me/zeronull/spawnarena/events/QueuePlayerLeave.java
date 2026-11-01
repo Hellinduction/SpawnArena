@@ -13,7 +13,7 @@ public class QueuePlayerLeave implements Listener {
         Player player = event.getPlayer();
 
         if (SpawnArena.arenas.isInQueue(player)) {
-            SpawnArena.arenas.fromQueued(player).queue.removePlayer(player);
+            SpawnArena.arenas.fromQueued(player).queue.leave(player, "logged off");
         }
     }
 

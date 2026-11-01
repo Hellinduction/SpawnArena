@@ -72,7 +72,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         if (args.length >= 2 && args[1].equalsIgnoreCase("menu")) {
             // Already queued here: the menu shows which queue they're in and lets them leave or switch. A fight already
             // running in the arena doesn't stop it opening (they can look, joining from it is still refused)
-            final String problem = arena.queue.playerInQueue(player) ? null : cantJoin(player, arena, false);
+            final String problem = arena.queue.playerInQueue(player) ? null : cantJoin(player, arena, false, FightMode.ONE_V_ONE);
             if (problem != null) {
                 sender.sendMessage(ChatColor.RED + problem);
                 return true;
@@ -85,7 +85,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         final FightMode current = arena.queue.modeOf(player);
         final boolean anyMode = args.length < 2 || args[1].equalsIgnoreCase("auto");
         if (current != null && (anyMode || current == FightMode.fromLabel(args[1]))) {
-            arena.queue.removePlayer(player);
+            arena.queue.leave(player, "left the queue");
             player.sendMessage(ChatColor.YELLOW + "You've been removed from the queue!");
             return true;
         }
@@ -102,11 +102,15 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
 
     /** Why this player can't queue for this arena right now, or null if they can. */
     public static String cantJoin(final Player player, final Arena arena) {
-        return cantJoin(player, arena, true);
+        return cantJoin(player, arena, true, FightMode.ONE_V_ONE);
     }
 
-    /** As {@link #cantJoin(Player, Arena)}; {@code busy} false leaves out a fight already running in a SINGLE arena. */
-    private static String cantJoin(final Player player, final Arena arena, final boolean busy) {
+    /**
+     * As {@link #cantJoin(Player, Arena)} for this mode's queue. While a SINGLE arena has a fight running, the next match's
+     * players (2 for 1v1, 4 for 2v2) can already queue: it starts once the fight is over and the arena reset. {@code busy}
+     * false leaves that check out.
+     */
+    private static String cantJoin(final Player player, final Arena arena, final boolean busy, final FightMode mode) {
         if (!SpawnArena.settings.arenasOpen)
             return "The arenas are closed right now. Try again later!";
         if (arena.isLocked())
@@ -123,8 +127,8 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return "You can't join while in spectator mode.";
         if (SpawnArena.settings.queueMaxDistance > 0 && arena.distanceFrom(player.getLocation()) > SpawnArena.settings.queueMaxDistance)
             return "You are too far from that arena!";
-        if (busy && !arena.queue.playerInQueue(player) && arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty())
-            return "There's already a fight in that arena. Wait for it to finish, then join!";
+        if (busy && !arena.queue.playerInQueue(player) && running(arena) && arena.queue.size(mode) >= mode.players())
+            return "There's a fight in that arena and the next match is full. Wait for it to finish, then join!";
         return null;
     }
 
@@ -139,7 +143,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
                     + " queue. Run /joinarenaqueue " + arena.getArenaName() + " to leave.");
             return;
         }
-        final String problem = cantJoin(player, arena);
+        final String problem = cantJoin(player, arena, true, mode);
         if (problem != null) {
             player.sendMessage(ChatColor.RED + problem);
             return;
@@ -171,10 +175,18 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
                         : String.format("&aYou've joined the &e%s 1v1&a queue! &7(%d players waiting, including you)", arena.getArenaName(), waiting))
                     : String.format("&aYou've joined the &e%s 2v2&a queue! &7(%d/%d players)", arena.getArenaName(), waiting, mode.players());
             player.sendMessage(ChatColor.translateAlternateColorCodes('&', message));
+            if (running(arena))
+                player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&7A fight is on in that arena: your match starts once it's over. Stay near the arena (/joinarenaqueue "
+                        + arena.getArenaName() + " again to leave)."));
         } else {
             player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&aYou've joined the queue! &7Match found, get ready!"));
         }
         player.sendMessage(ChatColor.translateAlternateColorCodes('&', "&eWarning! If you have issues (e.g. you lost your inventory or need it restored for another reason), &c&l&ndo NOT&e rejoin the arena. Tell staff, warn other players, and avoid dying an excessive number of times. Otherwise, your inventory logs will be lost!"));
+    }
+
+    /** A SINGLE arena with a fight going on (the next match waits for it). */
+    private static boolean running(final Arena arena) {
+        return arena.getArenaMode() == ArenaMode.SINGLE && !arena.getFights().isEmpty();
     }
 
     @Override

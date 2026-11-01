@@ -69,7 +69,7 @@ public final class QueueMenuListener implements Listener {
 
         // Clicking the queue you're already in leaves it
         if (mode != null && arena.queue.modeOf(player) == mode) {
-            arena.queue.removePlayer(player);
+            arena.queue.leave(player, "left the queue");
             player.sendMessage(ChatColor.YELLOW + "You've been removed from the queue!");
             return;
         }

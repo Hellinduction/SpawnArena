@@ -136,7 +136,7 @@ public final class DuelManager {
         for (final Player p : new Player[]{target, requester}) {
             final ArenaQueue queue = ArenaQueue.PLAYER_QUEUE_MAP.get(p);
             if (queue != null)
-                queue.removePlayer(p);
+                queue.leave(p, "accepted a duel");
             clear(p);
         }
 
