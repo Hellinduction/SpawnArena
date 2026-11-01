@@ -1610,11 +1610,18 @@ public class StatsManager {
         }
     }
 
-    /**
-     * Stats across every arena on this server: matches played (in total and per arena, lower case), players who've
-     * fought, time spent fighting (every fighter's added up), free-for-all kills and win rewards paid.
-     */
-    public record GlobalStats(long matches, java.util.Map<String, Long> matchesByArena, long players, long fightSeconds, long ffaKills, double paid) {}
+    /** Totals for one arena, or every arena together: matches, players who've fought, time fought (every fighter's added up),
+     * free-for-all kills and win rewards paid. */
+    public record ArenaTotals(long matches, long players, long fightSeconds, long ffaKills, double paid) {
+        static final ArenaTotals NONE = new ArenaTotals(0, 0, 0, 0, 0);
+    }
+
+    /** Every arena together, and each arena (by lower-case name). */
+    public record GlobalStats(ArenaTotals all, java.util.Map<String, ArenaTotals> byArena) {
+        public ArenaTotals of(final String arena) {
+            return arena == null ? this.all : this.byArena.getOrDefault(arena.toLowerCase(), ArenaTotals.NONE);
+        }
+    }
 
     private volatile GlobalStats globalCache;
     private volatile long globalFetchedAt;
@@ -1625,29 +1632,48 @@ public class StatsManager {
         if (cached != null && System.currentTimeMillis() - this.globalFetchedAt < TOP_CACHE_MILLIS)
             return cached;
         try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
-            final java.util.Map<String, Long> byArena = new java.util.HashMap<>();
-            long matches = 0;
+            final java.util.Map<String, long[]> sums = new java.util.HashMap<>(); // matches, players, seconds, kills
+            final java.util.Map<String, Double> paid = new java.util.HashMap<>();
             try (ResultSet rs = s.executeQuery("SELECT arena, matches FROM arena_matches WHERE server_id=" + sid)) {
+                while (rs.next())
+                    sums.computeIfAbsent(rs.getString(1).toLowerCase(), k -> new long[4])[0] += rs.getLong(2);
+            }
+            final String fought = "wins > 0 OR losses > 0 OR ffa_kills > 0 OR ffa_deaths > 0";
+            try (ResultSet rs = s.executeQuery("SELECT arena, SUM(CASE WHEN " + fought + " THEN 1 ELSE 0 END),"
+                    + " COALESCE(SUM(fight_seconds), 0), COALESCE(SUM(ffa_kills), 0) FROM arena_stats WHERE server_id=" + sid + " GROUP BY arena")) {
                 while (rs.next()) {
-                    byArena.merge(rs.getString(1).toLowerCase(), rs.getLong(2), Long::sum);
-                    matches += rs.getLong(2);
+                    final long[] a = sums.computeIfAbsent(rs.getString(1).toLowerCase(), k -> new long[4]);
+                    a[1] += rs.getLong(2);
+                    a[2] += rs.getLong(3);
+                    a[3] += rs.getLong(4);
                 }
             }
-            long players = 0, seconds = 0, kills = 0;
-            try (ResultSet rs = s.executeQuery("SELECT COUNT(DISTINCT CASE WHEN wins > 0 OR losses > 0 OR ffa_kills > 0 OR ffa_deaths > 0 THEN uuid END),"
-                    + " COALESCE(SUM(fight_seconds), 0), COALESCE(SUM(ffa_kills), 0) FROM arena_stats WHERE server_id=" + sid)) {
-                if (rs.next()) {
-                    players = rs.getLong(1);
-                    seconds = rs.getLong(2);
-                    kills = rs.getLong(3);
-                }
+            try (ResultSet rs = s.executeQuery("SELECT arena, COALESCE(SUM(amount), 0) FROM arena_payouts WHERE server_id=" + sid + " GROUP BY arena")) {
+                while (rs.next())
+                    paid.merge(rs.getString(1).toLowerCase(), rs.getDouble(2), Double::sum);
             }
-            double paid = 0;
-            try (ResultSet rs = s.executeQuery("SELECT COALESCE(SUM(amount), 0) FROM arena_payouts WHERE server_id=" + sid)) {
+            // Someone who's fought in several arenas is one player overall
+            long players = 0;
+            try (ResultSet rs = s.executeQuery("SELECT COUNT(DISTINCT uuid) FROM arena_stats WHERE server_id=" + sid + " AND (" + fought + ")")) {
                 if (rs.next())
-                    paid = rs.getDouble(1);
+                    players = rs.getLong(1);
             }
-            final GlobalStats fresh = new GlobalStats(matches, java.util.Map.copyOf(byArena), players, seconds, kills, paid);
+
+            final java.util.Map<String, ArenaTotals> byArena = new java.util.HashMap<>();
+            long matches = 0, seconds = 0, kills = 0;
+            double paidAll = 0;
+            final java.util.Set<String> arenas = new java.util.HashSet<>(sums.keySet());
+            arenas.addAll(paid.keySet());
+            for (final String arena : arenas) {
+                final long[] a = sums.getOrDefault(arena, new long[4]);
+                final double p = paid.getOrDefault(arena, 0.0);
+                byArena.put(arena, new ArenaTotals(a[0], a[1], a[2], a[3], p));
+                matches += a[0];
+                seconds += a[2];
+                kills += a[3];
+                paidAll += p;
+            }
+            final GlobalStats fresh = new GlobalStats(new ArenaTotals(matches, players, seconds, kills, paidAll), java.util.Map.copyOf(byArena));
             this.globalCache = fresh;
             this.globalFetchedAt = System.currentTimeMillis();
             return fresh;
@@ -1657,11 +1683,14 @@ public class StatsManager {
         }
     }
 
-    /** Matches this player has won or lost, across every arena. */
-    public long getMatchesPlayed(final UUID uuid) {
+    /** Matches this player has won or lost in this arena, or across every arena (null). */
+    public long getMatchesPlayed(final UUID uuid, final String arena) {
         try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement("SELECT COALESCE(SUM(wins + losses), 0) FROM arena_stats WHERE server_id=" + sid + " AND uuid=?")) {
+             PreparedStatement ps = c.prepareStatement("SELECT COALESCE(SUM(wins + losses), 0) FROM arena_stats WHERE server_id=" + sid
+                     + " AND uuid=?" + (arena == null ? "" : " AND arena=?"))) {
             ps.setString(1, uuid.toString());
+            if (arena != null)
+                ps.setString(2, arena);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getLong(1) : 0;
             }

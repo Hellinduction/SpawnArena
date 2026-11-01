@@ -167,19 +167,23 @@ public final class LeaderboardHolograms {
     }
 
     private static final String GLOBAL = "global";
-    public static final int GLOBAL_LINES = 8;
+    private static final String STATS_TAG = "_stats";
+    public static final int STATS_LINES = 8;
 
-    /** Stats across every arena: matches, players, time fought, free-for-all kills, rewards paid, and the viewer's matches. */
-    public static String spawnGlobal(final Location loc) {
+    /**
+     * Totals for one arena ({@code arena}), or every arena together (null): matches, players, time fought, free-for-all
+     * kills (where there's a free-for-all), rewards paid, and the viewer's own matches.
+     */
+    public static String spawnStats(final String arena, final Location loc) {
         final HologramManager manager = FancyHologramsPlugin.get().getHologramManager();
 
         String name;
         do {
-            name = NAME_PREFIX + GLOBAL + "_" + String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
+            name = NAME_PREFIX + (arena == null ? GLOBAL : arena.toLowerCase() + STATS_TAG) + "_" + String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
         } while (manager.getHologram(name).isPresent());
 
         final TextHologramData data = new TextHologramData(name, loc);
-        data.setText(globalLines());
+        data.setText(statsLines(arena));
         data.setTextUpdateInterval(UPDATE_INTERVAL_MS);
         data.setTextShadow(true);
         data.setPersistent(true);
@@ -190,17 +194,22 @@ public final class LeaderboardHolograms {
         return name;
     }
 
-    private static List<String> globalLines() {
-        return new ArrayList<>(List.of(
-                "<gradient:#FFD700:#FF8C00><bold>✦ Arena Stats ✦</bold></gradient>",
-                "<gray>Matches played: <yellow>%spawnarena_global_matches%",
-                "<gray>Players who've fought: <yellow>%spawnarena_global_players%",
-                "<gray>Time spent fighting: <yellow>%spawnarena_global_time%",
-                "<gray>Free-for-all kills: <yellow>%spawnarena_global_ffa_kills%",
-                "<gray>Win rewards paid: <#55FF55>%spawnarena_global_paid%",
-                SEPARATOR,
-                "<gray>Your matches: <light_purple>%spawnarena_global_my_matches%"
-        ));
+    private static List<String> statsLines(final String arena) {
+        final String of = arena == null ? "" : "_" + arena;
+        final boolean ffa = me.zeronull.spawnarena.SpawnArena.arenas != null && (arena == null
+                ? java.util.stream.StreamSupport.stream(me.zeronull.spawnarena.SpawnArena.arenas.spliterator(), false).anyMatch(Arena::isFfa)
+                : me.zeronull.spawnarena.SpawnArena.arenas.of(arena) != null && me.zeronull.spawnarena.SpawnArena.arenas.of(arena).isFfa());
+        final List<String> lines = new ArrayList<>();
+        lines.add("<gradient:#FFD700:#FF8C00><bold>✦ " + (arena == null ? "Arena" : displayName(arena)) + " Stats ✦</bold></gradient>");
+        lines.add("<gray>Matches played: <yellow>%spawnarena_global_matches" + of + "%");
+        lines.add("<gray>Players who've fought: <yellow>%spawnarena_global_players" + of + "%");
+        lines.add("<gray>Time spent fighting: <yellow>%spawnarena_global_time" + of + "%");
+        if (ffa)
+            lines.add("<gray>Free-for-all kills: <yellow>%spawnarena_global_ffa_kills" + of + "%");
+        lines.add("<gray>Win rewards paid: <#55FF55>%spawnarena_global_paid" + of + "%");
+        lines.add(SEPARATOR);
+        lines.add("<gray>Your matches: <light_purple>%spawnarena_global_my_matches" + of + "%");
+        return lines;
     }
 
     // ── "Ready!" poof ───────────────────────────────────────────────────────
@@ -283,7 +292,12 @@ public final class LeaderboardHolograms {
             final int interval;
 
             if (rest.equals(GLOBAL)) {
-                lines = globalLines();
+                lines = statsLines(null);
+                interval = UPDATE_INTERVAL_MS;
+            } else if (rest.endsWith(STATS_TAG)) {
+                final String arena = resolveArena(rest.substring(0, rest.length() - STATS_TAG.length()));
+                if (arena == null) { skipped.add(name); continue; }
+                lines = statsLines(arena);
                 interval = UPDATE_INTERVAL_MS;
             } else if (rest.endsWith("_reward")) {
                 final String arena = resolveArena(rest.substring(0, rest.length() - "_reward".length()));
@@ -324,7 +338,7 @@ public final class LeaderboardHolograms {
         final java.util.regex.Matcher id = BOARD_ID.matcher(rest);
         while (id.find()) {
             final String part = rest.substring(0, id.start());
-            if (part.endsWith("_reward") || java.util.Arrays.stream(BOARD_STATS).anyMatch(s -> part.endsWith("_" + s)))
+            if (part.endsWith("_reward") || part.endsWith(STATS_TAG) || part.equals(GLOBAL) || java.util.Arrays.stream(BOARD_STATS).anyMatch(s -> part.endsWith("_" + s)))
                 return part;
         }
         return rest.replaceFirst("_\\d{4}$", "");

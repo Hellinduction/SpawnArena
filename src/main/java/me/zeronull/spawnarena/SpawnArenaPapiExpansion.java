@@ -38,25 +38,29 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
     private static final int TOP_CACHE_SIZE = me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT;
     /**
-     * global_matches, global_matches_<arena>, global_players, global_time, global_ffa_kills, global_paid (every arena on
-     * this server), and global_my_matches (the viewer's matches won or lost, every arena).
+     * global_<stat> for every arena on this server together, global_<stat>_<arena> for one: matches, players, time,
+     * ffa_kills, paid, and my_matches (the viewer's matches won or lost).
      */
     private static String global(final Player player, final String what) {
-        if (what.equals("my_matches"))
-            return player == null ? "" : String.format("%,d", SpawnArena.statsManager.getMatchesPlayed(player.getUniqueId()));
-        final StatsManager.GlobalStats stats = SpawnArena.statsManager.getGlobalStats();
-        if (stats == null)
-            return "...";
-        if (what.startsWith("matches_"))
-            return String.format("%,d", stats.matchesByArena().getOrDefault(what.substring("matches_".length()).toLowerCase(), 0L));
-        return switch (what) {
-            case "matches" -> String.format("%,d", stats.matches());
-            case "players" -> String.format("%,d", stats.players());
-            case "time" -> StatsManager.formatDuration(stats.fightSeconds());
-            case "ffa_kills" -> String.format("%,d", stats.ffaKills());
-            case "paid" -> StatsManager.formatMoney(stats.paid());
-            default -> null;
-        };
+        for (final String stat : new String[]{"my_matches", "ffa_kills", "matches", "players", "time", "paid"}) {
+            if (!what.equals(stat) && !what.startsWith(stat + "_"))
+                continue;
+            final String arena = what.equals(stat) ? null : what.substring(stat.length() + 1);
+            if (stat.equals("my_matches"))
+                return player == null ? "" : String.format("%,d", SpawnArena.statsManager.getMatchesPlayed(player.getUniqueId(), arena));
+            final StatsManager.GlobalStats stats = SpawnArena.statsManager.getGlobalStats();
+            if (stats == null)
+                return "...";
+            final StatsManager.ArenaTotals totals = stats.of(arena);
+            return switch (stat) {
+                case "matches" -> String.format("%,d", totals.matches());
+                case "players" -> String.format("%,d", totals.players());
+                case "time" -> StatsManager.formatDuration(totals.fightSeconds());
+                case "ffa_kills" -> String.format("%,d", totals.ffaKills());
+                default -> StatsManager.formatMoney(totals.paid());
+            };
+        }
+        return null;
     }
 
     /** my_rank_<arena>_<stat> ("#14", or "unranked") and my_value_<arena>_<stat>, for the viewer. */

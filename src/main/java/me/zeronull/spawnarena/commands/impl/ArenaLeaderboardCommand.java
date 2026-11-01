@@ -79,16 +79,21 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             sender.sendMessage("§cYou must be a player to spawn a leaderboard.");
             return true;
         }
-        if (args.length == 2 && args[1].equalsIgnoreCase("global")) {
+        final boolean global = args.length == 2 && args[1].equalsIgnoreCase("global");
+        if (global || (args.length >= 3 && args[2].equalsIgnoreCase("stats"))) {
+            final String arena = global ? null : args[1];
             final LeaderboardHolograms.Placement placement =
-                    LeaderboardHolograms.correctPlacement(p.getLocation(), LeaderboardHolograms.GLOBAL_LINES);
-            final String name = LeaderboardHolograms.spawnGlobal(placement.location());
-            sender.sendMessage(String.format("§aCreated the global stats hologram named §e%s§a.", name));
+                    LeaderboardHolograms.correctPlacement(p.getLocation(), LeaderboardHolograms.STATS_LINES);
+            final String name = LeaderboardHolograms.spawnStats(arena, placement.location());
+            sender.sendMessage(global ? String.format("§aCreated the stats hologram for every arena named §e%s§a.", name)
+                    : String.format("§aCreated the stats hologram for §e%s§a named §e%s§a.", arena, name));
+            if (!global && SpawnArena.arenas.of(arena) == null)
+                sender.sendMessage("§eNote: there's no arena named §6" + arena + "§e (names are case-sensitive), so it will show zeros.");
             return true;
         }
         if (args.length < 3) {
-            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak|reward> [limit]");
-            sender.sendMessage("§c   or: /arenaleaderboard spawn global  (stats across every arena)");
+            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak|reward|stats> [limit]");
+            sender.sendMessage("§c   or: /arenaleaderboard spawn global  (stats for every arena together)");
             return true;
         }
 
@@ -257,8 +262,8 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             if (manage) options.addAll(List.of("spawn", "remove", "list", "tp", "reload", "update"));
             options.addAll(arenaNames());
         } else if (args[0].equalsIgnoreCase("spawn") && manage) {
-            if (args.length == 2) options.addAll(arenaNames());
-            else if (args.length == 3) { options.addAll(STATS); options.add("reward"); }
+            if (args.length == 2) { options.addAll(arenaNames()); options.add("global"); }
+            else if (args.length == 3 && !args[1].equalsIgnoreCase("global")) { options.addAll(STATS); options.add("reward"); options.add("stats"); }
         } else if ((args[0].equalsIgnoreCase("remove") || args[0].equalsIgnoreCase("tp")) && manage) {
             if (args.length == 2 && Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
                 options.addAll(LeaderboardHolograms.list());
