@@ -37,6 +37,28 @@ import java.util.UUID;
 public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
     private static final int TOP_CACHE_SIZE = me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT;
+    /**
+     * global_matches, global_matches_<arena>, global_players, global_time, global_ffa_kills, global_paid (every arena on
+     * this server), and global_my_matches (the viewer's matches won or lost, every arena).
+     */
+    private static String global(final Player player, final String what) {
+        if (what.equals("my_matches"))
+            return player == null ? "" : String.format("%,d", SpawnArena.statsManager.getMatchesPlayed(player.getUniqueId()));
+        final StatsManager.GlobalStats stats = SpawnArena.statsManager.getGlobalStats();
+        if (stats == null)
+            return "...";
+        if (what.startsWith("matches_"))
+            return String.format("%,d", stats.matchesByArena().getOrDefault(what.substring("matches_".length()).toLowerCase(), 0L));
+        return switch (what) {
+            case "matches" -> String.format("%,d", stats.matches());
+            case "players" -> String.format("%,d", stats.players());
+            case "time" -> StatsManager.formatDuration(stats.fightSeconds());
+            case "ffa_kills" -> String.format("%,d", stats.ffaKills());
+            case "paid" -> StatsManager.formatMoney(stats.paid());
+            default -> null;
+        };
+    }
+
     /** my_rank_<arena>_<stat> ("#14", or "unranked") and my_value_<arena>_<stat>, for the viewer. */
     private static String standing(final Player player, final String params) {
         if (player == null)
@@ -78,6 +100,8 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
     public @Nullable String onPlaceholderRequest(Player player, @NotNull String params) {
         if (params.startsWith("reward_"))
             return reward(player, params.substring("reward_".length()));
+        if (params.startsWith("global_"))
+            return global(player, params.substring("global_".length()));
         // The #1 Elo tag: " #1 CrystalPvP" (legacy & / &#hex colours), or "" if they're #1 nowhere
         if (params.equals("top_elo"))
             return player == null ? "" : TopEloSuffix.tagOf(player.getUniqueId());

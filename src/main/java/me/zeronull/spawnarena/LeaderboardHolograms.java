@@ -166,6 +166,43 @@ public final class LeaderboardHolograms {
         ));
     }
 
+    private static final String GLOBAL = "global";
+    public static final int GLOBAL_LINES = 8;
+
+    /** Stats across every arena: matches, players, time fought, free-for-all kills, rewards paid, and the viewer's matches. */
+    public static String spawnGlobal(final Location loc) {
+        final HologramManager manager = FancyHologramsPlugin.get().getHologramManager();
+
+        String name;
+        do {
+            name = NAME_PREFIX + GLOBAL + "_" + String.format("%04d", ThreadLocalRandom.current().nextInt(10_000));
+        } while (manager.getHologram(name).isPresent());
+
+        final TextHologramData data = new TextHologramData(name, loc);
+        data.setText(globalLines());
+        data.setTextUpdateInterval(UPDATE_INTERVAL_MS);
+        data.setTextShadow(true);
+        data.setPersistent(true);
+
+        final Hologram hologram = manager.create(data);
+        manager.addHologram(hologram);
+        rememberCreated(name);
+        return name;
+    }
+
+    private static List<String> globalLines() {
+        return new ArrayList<>(List.of(
+                "<gradient:#FFD700:#FF8C00><bold>✦ Arena Stats ✦</bold></gradient>",
+                "<gray>Matches played: <yellow>%spawnarena_global_matches%",
+                "<gray>Players who've fought: <yellow>%spawnarena_global_players%",
+                "<gray>Time spent fighting: <yellow>%spawnarena_global_time%",
+                "<gray>Free-for-all kills: <yellow>%spawnarena_global_ffa_kills%",
+                "<gray>Win rewards paid: <#55FF55>%spawnarena_global_paid%",
+                SEPARATOR,
+                "<gray>Your matches: <light_purple>%spawnarena_global_my_matches%"
+        ));
+    }
+
     // ── "Ready!" poof ───────────────────────────────────────────────────────
 
     private static final double READY_EFFECT_RADIUS = 16;
@@ -245,7 +282,10 @@ public final class LeaderboardHolograms {
             final List<String> lines;
             final int interval;
 
-            if (rest.endsWith("_reward")) {
+            if (rest.equals(GLOBAL)) {
+                lines = globalLines();
+                interval = UPDATE_INTERVAL_MS;
+            } else if (rest.endsWith("_reward")) {
                 final String arena = resolveArena(rest.substring(0, rest.length() - "_reward".length()));
                 if (arena == null) { skipped.add(name); continue; }
                 lines = rewardLines(arena);

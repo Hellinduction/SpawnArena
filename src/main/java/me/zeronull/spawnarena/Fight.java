@@ -902,6 +902,7 @@ public class Fight {
             for (final Player winner : winners)
                 winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName));
 
+            SpawnArena.statsManager.recordMatch(this.arena.arenaName);
             final Map<UUID, int[]> elo = this.unranked ? Map.of() : SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
             TopEloSuffix.refreshLater(); // a new #1 gets their suffix straight away
             for (final Player p : this.getMembers()) {

@@ -242,6 +242,12 @@ public class StatsManager {
                     "uuid VARCHAR(36) NOT NULL PRIMARY KEY, " +
                     "name VARCHAR(16) NOT NULL, " +
                     "updated_at BIGINT NOT NULL)");
+            // Matches played per arena (counted ones: not duels or alts). Before this table, only wins were stored
+            s.execute("CREATE TABLE IF NOT EXISTS arena_matches (" +
+                    "server_id VARCHAR(36) NOT NULL, " +
+                    "arena VARCHAR(64) NOT NULL, " +
+                    "matches INT NOT NULL DEFAULT 0, " +
+                    "PRIMARY KEY (server_id, arena))");
             s.execute("CREATE TABLE IF NOT EXISTS player_ips (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "ip_hash VARCHAR(64) NOT NULL, " +
@@ -264,6 +270,13 @@ public class StatsManager {
                         setMeta(c, "losses_since", String.valueOf(System.currentTimeMillis()));
                 }
                 setMeta(c, "losses_checked", "1");
+            }
+
+            // Matches from before they were counted: one per win (exact for 1v1; a 2v2 counted twice)
+            if (getMeta(c, "matches_checked") == null) {
+                s.execute("INSERT INTO arena_matches (server_id, arena, matches) SELECT server_id, arena, SUM(wins) FROM arena_stats"
+                        + " WHERE server_id=" + sid + " GROUP BY server_id, arena HAVING SUM(wins) > 0");
+                setMeta(c, "matches_checked", "1");
             }
 
             // Get the tables onto disk now rather than whenever H2 next writes
@@ -1580,6 +1593,83 @@ public class StatsManager {
     // Writes through this plugin clear the cache immediately; the TTL only covers edits made
     // directly in the database (e.g. another server sharing the same MySQL).
     private static final long TOP_CACHE_MILLIS = 30_000;
+
+    /** One more match played in this arena (a counted one: not a duel, and not between alts). */
+    public synchronized void recordMatch(final String arena) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement update = c.prepareStatement("UPDATE arena_matches SET matches = matches + 1 WHERE server_id=" + sid + " AND arena=?")) {
+            update.setString(1, arena);
+            if (update.executeUpdate() == 0)
+                try (PreparedStatement insert = c.prepareStatement("INSERT INTO arena_matches (server_id, arena, matches) VALUES (" + sid + ", ?, 1)")) {
+                    insert.setString(1, arena);
+                    insert.executeUpdate();
+                }
+            globalCache = null;
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] recordMatch: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Stats across every arena on this server: matches played (in total and per arena, lower case), players who've
+     * fought, time spent fighting (every fighter's added up), free-for-all kills and win rewards paid.
+     */
+    public record GlobalStats(long matches, java.util.Map<String, Long> matchesByArena, long players, long fightSeconds, long ffaKills, double paid) {}
+
+    private volatile GlobalStats globalCache;
+    private volatile long globalFetchedAt;
+
+    /** {@link GlobalStats}, read at most every 30 seconds; null if the database can't be read. */
+    public GlobalStats getGlobalStats() {
+        final GlobalStats cached = this.globalCache;
+        if (cached != null && System.currentTimeMillis() - this.globalFetchedAt < TOP_CACHE_MILLIS)
+            return cached;
+        try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
+            final java.util.Map<String, Long> byArena = new java.util.HashMap<>();
+            long matches = 0;
+            try (ResultSet rs = s.executeQuery("SELECT arena, matches FROM arena_matches WHERE server_id=" + sid)) {
+                while (rs.next()) {
+                    byArena.merge(rs.getString(1).toLowerCase(), rs.getLong(2), Long::sum);
+                    matches += rs.getLong(2);
+                }
+            }
+            long players = 0, seconds = 0, kills = 0;
+            try (ResultSet rs = s.executeQuery("SELECT COUNT(DISTINCT CASE WHEN wins > 0 OR losses > 0 OR ffa_kills > 0 OR ffa_deaths > 0 THEN uuid END),"
+                    + " COALESCE(SUM(fight_seconds), 0), COALESCE(SUM(ffa_kills), 0) FROM arena_stats WHERE server_id=" + sid)) {
+                if (rs.next()) {
+                    players = rs.getLong(1);
+                    seconds = rs.getLong(2);
+                    kills = rs.getLong(3);
+                }
+            }
+            double paid = 0;
+            try (ResultSet rs = s.executeQuery("SELECT COALESCE(SUM(amount), 0) FROM arena_payouts WHERE server_id=" + sid)) {
+                if (rs.next())
+                    paid = rs.getDouble(1);
+            }
+            final GlobalStats fresh = new GlobalStats(matches, java.util.Map.copyOf(byArena), players, seconds, kills, paid);
+            this.globalCache = fresh;
+            this.globalFetchedAt = System.currentTimeMillis();
+            return fresh;
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getGlobalStats: " + e.getMessage());
+            return cached;
+        }
+    }
+
+    /** Matches this player has won or lost, across every arena. */
+    public long getMatchesPlayed(final UUID uuid) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT COALESCE(SUM(wins + losses), 0) FROM arena_stats WHERE server_id=" + sid + " AND uuid=?")) {
+            ps.setString(1, uuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getMatchesPlayed: " + e.getMessage());
+            return 0;
+        }
+    }
 
     private record CachedTop(long fetchedAt, List<LeaderboardEntry> entries) {}
     private final java.util.Map<String, CachedTop> topCache = new java.util.concurrent.ConcurrentHashMap<>();

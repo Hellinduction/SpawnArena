@@ -79,8 +79,16 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             sender.sendMessage("§cYou must be a player to spawn a leaderboard.");
             return true;
         }
+        if (args.length == 2 && args[1].equalsIgnoreCase("global")) {
+            final LeaderboardHolograms.Placement placement =
+                    LeaderboardHolograms.correctPlacement(p.getLocation(), LeaderboardHolograms.GLOBAL_LINES);
+            final String name = LeaderboardHolograms.spawnGlobal(placement.location());
+            sender.sendMessage(String.format("§aCreated the global stats hologram named §e%s§a.", name));
+            return true;
+        }
         if (args.length < 3) {
             sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak|reward> [limit]");
+            sender.sendMessage("§c   or: /arenaleaderboard spawn global  (stats across every arena)");
             return true;
         }
 
