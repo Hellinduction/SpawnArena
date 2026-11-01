@@ -38,6 +38,8 @@ public class Fight {
     protected final Set<Player> alive = Collections.synchronizedSet(new LinkedHashSet<>());
     /** When each fighter started fighting (the fight going live, or joining a free-for-all), for their fight time. */
     protected final Map<UUID, Long> fightingSince = new java.util.concurrent.ConcurrentHashMap<>();
+    /** When the fighting started (after the countdown), for how long the match took; 0 until then. */
+    private volatile long startedAt;
     protected final Map<UUID, PlayerPreFightData> preFightData = new java.util.concurrent.ConcurrentHashMap<>();
     /** Arrows already stuck in each player when they went in (Archer takes away only the match's own). */
     protected final Map<UUID, Integer> arrowsBefore = new java.util.concurrent.ConcurrentHashMap<>();
@@ -579,6 +581,7 @@ public class Fight {
             this.fightState = FightState.IN_FIGHT;
         }
         final long now = System.currentTimeMillis();
+        this.startedAt = now;
         for (final Player p : this.getFighters())
             this.fightingSince.put(p.getUniqueId(), now);
         this.stats.start();
@@ -902,7 +905,7 @@ public class Fight {
             for (final Player winner : winners)
                 winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName));
 
-            SpawnArena.statsManager.recordMatch(this.arena.arenaName);
+            SpawnArena.statsManager.recordMatch(this.arena.arenaName, this.startedAt == 0 ? 0 : (System.currentTimeMillis() - this.startedAt) / 1000);
             final Map<UUID, int[]> elo = this.unranked ? Map.of() : SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
             TopEloSuffix.refreshLater(); // a new #1 gets their suffix straight away
             for (final Player p : this.getMembers()) {

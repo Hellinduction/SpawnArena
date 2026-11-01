@@ -247,7 +247,10 @@ public class StatsManager {
                     "server_id VARCHAR(36) NOT NULL, " +
                     "arena VARCHAR(64) NOT NULL, " +
                     "matches INT NOT NULL DEFAULT 0, " +
+                    "match_seconds BIGINT NOT NULL DEFAULT 0, " +
                     "PRIMARY KEY (server_id, arena))");
+            if (!hasColumn(c, "arena_matches", "match_seconds"))
+                s.execute("ALTER TABLE arena_matches ADD COLUMN match_seconds BIGINT NOT NULL DEFAULT 0");
             s.execute("CREATE TABLE IF NOT EXISTS player_ips (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "ip_hash VARCHAR(64) NOT NULL, " +
@@ -277,6 +280,13 @@ public class StatsManager {
                 s.execute("INSERT INTO arena_matches (server_id, arena, matches) SELECT server_id, arena, SUM(wins) FROM arena_stats"
                         + " WHERE server_id=" + sid + " GROUP BY server_id, arena HAVING SUM(wins) > 0");
                 setMeta(c, "matches_checked", "1");
+            }
+            // Match time from before it was counted: half of what the fighters spent (exact for 1v1; a 2v2 counted twice)
+            if (getMeta(c, "match_seconds_checked") == null) {
+                s.execute("UPDATE arena_matches SET match_seconds = (SELECT COALESCE(SUM(fight_seconds), 0) / 2 FROM arena_stats"
+                        + " WHERE arena_stats.server_id = arena_matches.server_id AND arena_stats.arena = arena_matches.arena)"
+                        + " WHERE server_id=" + sid);
+                setMeta(c, "match_seconds_checked", "1");
             }
 
             // Get the tables onto disk now rather than whenever H2 next writes
@@ -1594,14 +1604,19 @@ public class StatsManager {
     // directly in the database (e.g. another server sharing the same MySQL).
     private static final long TOP_CACHE_MILLIS = 30_000;
 
-    /** One more match played in this arena (a counted one: not a duel, and not between alts). */
-    public synchronized void recordMatch(final String arena) {
+    /** One more match played in this arena (a counted one: not a duel, and not between alts), that took this long. */
+    public synchronized void recordMatch(final String arena, final long seconds) {
+        final String key = arena.toLowerCase(); // like arena_stats
+        final long took = Math.max(0, seconds);
         try (Connection c = dataSource.getConnection();
-             PreparedStatement update = c.prepareStatement("UPDATE arena_matches SET matches = matches + 1 WHERE server_id=" + sid + " AND arena=?")) {
-            update.setString(1, arena);
+             PreparedStatement update = c.prepareStatement("UPDATE arena_matches SET matches = matches + 1, match_seconds = match_seconds + ?"
+                     + " WHERE server_id=" + sid + " AND arena=?")) {
+            update.setLong(1, took);
+            update.setString(2, key);
             if (update.executeUpdate() == 0)
-                try (PreparedStatement insert = c.prepareStatement("INSERT INTO arena_matches (server_id, arena, matches) VALUES (" + sid + ", ?, 1)")) {
-                    insert.setString(1, arena);
+                try (PreparedStatement insert = c.prepareStatement("INSERT INTO arena_matches (server_id, arena, matches, match_seconds) VALUES (" + sid + ", ?, 1, ?)")) {
+                    insert.setString(1, key);
+                    insert.setLong(2, took);
                     insert.executeUpdate();
                 }
             globalCache = null;
@@ -1610,8 +1625,8 @@ public class StatsManager {
         }
     }
 
-    /** Totals for one arena, or every arena together: matches, players who've fought, time fought (every fighter's added up),
-     * free-for-all kills and win rewards paid. */
+    /** Totals for one arena, or every arena together: matches, players who've fought, time fought (how long the matches
+     * took; in a free-for-all, which has no matches, the time players spent in it), free-for-all kills and win rewards paid. */
     public record ArenaTotals(long matches, long players, long fightSeconds, long ffaKills, double paid) {
         static final ArenaTotals NONE = new ArenaTotals(0, 0, 0, 0, 0);
     }
@@ -1634,17 +1649,25 @@ public class StatsManager {
         try (Connection c = dataSource.getConnection(); Statement s = c.createStatement()) {
             final java.util.Map<String, long[]> sums = new java.util.HashMap<>(); // matches, players, seconds, kills
             final java.util.Map<String, Double> paid = new java.util.HashMap<>();
-            try (ResultSet rs = s.executeQuery("SELECT arena, matches FROM arena_matches WHERE server_id=" + sid)) {
-                while (rs.next())
-                    sums.computeIfAbsent(rs.getString(1).toLowerCase(), k -> new long[4])[0] += rs.getLong(2);
+            final java.util.Set<String> hasMatches = new java.util.HashSet<>();
+            try (ResultSet rs = s.executeQuery("SELECT arena, matches, match_seconds FROM arena_matches WHERE server_id=" + sid)) {
+                while (rs.next()) {
+                    final String arena = rs.getString(1).toLowerCase();
+                    final long[] a = sums.computeIfAbsent(arena, k -> new long[4]);
+                    a[0] += rs.getLong(2);
+                    a[2] += rs.getLong(3);
+                    hasMatches.add(arena);
+                }
             }
             final String fought = "wins > 0 OR losses > 0 OR ffa_kills > 0 OR ffa_deaths > 0";
             try (ResultSet rs = s.executeQuery("SELECT arena, SUM(CASE WHEN " + fought + " THEN 1 ELSE 0 END),"
                     + " COALESCE(SUM(fight_seconds), 0), COALESCE(SUM(ffa_kills), 0) FROM arena_stats WHERE server_id=" + sid + " GROUP BY arena")) {
                 while (rs.next()) {
-                    final long[] a = sums.computeIfAbsent(rs.getString(1).toLowerCase(), k -> new long[4]);
+                    final String arena = rs.getString(1).toLowerCase();
+                    final long[] a = sums.computeIfAbsent(arena, k -> new long[4]);
                     a[1] += rs.getLong(2);
-                    a[2] += rs.getLong(3);
+                    if (!hasMatches.contains(arena))
+                        a[2] += rs.getLong(3); // every fighter's time added up: right for a free-for-all
                     a[3] += rs.getLong(4);
                 }
             }
