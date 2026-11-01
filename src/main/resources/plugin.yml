@@ -83,6 +83,12 @@ commands:
     permission: spawnarena.arenapaste
     permission-message: "§cYou don't have permission!"
 
+  arenamove:
+    description: Move an arena to another world or spot (its spawns, exit, paste location and WorldGuard regions)
+    usage: "/arenamove <arena> here | <world> [dx dy dz]"
+    permission: spawnarena.arenamove
+    permission-message: "§cYou don't have permission!"
+
   arenareload:
     description: Reload settings.yml and arena configs
     usage: "/arenareload"
@@ -185,6 +191,8 @@ permissions:
   spawnarena.arenareload:
     default: op
   spawnarena.arenapaste:
+    default: op
+  spawnarena.arenamove:
     default: op
   spawnarena.setarenaexit:
     default: op
