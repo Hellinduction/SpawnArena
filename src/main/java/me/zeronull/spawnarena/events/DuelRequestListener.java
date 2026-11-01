@@ -12,7 +12,10 @@ import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
-/** Shift-right-clicking a player near an arena sends them a duel request for that arena. */
+/**
+ * Shift-right-clicking a player near an arena sends them a duel request for that arena, or accepts theirs if they
+ * already sent you one.
+ */
 public final class DuelRequestListener implements Listener {
 
     // Not ignoring cancelled events: other plugins (e.g. WorldGuard interact rules) may cancel clicks on players
@@ -31,6 +34,12 @@ public final class DuelRequestListener implements Listener {
         if (!requester.canSee(target)
                 || (target.getGameMode() == org.bukkit.GameMode.SPECTATOR && requester.getGameMode() != org.bukkit.GameMode.SPECTATOR))
             return;
+
+        // They already challenged you: shift-right-clicking them back accepts it
+        if (DuelManager.hasRequest(requester, target)) {
+            DuelManager.accept(requester, target);
+            return;
+        }
 
         final Arena arena = DuelManager.arenaNear(requester.getLocation());
         if (arena == null)

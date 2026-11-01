@@ -207,6 +207,13 @@ public final class DuelManager {
         return had;
     }
 
+    /** Whether this player has a duel request from that one that hasn't expired. */
+    public static boolean hasRequest(final Player target, final Player requester) {
+        final Map<UUID, Request> requests = REQUESTS.get(target.getUniqueId());
+        final Request request = requests == null ? null : requests.get(requester.getUniqueId());
+        return request != null && System.currentTimeMillis() <= request.expiresAt();
+    }
+
     private static Request take(final Player target, final Player requester) {
         final Map<UUID, Request> requests = REQUESTS.get(target.getUniqueId());
         if (requests == null)
@@ -227,7 +234,7 @@ public final class DuelManager {
             return "The arenas are closed right now.";
         if (arena.isLocked())
             return "That arena is closed right now.";
-        if (!player.getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
+        if (!Arena.isSpawnWorld(player.getWorld()))
             return self ? "You must be at spawn to duel." : name + " isn't at spawn.";
         if (player.getGameMode() == org.bukkit.GameMode.SPECTATOR)
             return self ? "You can't duel while in spectator mode." : name + " is in spectator mode.";
