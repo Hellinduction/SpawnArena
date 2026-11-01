@@ -1679,6 +1679,60 @@ public class StatsManager {
         }
     }
 
+    /**
+     * Players who've changed name since: a name from the logs that no player has now is matched to the player whose wins
+     * in each arena, less the wins the logs give their other names, are what that name won (within 2, and only one such
+     * player). Adds them to {@code byName}; returns "old -> new" for the report.
+     */
+    private java.util.Map<String, String> matchRenamed(final Connection c, final List<LoggedMatch> matches, final java.util.Map<String, UUID> byName)
+            throws SQLException {
+        final java.util.Map<String, java.util.Map<String, Integer>> logWins = new java.util.HashMap<>(); // name -> arena -> wins
+        for (final LoggedMatch m : matches)
+            for (final String n : m.winners())
+                logWins.computeIfAbsent(n.toLowerCase(), k -> new java.util.HashMap<>()).merge(m.arena(), 1, Integer::sum);
+        final java.util.Map<UUID, java.util.Map<String, Integer>> left = new java.util.HashMap<>(); // wins not explained by a known name
+        try (Statement s = c.createStatement(); ResultSet rs = s.executeQuery("SELECT uuid, arena, wins FROM arena_stats WHERE server_id=" + sid + " AND wins > 0")) {
+            while (rs.next())
+                left.computeIfAbsent(UUID.fromString(rs.getString(1)), k -> new java.util.HashMap<>()).put(rs.getString(2), rs.getInt(3));
+        }
+        for (final java.util.Map.Entry<String, java.util.Map<String, Integer>> e : logWins.entrySet()) {
+            final UUID u = byName.get(e.getKey());
+            if (u != null && left.containsKey(u))
+                e.getValue().forEach((arena, wins) -> left.get(u).merge(arena, -wins, Integer::sum));
+        }
+        final java.util.Map<String, String> found = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        for (final java.util.Map.Entry<String, java.util.Map<String, Integer>> e : logWins.entrySet()) {
+            if (byName.containsKey(e.getKey()) || e.getValue().values().stream().mapToInt(Integer::intValue).sum() < 3)
+                continue;
+            UUID match = null;
+            int candidates = 0;
+            for (final java.util.Map.Entry<UUID, java.util.Map<String, Integer>> player : left.entrySet()) {
+                final java.util.Set<String> arenas = new java.util.HashSet<>(e.getValue().keySet());
+                player.getValue().forEach((arena, wins) -> { if (wins > 2) arenas.add(arena); });
+                boolean fits = true;
+                for (final String arena : arenas)
+                    if (Math.abs(player.getValue().getOrDefault(arena, 0) - e.getValue().getOrDefault(arena, 0)) > 2) { fits = false; break; }
+                if (fits) { match = player.getKey(); candidates++; }
+            }
+            if (candidates == 1) {
+                byName.put(e.getKey(), match);
+                found.put(e.getKey(), e.getKey() + " -> " + nameOf(match));
+            }
+        }
+        return found;
+    }
+
+    /** A name from the logs as a player, or a UUID written in the file instead of a name; null if not known. */
+    private static UUID player(final String name, final java.util.Map<String, UUID> byName) {
+        if (name.length() == 36)
+            try {
+                return UUID.fromString(name);
+            } catch (final IllegalArgumentException ignored) {
+                // a 36-letter name
+            }
+        return byName.get(name.toLowerCase());
+    }
+
     private static String joined(final List<String> ids) {
         final String all = String.join(",", ids);
         return all.length() > 255 ? all.substring(0, 255) : all;
@@ -1714,6 +1768,16 @@ public class StatsManager {
             for (final org.bukkit.OfflinePlayer p : Bukkit.getOfflinePlayers())
                 if (p.getName() != null)
                     byName.putIfAbsent(p.getName().toLowerCase(), p.getUniqueId());
+            // The server's own name cache (usercache.json) knows some the others don't
+            try (java.io.Reader in = java.nio.file.Files.newBufferedReader(new File(Bukkit.getWorldContainer(), "usercache.json").toPath())) {
+                for (final com.google.gson.JsonElement e : com.google.gson.JsonParser.parseReader(in).getAsJsonArray()) {
+                    final com.google.gson.JsonObject o = e.getAsJsonObject();
+                    byName.putIfAbsent(o.get("name").getAsString().toLowerCase(), UUID.fromString(o.get("uuid").getAsString()));
+                }
+            } catch (final Exception ignored) {
+                // no cache: names from the other two only
+            }
+            final java.util.Map<String, String> renamed = matchRenamed(c, matches, byName);
 
             final java.util.Map<String, Integer> perArena = new java.util.TreeMap<>();
             final java.util.Map<String, Long> first = new java.util.HashMap<>();      // uuid|arena -> first match
@@ -1727,8 +1791,8 @@ public class StatsManager {
                 used++;
                 final List<String> w = new ArrayList<>(), l = new ArrayList<>();
                 final List<UUID> wu = new ArrayList<>(), lu = new ArrayList<>();
-                for (final String n : m.winners()) { final UUID u = byName.get(n.toLowerCase()); if (u == null) { unresolved.merge(n, 1, Integer::sum); w.add("?" + n); } else { wu.add(u); w.add(u.toString()); } }
-                for (final String n : m.losers()) { final UUID u = byName.get(n.toLowerCase()); if (u == null) { unresolved.merge(n, 1, Integer::sum); l.add("?" + n); } else { lu.add(u); l.add(u.toString()); } }
+                for (final String n : m.winners()) { final UUID u = player(n, byName); if (u == null) { unresolved.merge(n, 1, Integer::sum); w.add("?" + n); } else { wu.add(u); w.add(u.toString()); } }
+                for (final String n : m.losers()) { final UUID u = player(n, byName); if (u == null) { unresolved.merge(n, 1, Integer::sum); l.add("?" + n); } else { lu.add(u); l.add(u.toString()); } }
                 boolean counted = true;
                 if (checkAlts)
                     outer:
@@ -1763,6 +1827,8 @@ public class StatsManager {
             if (later > 0 || unknownArena > 0)
                 report.add("§7Left out: " + later + " already in the match log, " + unknownArena + " in arenas that don't exist any more.");
             report.add("§7Between alts (not counted, as when played): §e" + alts);
+            if (!renamed.isEmpty())
+                report.add("§7Old names found by their wins (renamed since): §e" + String.join(", ", renamed.values()));
             for (final String arena : arenas) {
                 final long total = perArena.getOrDefault(arena, 0) + live.getOrDefault(arena, 0);
                 report.add("§7- §e" + arena + "§7: matches §e" + String.format("%,d", now.getOrDefault(arena, 0L)) + " §7-> §e" + String.format("%,d", total));
