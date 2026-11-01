@@ -32,6 +32,11 @@ public final class WorldEditUtils {
      * //paste -a). The future completes once the paste is done, failed or not (failures are logged).
      */
     public static CompletableFuture<Void> paste(final Location loc, final File schematic, final boolean ignoreAir) {
+        return paste(loc, schematic, ignoreAir, 0);
+    }
+
+    /** As {@link #paste(Location, File, boolean)}, turned {@code turn} degrees clockwise seen from above (like //rotate). */
+    public static CompletableFuture<Void> paste(final Location loc, final File schematic, final boolean ignoreAir, final int turn) {
         final CompletableFuture<Void> done = new CompletableFuture<>();
         // Reading the file is thread-safe for both implementations
         Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> {
@@ -45,11 +50,11 @@ public final class WorldEditUtils {
             }
 
             if (FAWE) {
-                pasteNow(clipboard, loc, ignoreAir);
+                pasteNow(clipboard, loc, ignoreAir, turn);
                 done.complete(null);
             } else {
                 Bukkit.getRegionScheduler().execute(SpawnArena.INSTANCE, loc, () -> {
-                    pasteNow(clipboard, loc, ignoreAir);
+                    pasteNow(clipboard, loc, ignoreAir, turn);
                     done.complete(null);
                 });
             }
@@ -67,9 +72,12 @@ public final class WorldEditUtils {
         }
     }
 
-    private static void pasteNow(final Clipboard clipboard, final Location loc, final boolean ignoreAir) {
+    private static void pasteNow(final Clipboard clipboard, final Location loc, final boolean ignoreAir, final int turn) {
         try (EditSession session = newSession(loc.getWorld())) {
-            Operations.complete(new ClipboardHolder(clipboard)
+            final ClipboardHolder holder = new ClipboardHolder(clipboard);
+            if (turn % 360 != 0) // //rotate's way round: WorldEdit's rotateY turns the other way
+                holder.setTransform(new com.sk89q.worldedit.math.transform.AffineTransform().rotateY(-turn));
+            Operations.complete(holder
                     .createPaste(session)
                     .to(BlockVector3.at(loc.getX(), loc.getY(), loc.getZ()))
                     .ignoreAirBlocks(ignoreAir)

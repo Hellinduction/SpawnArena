@@ -29,21 +29,29 @@ import java.util.List;
 import java.util.logging.Level;
 
 /**
- * /arenamove &lt;arena&gt; here | &lt;world&gt; [dx dy dz]: points an arena at another spot, e.g. after the spawn moved to a new
- * world. Its spawns, exit and paste location move by the offset, and its WorldGuard regions (the arena's and
- * &lt;arena&gt;_copy) are copied there, flags and all. Stats stay, as they go by the arena's name. The build itself
- * isn't moved: it must already be there (or paste it there).
+ * /arenamove &lt;arena&gt; here | &lt;world&gt; [dx dy dz] [turn]: points an arena at another spot, e.g. after the spawn moved
+ * to a new world, also when its build was pasted there turned. Its spawns, exit and paste location move (and turn, about
+ * spawn 1), the schematic is pasted turned from then on, and its WorldGuard regions (the arena's and &lt;arena&gt;_copy) are
+ * copied there, flags and all. Stats stay, as they go by the arena's name. The build itself isn't moved: it must already
+ * be there (or paste it there).
+ * <p>
+ * With "here", the player stands on spawn 1's block in the new spot looking toward spawn 2; the turn is how far that
+ * is from the old spawn 1 to spawn 2 direction, to the nearest quarter.
  */
 public final class ArenaMoveCommand extends ArenaTabComplete implements CommandExecutor {
     public ArenaMoveCommand() {
         super(0);
     }
 
+    private static void usage(final CommandSender sender) {
+        sender.sendMessage(ChatColor.RED + "Usage: /arenamove <arena> here  (on spawn 1's block in the new spot, looking toward spawn 2)");
+        sender.sendMessage(ChatColor.RED + "   or: /arenamove <arena> <world> [dx dy dz] [0|90|180|270]  (moved by that much, turned clockwise about spawn 1)");
+    }
+
     @Override
     public boolean onCommand(final CommandSender sender, final Command command, final String label, final String[] args) {
-        if (args.length != 2 && args.length != 5) {
-            sender.sendMessage(ChatColor.RED + "Usage: /arenamove <arena> here  (standing on its spawn 1's block in the new spot)");
-            sender.sendMessage(ChatColor.RED + "   or: /arenamove <arena> <world> [dx dy dz]  (same coordinates, or moved by that much)");
+        if (args.length < 2 || args.length == 4 || args.length > 6) {
+            usage(sender);
             return true;
         }
         final Arena found = SpawnArena.arenas.of(args[0]);
@@ -57,19 +65,25 @@ public final class ArenaMoveCommand extends ArenaTabComplete implements CommandE
             return true;
         }
         final World from = config.spawnPoint1.getWorld();
+        final BlockVector3 pivot = BlockVector3.at(config.spawnPoint1.getBlockX(), config.spawnPoint1.getBlockY(), config.spawnPoint1.getBlockZ());
 
         final World to;
-        final int dx, dy, dz;
+        final BlockVector3 at;
+        final int turn;
         if (args[1].equalsIgnoreCase("here")) {
-            if (!(sender instanceof Player player)) {
-                sender.sendMessage(ChatColor.RED + "Only a player can use \"here\". From the console: /arenamove <arena> <world> [dx dy dz]");
+            if (!(sender instanceof Player player) || args.length != 2) {
+                usage(sender);
                 return true;
             }
-            final Location at = player.getLocation();
-            to = at.getWorld();
-            dx = at.getBlockX() - config.spawnPoint1.getBlockX();
-            dy = at.getBlockY() - config.spawnPoint1.getBlockY();
-            dz = at.getBlockZ() - config.spawnPoint1.getBlockZ();
+            if (config.spawnPoint2 == null) {
+                sender.sendMessage(ChatColor.RED + "That arena has no spawn 2, so which way it's turned can't be told. Use /arenamove <arena> <world> dx dy dz <turn>.");
+                return true;
+            }
+            final Location here = player.getLocation();
+            to = here.getWorld();
+            at = BlockVector3.at(here.getBlockX(), here.getBlockY(), here.getBlockZ());
+            final double before = yawOf(config.spawnPoint2.getX() - config.spawnPoint1.getX(), config.spawnPoint2.getZ() - config.spawnPoint1.getZ());
+            turn = Math.floorMod(Math.round((here.getYaw() - before) / 90f) * 90, 360);
         } else {
             to = Bukkit.getWorld(args[1]);
             if (to == null) {
@@ -77,15 +91,19 @@ public final class ArenaMoveCommand extends ArenaTabComplete implements CommandE
                 return true;
             }
             try {
-                dx = args.length == 5 ? Integer.parseInt(args[2]) : 0;
-                dy = args.length == 5 ? Integer.parseInt(args[3]) : 0;
-                dz = args.length == 5 ? Integer.parseInt(args[4]) : 0;
+                at = args.length >= 5 ? pivot.add(Integer.parseInt(args[2]), Integer.parseInt(args[3]), Integer.parseInt(args[4])) : pivot;
+                turn = args.length == 6 || args.length == 3 ? Integer.parseInt(args[args.length - 1]) : 0;
             } catch (final NumberFormatException e) {
-                sender.sendMessage(ChatColor.RED + "dx, dy and dz must be whole numbers.");
+                usage(sender);
+                return true;
+            }
+            if (turn % 90 != 0 || turn < 0 || turn >= 360) {
+                sender.sendMessage(ChatColor.RED + "The turn must be 0, 90, 180 or 270 (clockwise, seen from above).");
                 return true;
             }
         }
-        if (to.equals(from) && dx == 0 && dy == 0 && dz == 0) {
+        final Move move = new Move(to, pivot, at, turn);
+        if (to.equals(from) && at.equals(pivot) && turn == 0) {
             sender.sendMessage(ChatColor.RED + "That's where it already is.");
             return true;
         }
@@ -99,7 +117,7 @@ public final class ArenaMoveCommand extends ArenaTabComplete implements CommandE
         final List<String> regionNotes = new ArrayList<>();
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             try {
-                moveRegions(arena.getArenaName(), from, to, BlockVector3.at(dx, dy, dz), regionNotes);
+                moveRegions(arena.getArenaName(), from, move, regionNotes);
             } catch (final RuntimeException e) {
                 SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "/arenamove couldn't copy " + arena.getArenaName() + "'s regions", e);
                 sender.sendMessage(ChatColor.RED + "Couldn't copy the WorldGuard regions, so nothing was moved: " + e.getMessage());
@@ -107,14 +125,18 @@ public final class ArenaMoveCommand extends ArenaTabComplete implements CommandE
             }
         }
 
-        final List<Player> queued = arena.queue.clear();
-        for (final Player p : queued)
+        for (final Player p : arena.queue.clear())
             p.sendMessage(ChatColor.YELLOW + "You were taken out of the " + arena.getArenaName() + " queue as the arena is being moved.");
         arena.save(c -> {
-            c.spawnPoint1 = shifted(c.spawnPoint1, to, dx, dy, dz);
-            c.spawnPoint2 = shifted(c.spawnPoint2, to, dx, dy, dz);
-            c.exitLocation = shifted(c.exitLocation, to, dx, dy, dz);
-            c.pasteLocation = shifted(c.pasteLocation, to, dx, dy, dz);
+            c.spawnPoint1 = move.location(c.spawnPoint1);
+            c.spawnPoint2 = move.location(c.spawnPoint2);
+            c.exitLocation = move.location(c.exitLocation);
+            if (c.pasteLocation != null) {
+                // The schematic is pasted about its own origin, which is the paste location's block
+                final BlockVector3 paste = move.block(BlockVector3.at(c.pasteLocation.getBlockX(), c.pasteLocation.getBlockY(), c.pasteLocation.getBlockZ()));
+                c.pasteLocation = new Location(to, paste.x(), paste.y(), paste.z());
+            }
+            c.pasteTurn = Math.floorMod(c.pasteTurn + turn, 360);
         });
         arena.reloadFromDisk();
         // A MULTI crystal arena's copies are copied from the arena again, at its new spot
@@ -123,8 +145,13 @@ public final class ArenaMoveCommand extends ArenaTabComplete implements CommandE
             CrystalCopies.setUp(arena, true);
         }
 
-        sender.sendMessage(ChatColor.GREEN + "Moved " + arena.getArenaName() + " to " + to.getName()
-                + (dx == 0 && dy == 0 && dz == 0 ? " (same coordinates)" : " (moved by " + dx + " " + dy + " " + dz + ")") + ".");
+        final BlockVector3 by = at.subtract(pivot);
+        sender.sendMessage(ChatColor.GREEN + "Moved " + arena.getArenaName() + " to " + to.getName() + " (moved by " + by.x() + " " + by.y() + " " + by.z()
+                + (turn == 0 ? ", not turned" : ", turned " + turn + "° clockwise") + ").");
+        final ArenaConfig now = SavableArena.getArenaConfig(arena.getConfigFile());
+        if (now.spawnPoint2 != null)
+            sender.sendMessage(ChatColor.GRAY + "Spawn 2 is now at " + now.spawnPoint2.getBlockX() + " " + now.spawnPoint2.getBlockY() + " "
+                    + now.spawnPoint2.getBlockZ() + ": check it's on the other spawn.");
         for (final String note : regionNotes)
             sender.sendMessage(ChatColor.GRAY + note);
         if (!Arena.isSpawnWorld(to))
@@ -134,33 +161,61 @@ public final class ArenaMoveCommand extends ArenaTabComplete implements CommandE
         return true;
     }
 
-    private static Location shifted(final Location loc, final World to, final int dx, final int dy, final int dz) {
-        if (loc == null)
-            return null;
-        final Location moved = loc.clone().add(dx, dy, dz);
-        moved.setWorld(to);
-        return moved;
+    /** Minecraft's yaw for looking along (dx, dz): 0 = south (+z), 90 = west, 180 = north, 270 = east. */
+    private static double yawOf(final double dx, final double dz) {
+        return Math.toDegrees(Math.atan2(-dx, dz));
     }
 
-    /** Copies the arena's region and its _copy region (if any) into {@code to}, moved by {@code by}, flags and all. */
-    private static void moveRegions(final String arena, final World from, final World to, final BlockVector3 by, final List<String> notes) {
+    /** Moves spawn 1's block {@code from} onto {@code at} in {@code to}, turning everything about it clockwise by {@code turn}. */
+    private record Move(World to, BlockVector3 from, BlockVector3 at, int turn) {
+        /** (x, z) turned clockwise as seen from above (east goes south): the same way as WorldEdit's //rotate. */
+        private double[] turned(final double x, final double z) {
+            return switch (this.turn) {
+                case 90 -> new double[]{-z, x};
+                case 180 -> new double[]{-x, -z};
+                case 270 -> new double[]{z, -x};
+                default -> new double[]{x, z};
+            };
+        }
+
+        BlockVector3 block(final BlockVector3 b) {
+            final double[] t = this.turned(b.x() - this.from.x(), b.z() - this.from.z());
+            return BlockVector3.at(this.at.x() + (int) t[0], this.at.y() + b.y() - this.from.y(), this.at.z() + (int) t[1]);
+        }
+
+        /** A spot keeps its place in its block (about the block's centre) and turns its facing with the arena. */
+        Location location(final Location loc) {
+            if (loc == null)
+                return null;
+            final double[] t = this.turned(loc.getX() - this.from.x() - 0.5, loc.getZ() - this.from.z() - 0.5);
+            return new Location(this.to, this.at.x() + 0.5 + t[0], loc.getY() - this.from.y() + this.at.y(), this.at.z() + 0.5 + t[1],
+                    loc.getYaw() + this.turn, loc.getPitch());
+        }
+    }
+
+    /** Copies the arena's region and its _copy region (if any) into the new spot, moved and turned, flags and all. */
+    private static void moveRegions(final String arena, final World from, final Move move, final List<String> notes) {
         final RegionManager source = Arena.ArenaUtils.REGION_CONTAINER.get(BukkitAdapter.adapt(from));
-        final RegionManager target = Arena.ArenaUtils.REGION_CONTAINER.get(BukkitAdapter.adapt(to));
+        final RegionManager target = Arena.ArenaUtils.REGION_CONTAINER.get(BukkitAdapter.adapt(move.to()));
         if (source == null || target == null)
-            throw new IllegalStateException("WorldGuard has no regions for " + (source == null ? from : to).getName());
+            throw new IllegalStateException("WorldGuard has no regions for " + (source == null ? from : move.to()).getName());
         for (final String id : new String[]{arena, arena + "_copy"}) {
             final ProtectedRegion old = source.getRegion(id);
             if (old == null) {
                 if (id.equals(arena))
-                    notes.add("There's no region " + id + " in " + from.getName() + " to copy: make one around the arena in " + to.getName() + ".");
+                    notes.add("There's no region " + id + " in " + from.getName() + " to copy: make one around the arena in " + move.to().getName() + ".");
                 continue;
             }
             final ProtectedRegion moved;
             if (old instanceof ProtectedPolygonalRegion) {
-                final List<BlockVector2> points = old.getPoints().stream().map(p -> p.add(by.x(), by.z())).toList();
-                moved = new ProtectedPolygonalRegion(id, points, old.getMinimumPoint().y() + by.y(), old.getMaximumPoint().y() + by.y());
+                final List<BlockVector2> points = old.getPoints().stream()
+                        .map(p -> move.block(BlockVector3.at(p.x(), move.from().y(), p.z())).toBlockVector2()).toList();
+                final int dy = move.at().y() - move.from().y();
+                moved = new ProtectedPolygonalRegion(id, points, old.getMinimumPoint().y() + dy, old.getMaximumPoint().y() + dy);
             } else if (old instanceof ProtectedCuboidRegion) {
-                moved = new ProtectedCuboidRegion(id, old.getMinimumPoint().add(by), old.getMaximumPoint().add(by));
+                final BlockVector3 a = move.block(old.getMinimumPoint());
+                final BlockVector3 b = move.block(old.getMaximumPoint());
+                moved = new ProtectedCuboidRegion(id, a.getMinimum(b), a.getMaximum(b));
             } else {
                 notes.add("Region " + id + " isn't a box or polygon, so it wasn't copied.");
                 continue;
@@ -178,9 +233,9 @@ public final class ArenaMoveCommand extends ArenaTabComplete implements CommandE
                 }
             }
             if (target.hasRegion(id))
-                notes.add("Replaced the region " + id + " that was already in " + to.getName() + ".");
+                notes.add("Replaced the region " + id + " that was already in " + move.to().getName() + ".");
             target.addRegion(moved);
-            notes.add("Copied region " + id + " (flags, priority and members) into " + to.getName() + ".");
+            notes.add("Copied region " + id + " (flags, priority and members) into " + move.to().getName() + ".");
         }
         try {
             target.saveChanges();

@@ -102,4 +102,8 @@ public final class ArenaConfig {
 
     @Comment("Schematic of the arena")
     public String schematic = null;
+
+    @Comment({"How far the schematic is turned when it's pasted, clockwise seen from above: 0, 90, 180 or 270. Set by /arenamove",
+            "when the arena's build was pasted turned in its new spot."})
+    public int pasteTurn = 0;
 }

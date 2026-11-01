@@ -287,6 +287,6 @@ public final class SavableArena extends Arena {
             throw new IllegalStateException("Schematic '" + config.schematic + "' for arena " + this.getArenaName()
                     + " was not found in the WorldEdit/FastAsyncWorldEdit schematics folders");
 
-        return WorldEditUtils.paste(loc, schematic, !this.isCrystalPvp());
+        return WorldEditUtils.paste(loc, schematic, !this.isCrystalPvp(), config.pasteTurn);
     }
 }
