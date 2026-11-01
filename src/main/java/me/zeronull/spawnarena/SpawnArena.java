@@ -206,6 +206,7 @@ public class SpawnArena extends JavaPlugin {
         me.zeronull.spawnarena.config.ConfigHandler.getInstance().flushPreFights();
         LagOuts.unwatchAll();
         MatchSounds.uninstallAll();
+        Threads.finishResults();
         if (statsManager != null) statsManager.close();
     }
 

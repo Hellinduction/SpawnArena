@@ -66,7 +66,8 @@ public final class WinRewards {
             return 0;
         }
 
-        final EconomyResponse response = economy.depositPlayer(winner, amount);
+        final double paying = amount;
+        final EconomyResponse response = Threads.callGlobal(() -> economy.depositPlayer(winner, paying));
         if (!response.transactionSuccess()) {
             SpawnArena.INSTANCE.getLogger().warning("Couldn't pay " + winner.getName() + " their win reward: " + response.errorMessage);
             return 0;

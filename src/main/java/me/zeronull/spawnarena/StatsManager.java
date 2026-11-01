@@ -996,6 +996,13 @@ public class StatsManager {
 
     // ── Alt detection ───────────────────────────────────────────────────────
 
+    /** Like {@link #areAlts(Player, Player)}, with their addresses taken beforehand (so it can run off the main thread). */
+    public boolean areAlts(final UUID a, final java.net.InetAddress aAddress, final UUID b, final java.net.InetAddress bAddress) {
+        recordIp(a, aAddress);
+        recordIp(b, bAddress);
+        return sharesIp(a, b);
+    }
+
     /** Records both players' current IPs, then checks whether they've ever shared one. */
     public boolean areAlts(final Player a, final Player b) {
         if (a == null || b == null)

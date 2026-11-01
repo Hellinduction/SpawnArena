@@ -80,6 +80,69 @@ public final class Threads {
         Bukkit.getGlobalRegionScheduler().execute(SpawnArena.INSTANCE, task);
     }
 
+    /**
+     * Runs on the global thread and waits for the result: for a background thread calling something that must be called
+     * there (like the economy). Runs straight away if already there or shutting down. It runs exactly once: if the plugin
+     * starts shutting down while it waits (the global thread then never gets to it), the waiting thread runs it instead,
+     * and only if the global thread hasn't started it.
+     */
+    public static <T> T callGlobal(final Supplier<T> task) {
+        if (shuttingDown() || Bukkit.isGlobalTickThread())
+            return task.get();
+        final java.util.concurrent.atomic.AtomicBoolean claimed = new java.util.concurrent.atomic.AtomicBoolean();
+        final CompletableFuture<T> result = new CompletableFuture<>();
+        Bukkit.getGlobalRegionScheduler().execute(SpawnArena.INSTANCE, () -> {
+            if (!claimed.compareAndSet(false, true))
+                return;
+            try {
+                result.complete(task.get());
+            } catch (final Throwable t) {
+                result.completeExceptionally(t);
+            }
+        });
+        while (true) {
+            try {
+                return result.get(100, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (final java.util.concurrent.TimeoutException e) {
+                if (shuttingDown() && claimed.compareAndSet(false, true))
+                    return task.get();
+            } catch (final InterruptedException e) {
+                // Keep waiting: giving up here could let it run after we've moved on
+            } catch (final java.util.concurrent.ExecutionException e) {
+                throw e.getCause() instanceof RuntimeException r ? r : new IllegalStateException(e.getCause());
+            }
+        }
+    }
+
+    /**
+     * Match results are recorded one at a time, in the order the matches ended, on a thread of their own: so one player's
+     * results (streaks, rewards) never overlap, however slow the database is.
+     */
+    private static final java.util.concurrent.ExecutorService RESULTS = java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+        final Thread t = new Thread(r, "SpawnArena results");
+        t.setDaemon(true);
+        return t;
+    });
+
+    public static void result(final Runnable task) {
+        try {
+            RESULTS.execute(task);
+        } catch (final java.util.concurrent.RejectedExecutionException e) {
+            task.run(); // shutting down: record it here
+        }
+    }
+
+    /** On disable, before the database closes: lets the results still queued finish (up to 30 seconds). */
+    public static void finishResults() {
+        RESULTS.shutdown();
+        try {
+            if (!RESULTS.awaitTermination(30, java.util.concurrent.TimeUnit.SECONDS))
+                SpawnArena.INSTANCE.getLogger().severe("Match results were still being recorded after 30 seconds; the rest weren't saved.");
+        } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     public static ScheduledTask globalTimer(final Consumer<ScheduledTask> task, final long delayTicks, final long periodTicks) {
         return Bukkit.getGlobalRegionScheduler().runAtFixedRate(SpawnArena.INSTANCE, task, Math.max(1, delayTicks), periodTicks);
     }

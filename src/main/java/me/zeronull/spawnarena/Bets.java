@@ -30,6 +30,11 @@ public final class Bets {
     /** Bets set with /arenabet, waiting for a fight where the player's reward is ready. Used once. */
     private static final Map<UUID, Double> PENDING = new ConcurrentHashMap<>();
 
+    /** Pays into their account on the global thread (bets can be settled from the background, and economies expect it there). */
+    private static boolean deposit(final Economy economy, final org.bukkit.OfflinePlayer player, final double amount) {
+        return Threads.callGlobal(() -> economy.depositPlayer(player, amount).transactionSuccess());
+    }
+
     public static Double pending(final Player player) {
         return PENDING.get(player.getUniqueId());
     }
@@ -136,7 +141,7 @@ public final class Bets {
             if (cap > 0)
                 bonus = Math.max(0, Math.min(bonus, cap - stats.getEarnedToday(winner.getUniqueId())));
 
-            if (economy == null || !economy.depositPlayer(winner, bet + bonus).transactionSuccess()) {
+            if (economy == null || !deposit(economy, winner, bet + bonus)) {
                 SpawnArena.INSTANCE.getLogger().severe("Couldn't pay " + winner.getName() + " their bet back (" + bet + " + " + bonus
                         + "); it's still recorded as held and will be refunded on the next restart.");
                 continue;
@@ -164,7 +169,7 @@ public final class Bets {
             // A laggy fight gives part of a lost bet back (not to quitters)
             final double back = lagRefundFor(bet, tps);
             if (back > 0 && !fight.hasQuit(loser)) {
-                if (economy != null && economy.depositPlayer(loser, back).transactionSuccess()) {
+                if (economy != null && deposit(economy, loser, back)) {
                     loser.sendMessage(MiniMessage.miniMessage().deserialize(
                             "<red>-<lost>: you lost your bet.</red> <gray>The server was lagging (<tps> TPS), so <back> came back.",
                             Placeholder.unparsed("lost", StatsManager.formatMoney(bet - back)),
@@ -211,7 +216,7 @@ public final class Bets {
 
     private static void refund(final Player player, final double bet, final String reason) {
         final Economy economy = WinRewards.economy();
-        if (economy == null || !economy.depositPlayer(player, bet).transactionSuccess()) {
+        if (economy == null || !deposit(economy, player, bet)) {
             SpawnArena.INSTANCE.getLogger().severe("Couldn't refund " + player.getName() + "'s " + bet
                     + " bet; it's still recorded as held and will be refunded on the next restart.");
             return;
@@ -223,7 +228,7 @@ public final class Bets {
 
     private static void refundOffline(final UUID uuid, final double bet) {
         final Economy economy = WinRewards.economy();
-        if (economy == null || !economy.depositPlayer(Bukkit.getOfflinePlayer(uuid), bet).transactionSuccess()) {
+        if (economy == null || !deposit(economy, Bukkit.getOfflinePlayer(uuid), bet)) {
             SpawnArena.INSTANCE.getLogger().severe("Couldn't refund " + uuid + "'s " + bet + " bet; it'll be retried on the next restart.");
             return;
         }

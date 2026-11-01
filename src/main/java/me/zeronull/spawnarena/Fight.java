@@ -56,6 +56,10 @@ public class Fight {
     ScheduledTask starting;
     /** Bets taken from fighters for this fight (see Bets), until settled or refunded. */
     private final Map<UUID, Double> bets = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The result is being recorded in the background and will settle the bets: ending the fight mustn't refund them. */
+    private volatile boolean settlingBets;
+    /** Its result has been handed over to be recorded (once only). */
+    private final java.util.concurrent.atomic.AtomicBoolean resultRecorded = new java.util.concurrent.atomic.AtomicBoolean();
     /** Counts the arena's ticks while the fight is live, to tell how laggy it was (see averageTps). */
     private volatile ScheduledTask tickCounter;
     private volatile long firstTickNanos, lastTickNanos;
@@ -754,7 +758,7 @@ public class Fight {
         this.alive.clear();
 
         // Bets that weren't settled (fight ended without a result, e.g. shutdown) go back
-        if (!this.bets.isEmpty() && Bukkit.getPluginManager().isPluginEnabled("Vault"))
+        if (!this.settlingBets && !this.bets.isEmpty() && Bukkit.getPluginManager().isPluginEnabled("Vault"))
             Bets.refundAll(this, "the fight ended without a result");
 
         this.fightState = FightState.OVER;
@@ -889,6 +893,32 @@ public class Fight {
             return; // duels: no stats, no rewards
         }
 
+        // Recorded in the background (the database can be slow, e.g. MySQL over the network), then announced and paid
+        final Map<UUID, java.net.InetAddress> addresses = new HashMap<>();
+        for (final Player p : this.getMembers())
+            if (p.getAddress() != null)
+                addresses.put(p.getUniqueId(), p.getAddress().getAddress());
+        if (!this.resultRecorded.compareAndSet(false, true))
+            return;
+        if (!this.bets.isEmpty())
+            this.settlingBets = true;
+        final net.kyori.adventure.text.event.HoverEvent<Component> cardHover = statsHover;
+        Threads.result(() -> {
+            try {
+                this.recordResult(winners, losers, addresses, selfOut, arenaPart, cardHover);
+            } catch (final RuntimeException e) {
+                SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE, "Couldn't record the result of a match in " + this.arena.getArenaName(), e);
+                if (this.settlingBets)
+                    Bets.refundAll(this, "the result couldn't be recorded");
+            } finally {
+                this.settlingBets = false;
+            }
+        });
+    }
+
+    /** What the result of a (non-duel) match does: stats, then the announcement, then rewards and bets. Off the main thread. */
+    private void recordResult(final List<Player> winners, final List<Player> losers, final Map<UUID, java.net.InetAddress> addresses,
+                              final boolean selfOut, final String arenaPart, final net.kyori.adventure.text.event.HoverEvent<Component> cardHover) {
         // Matches where any winner has shared an IP with any loser (alts) can't pump stats or rewards
         final boolean checkIps = SpawnArena.settings != null
                 && (SpawnArena.settings.blockSameIpStats || SpawnArena.settings.blockSameIpRewards);
@@ -897,7 +927,7 @@ public class Fight {
             outer:
             for (final Player w : winners)
                 for (final Player l : losers)
-                    if (SpawnArena.statsManager.areAlts(w, l)) {
+                    if (SpawnArena.statsManager.areAlts(w.getUniqueId(), addresses.get(w.getUniqueId()), l.getUniqueId(), addresses.get(l.getUniqueId()))) {
                         alts = true;
                         break outer;
                     }
@@ -907,6 +937,7 @@ public class Fight {
 
         final List<Integer> winnerStreaks = new ArrayList<>();
         final Map<Player, Integer> endedStreaks = new LinkedHashMap<>();
+        Map<UUID, int[]> elo = Map.of();
         if (countStats) {
             final int threshold = SpawnArena.settings == null ? 0 : SpawnArena.settings.streakEndAnnounceThreshold;
             for (final Player loser : losers) {
@@ -920,34 +951,39 @@ public class Fight {
                 winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName));
 
             SpawnArena.statsManager.recordMatch(this.arena.arenaName, this.startedAt == 0 ? 0 : (System.currentTimeMillis() - this.startedAt) / 1000);
-            final Map<UUID, int[]> elo = this.unranked ? Map.of() : SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
+            elo = this.unranked ? Map.of() : SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
             TopEloSuffix.refreshLater(); // a new #1 gets their suffix straight away
+        }
+
+        // Announced on the global thread, as before; the rewards' messages come after it
+        final Map<UUID, int[]> eloChanges = elo;
+        Threads.callGlobal(() -> {
+            final net.kyori.adventure.text.event.HoverEvent<Component> statsHover = eloChanges.isEmpty() ? cardHover
+                    : net.kyori.adventure.text.event.HoverEvent.showText(this.stats.card(this, winners, losers, eloChanges));
             for (final Player p : this.getMembers()) {
-                final int[] change = elo.get(p.getUniqueId());
+                final int[] change = eloChanges.get(p.getUniqueId());
                 if (change != null && p.isOnline())
                     p.sendMessage(MiniMessage.miniMessage().deserialize("<gray>Elo: <white><elo></white> (<change>)",
                             Placeholder.unparsed("elo", String.valueOf(change[0])),
                             Placeholder.parsed("change", change[1] >= 0 ? "<green>+" + change[1] + "</green>" : "<red>" + change[1] + "</red>")));
             }
-            if (!elo.isEmpty())
-                statsHover = net.kyori.adventure.text.event.HoverEvent.showText(this.stats.card(this, winners, losers, elo));
-        }
-
-        if (endedStreaks.isEmpty()) {
-            broadcast(this.getArena(), MiniMessage.miniMessage().deserialize(selfOut
-                            ? "<dark_red><loser> took themselves out in the <arena>arena, <winner> <wins><ws_str>!"
-                            : "<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
-                    Placeholder.component("winner", displayNames(winners)),
-                    Placeholder.unparsed("wins", winners.size() > 1 ? "win" : "wins"), // "Bot1 & Bot3 win"
-                    Placeholder.component("loser", displayNames(losers)),
-                    Placeholder.parsed("arena", arenaPart),
-                    Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners))).hoverEvent(statsHover),
-                    winners, losers);
-        } else {
-            // A long streak just ended: that replaces the usual result message
-            for (final Map.Entry<Player, Integer> ended : endedStreaks.entrySet())
-                this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut, winnerStreaks);
-        }
+            if (endedStreaks.isEmpty()) {
+                broadcast(this.getArena(), MiniMessage.miniMessage().deserialize(selfOut
+                                ? "<dark_red><loser> took themselves out in the <arena>arena, <winner> <wins><ws_str>!"
+                                : "<dark_red><winner> beat <loser> in the <arena>arena<ws_str>!",
+                        Placeholder.component("winner", displayNames(winners)),
+                        Placeholder.unparsed("wins", winners.size() > 1 ? "win" : "wins"), // "Bot1 & Bot3 win"
+                        Placeholder.component("loser", displayNames(losers)),
+                        Placeholder.parsed("arena", arenaPart),
+                        Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners))).hoverEvent(statsHover),
+                        winners, losers);
+            } else {
+                // A long streak just ended: that replaces the usual result message
+                for (final Map.Entry<Player, Integer> ended : endedStreaks.entrySet())
+                    this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut, winnerStreaks);
+            }
+            return null;
+        });
 
         if (Bukkit.getPluginManager().isPluginEnabled("Vault")) {
             final Map<UUID, Double> paid = new HashMap<>();
