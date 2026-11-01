@@ -267,8 +267,8 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         } else if ((args[0].equalsIgnoreCase("remove") || args[0].equalsIgnoreCase("tp")) && manage) {
             if (args.length == 2 && Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
                 options.addAll(LeaderboardHolograms.list());
-        } else if (args.length == 2) {
-            options.addAll(STATS);
+        } else if (args.length == 2 && !List.of("spawn", "remove", "tp", "list", "reload", "update").contains(args[0].toLowerCase())) {
+            options.addAll(STATS); // /arenaleaderboard <arena> <stat>
         }
 
         if (options.isEmpty()) return Collections.emptyList();
