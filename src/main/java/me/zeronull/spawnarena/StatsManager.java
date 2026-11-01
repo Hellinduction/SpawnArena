@@ -1681,8 +1681,8 @@ public class StatsManager {
 
     /**
      * Players who've changed name since: a name from the logs that no player has now is matched to the player whose wins
-     * in each arena, less the wins the logs give their other names, are what that name won (within 2, and only one such
-     * player). Adds them to {@code byName}; returns "old -> new" for the report.
+     * in each arena, less the wins the logs give their other names, are what that name won (within 2 or 3%, and only one
+     * such player). Adds them to {@code byName}; returns "old -> new" for the report.
      */
     private java.util.Map<String, String> matchRenamed(final Connection c, final List<LoggedMatch> matches, final java.util.Map<String, UUID> byName)
             throws SQLException {
@@ -1711,7 +1711,9 @@ public class StatsManager {
                 player.getValue().forEach((arena, wins) -> { if (wins > 2) arenas.add(arena); });
                 boolean fits = true;
                 for (final String arena : arenas)
-                    if (Math.abs(player.getValue().getOrDefault(arena, 0) - e.getValue().getOrDefault(arena, 0)) > 2) { fits = false; break; }
+                    // Within 2, or 3% for big numbers: wins against alts were announced but never counted
+                    if (Math.abs(player.getValue().getOrDefault(arena, 0) - e.getValue().getOrDefault(arena, 0))
+                            > Math.max(2, e.getValue().getOrDefault(arena, 0) * 3 / 100)) { fits = false; break; }
                 if (fits) { match = player.getKey(); candidates++; }
             }
             if (candidates == 1) {
