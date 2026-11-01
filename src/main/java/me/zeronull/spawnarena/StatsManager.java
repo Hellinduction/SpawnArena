@@ -1930,8 +1930,11 @@ public class StatsManager {
         return report;
     }
 
-    /** One more match played in this arena (a counted one: not a duel, and not between alts), that took this long. */
-    public synchronized void recordMatch(final String arena, final long seconds) {
+    /**
+     * One more match played in this arena (a counted one: not a duel, and not between alts), that took this long. Returns
+     * its number in the arena (the count with it), or 0 if the database couldn't be written.
+     */
+    public synchronized long recordMatch(final String arena, final long seconds) {
         final String key = arena.toLowerCase(); // like arena_stats
         final long took = Math.max(0, seconds);
         try (Connection c = dataSource.getConnection();
@@ -1946,8 +1949,40 @@ public class StatsManager {
                     insert.executeUpdate();
                 }
             globalCache = null;
+            try (PreparedStatement read = c.prepareStatement("SELECT matches FROM arena_matches WHERE server_id=" + sid + " AND arena=?")) {
+                read.setString(1, key);
+                try (ResultSet rs = read.executeQuery()) {
+                    return rs.next() ? rs.getLong(1) : 0;
+                }
+            }
         } catch (SQLException e) {
             Bukkit.getLogger().warning("[SpawnArena] recordMatch: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    /** A milestone passed on because its match was too short (the match number), or 0. */
+    public long getPendingMilestone(final String arena) {
+        try (Connection c = dataSource.getConnection()) {
+            final String v = getMeta(c, "milestone_pending_" + arena.toLowerCase());
+            return v == null ? 0 : Long.parseLong(v);
+        } catch (SQLException | NumberFormatException e) {
+            Bukkit.getLogger().warning("[SpawnArena] getPendingMilestone: " + e.getMessage());
+            return 0;
+        }
+    }
+
+    /** Sets (or with 0 clears) the milestone this arena's next long enough match gets. */
+    public void setPendingMilestone(final String arena, final long milestone) {
+        final String key = "milestone_pending_" + arena.toLowerCase();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement del = c.prepareStatement("DELETE FROM arena_meta WHERE server_id=" + sid + " AND meta_key=?")) {
+            del.setString(1, key);
+            del.executeUpdate();
+            if (milestone > 0)
+                setMeta(c, key, String.valueOf(milestone));
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] setPendingMilestone: " + e.getMessage());
         }
     }
 

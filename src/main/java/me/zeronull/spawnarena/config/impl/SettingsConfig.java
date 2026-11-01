@@ -68,6 +68,16 @@ public final class SettingsConfig {
     @Comment("Losing a win streak at least this long gets a dramatic announcement. 0 disables it.")
     public int streakEndAnnounceThreshold = 5;
 
+    @Comment({"Every counted match in an arena is numbered (its result message says which: \"(match #3,969)\"). A match whose number",
+            "is a multiple of one of these pays its winner(s) that much, on top of their win reward and not counted toward",
+            "dailyRewardCap. The biggest that fits pays: with 100 and 1000, the 1,000th, 2,000th... pay the 1000 one and the 100th,",
+            "200th, 1,100th... the 100 one. Each arena counts its own matches. Empty = no milestone rewards."})
+    public java.util.Map<Integer, Double> milestoneRewards = new java.util.LinkedHashMap<>(java.util.Map.of(100, 50_000.0, 1000, 250_000.0));
+
+    @Comment({"A milestone match over in less than this many seconds passes its milestone on to the next match that isn't, so",
+            "it can't be grabbed by throwing a quick one. 0 = any length."})
+    public int milestoneMinSeconds = 15;
+
     @Comment("How close (in blocks) to an arena's region you must be to shift-right-click someone for a duel there")
     public double duelRadius = 10;
 

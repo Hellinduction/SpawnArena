@@ -18,4 +18,17 @@ public final class Grammar {
     public static String count(final long n, final String singular) {
         return n + " " + (n == 1 ? singular : singular + "s");
     }
+
+    /** "st", "nd", "rd" or "th" for this number: 1st, 2nd, 3rd, 11th, 100th, 1,001st. */
+    public static String ordinalSuffix(final long n) {
+        final long tens = Math.abs(n) % 100;
+        if (tens >= 11 && tens <= 13)
+            return "th";
+        return switch ((int) (Math.abs(n) % 10)) {
+            case 1 -> "st";
+            case 2 -> "nd";
+            case 3 -> "rd";
+            default -> "th";
+        };
+    }
 }
