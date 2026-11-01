@@ -255,6 +255,24 @@ public class StatsManager {
                     "PRIMARY KEY (server_id, arena))");
             if (!hasColumn(c, "arena_matches", "match_seconds"))
                 s.execute("ALTER TABLE arena_matches ADD COLUMN match_seconds BIGINT NOT NULL DEFAULT 0");
+            // Every match, one row each, for anything we want to work out later. "live" rows from when this table was made
+            // (match_log_since), "log" rows read back from the server's logs by /arenastats importlog
+            s.execute("CREATE TABLE IF NOT EXISTS arena_match_log (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "server_id VARCHAR(36) NOT NULL, " +
+                    "arena VARCHAR(64) NOT NULL, " +
+                    "ended_at BIGINT NOT NULL, " +
+                    "seconds INT NOT NULL DEFAULT -1, " +     // how long it took (after the countdown); -1 = not known
+                    "winners VARCHAR(255) NOT NULL, " +       // UUIDs, comma-separated ("?name" for a name that couldn't be matched)
+                    "losers VARCHAR(255) NOT NULL, " +
+                    "counted BOOLEAN NOT NULL, " +            // went towards stats (not a duel, not between alts)
+                    "rated BOOLEAN NOT NULL, " +              // changed Elo
+                    "duel BOOLEAN NOT NULL, " +
+                    "self_out BOOLEAN NOT NULL, " +           // the losers went out without being touched
+                    "variant VARCHAR(32) NULL, " +            // random sumo's variant
+                    "source VARCHAR(8) NOT NULL DEFAULT 'live')");
+            if (!hasIndex(c, "arena_match_log", "arena_match_log_arena")) // MySQL has no CREATE INDEX IF NOT EXISTS
+                s.execute("CREATE INDEX arena_match_log_arena ON arena_match_log (server_id, arena, ended_at)");
             s.execute("CREATE TABLE IF NOT EXISTS player_ips (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "ip_hash VARCHAR(64) NOT NULL, " +
@@ -304,6 +322,8 @@ public class StatsManager {
                         + " WHERE server_id=" + sid);
                 setMeta(c, "match_seconds_checked", "1");
             }
+
+            setMeta(c, "match_log_since", String.valueOf(System.currentTimeMillis())); // only the first time
 
             // Get the tables onto disk now rather than whenever H2 next writes
             if (!this.mysql)
@@ -1623,6 +1643,215 @@ public class StatsManager {
     // Writes through this plugin clear the cache immediately; the TTL only covers edits made
     // directly in the database (e.g. another server sharing the same MySQL).
     private static final long TOP_CACHE_MILLIS = 30_000;
+
+    private static boolean hasIndex(final Connection c, final String table, final String index) throws SQLException {
+        for (final String t : new String[]{table, table.toUpperCase()})
+            try (ResultSet rs = c.getMetaData().getIndexInfo(c.getCatalog(), null, t, false, false)) {
+                while (rs.next())
+                    if (index.equalsIgnoreCase(rs.getString("INDEX_NAME")))
+                        return true;
+            }
+        return false;
+    }
+
+    /** One match, for {@link #logMatch}. */
+    public record MatchRecord(String arena, long endedAt, int seconds, List<UUID> winners, List<UUID> losers,
+                              boolean counted, boolean rated, boolean duel, boolean selfOut, String variant) {}
+
+    /** Adds a match to arena_match_log. Call off the main thread. */
+    public void logMatch(final MatchRecord m) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("INSERT INTO arena_match_log (server_id, arena, ended_at, seconds, winners, losers, counted, rated, duel,"
+                     + " self_out, variant, source) VALUES (" + sid + ", ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live')")) {
+            ps.setString(1, m.arena().toLowerCase());
+            ps.setLong(2, m.endedAt());
+            ps.setInt(3, m.seconds());
+            ps.setString(4, joined(m.winners().stream().map(UUID::toString).toList()));
+            ps.setString(5, joined(m.losers().stream().map(UUID::toString).toList()));
+            ps.setBoolean(6, m.counted());
+            ps.setBoolean(7, m.rated());
+            ps.setBoolean(8, m.duel());
+            ps.setBoolean(9, m.selfOut());
+            ps.setString(10, m.variant());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            Bukkit.getLogger().warning("[SpawnArena] logMatch: " + e.getMessage());
+        }
+    }
+
+    private static String joined(final List<String> ids) {
+        final String all = String.join(",", ids);
+        return all.length() > 255 ? all.substring(0, 255) : all;
+    }
+
+    /** A match read back from the server's logs (players by name). */
+    public record LoggedMatch(long endedAt, String arena, List<String> winners, List<String> losers, boolean selfOut) {}
+
+    /**
+     * Fills in history from matches read back from the server's logs (those from before arena_match_log began): each
+     * player's first time in each arena, the losses from before losses were stored, and each arena's exact match count
+     * (2v2 once). Matches between players who've shared an IP don't count, like when they were played. Without
+     * {@code apply} it only says what it would do. Once applied it can't run again. Call off the main thread.
+     */
+    public List<String> importLoggedMatches(final List<LoggedMatch> matches, final java.util.Set<String> arenas, final boolean apply) throws SQLException {
+        final List<String> report = new ArrayList<>();
+        try (Connection c = dataSource.getConnection()) {
+            if (getMeta(c, "log_imported") != null) {
+                report.add("§cThe logs were already imported here (" + new java.util.Date(Long.parseLong(getMeta(c, "log_imported"))) + ").");
+                return report;
+            }
+            final String sinceValue = getMeta(c, "match_log_since");
+            final long since = sinceValue == null ? System.currentTimeMillis() : Long.parseLong(sinceValue);
+            final long lossesSince = getLossesSince();
+            final boolean checkAlts = SpawnArena.settings == null || SpawnArena.settings.blockSameIpStats;
+
+            // Names to players: the network's saved names (the newest owner of a name wins), then this server's own
+            final java.util.Map<String, UUID> byName = new java.util.HashMap<>();
+            try (Statement s = c.createStatement(); ResultSet rs = s.executeQuery("SELECT uuid, name FROM player_names ORDER BY updated_at ASC")) {
+                while (rs.next())
+                    byName.put(rs.getString(2).toLowerCase(), UUID.fromString(rs.getString(1)));
+            }
+            for (final org.bukkit.OfflinePlayer p : Bukkit.getOfflinePlayers())
+                if (p.getName() != null)
+                    byName.putIfAbsent(p.getName().toLowerCase(), p.getUniqueId());
+
+            final java.util.Map<String, Integer> perArena = new java.util.TreeMap<>();
+            final java.util.Map<String, Long> first = new java.util.HashMap<>();      // uuid|arena -> first match
+            final java.util.Map<String, Integer> lossesAdd = new java.util.HashMap<>(); // uuid|arena -> losses to add
+            final java.util.Map<String, Integer> unresolved = new java.util.HashMap<>();
+            int used = 0, later = 0, unknownArena = 0, alts = 0;
+            final List<Object[]> rows = new ArrayList<>();
+            for (final LoggedMatch m : matches) {
+                if (m.endedAt() >= since) { later++; continue; } // in arena_match_log already
+                if (!arenas.contains(m.arena())) { unknownArena++; continue; }
+                used++;
+                final List<String> w = new ArrayList<>(), l = new ArrayList<>();
+                final List<UUID> wu = new ArrayList<>(), lu = new ArrayList<>();
+                for (final String n : m.winners()) { final UUID u = byName.get(n.toLowerCase()); if (u == null) { unresolved.merge(n, 1, Integer::sum); w.add("?" + n); } else { wu.add(u); w.add(u.toString()); } }
+                for (final String n : m.losers()) { final UUID u = byName.get(n.toLowerCase()); if (u == null) { unresolved.merge(n, 1, Integer::sum); l.add("?" + n); } else { lu.add(u); l.add(u.toString()); } }
+                boolean counted = true;
+                if (checkAlts)
+                    outer:
+                    for (final UUID a : wu)
+                        for (final UUID b : lu)
+                            if (sharesIp(a, b)) { counted = false; break outer; }
+                if (!counted)
+                    alts++;
+                else
+                    perArena.merge(m.arena(), 1, Integer::sum);
+                for (final UUID u : wu) first.merge(u + "|" + m.arena(), m.endedAt(), Math::min);
+                for (final UUID u : lu) first.merge(u + "|" + m.arena(), m.endedAt(), Math::min);
+                if (counted && lossesSince > 0 && m.endedAt() < lossesSince)
+                    for (final UUID u : lu) lossesAdd.merge(u + "|" + m.arena(), 1, Integer::sum);
+                rows.add(new Object[]{m.arena(), m.endedAt(), String.join(",", w), String.join(",", l), counted, m.selfOut()});
+            }
+
+            // Matches since the match log began, which it has (and the counter counted) itself
+            final java.util.Map<String, Integer> live = new java.util.HashMap<>();
+            try (Statement s = c.createStatement(); ResultSet rs = s.executeQuery("SELECT arena, COUNT(*) FROM arena_match_log WHERE server_id=" + sid
+                    + " AND source='live' AND counted GROUP BY arena")) {
+                while (rs.next())
+                    live.put(rs.getString(1), rs.getInt(2));
+            }
+            final java.util.Map<String, Long> now = new java.util.HashMap<>();
+            try (Statement s = c.createStatement(); ResultSet rs = s.executeQuery("SELECT arena, matches FROM arena_matches WHERE server_id=" + sid)) {
+                while (rs.next())
+                    now.put(rs.getString(1), rs.getLong(2));
+            }
+
+            report.add("§6" + (apply ? "Imported" : "Would import") + " §e" + used + "§6 matches from the logs (from before " + new java.util.Date(since) + ").");
+            if (later > 0 || unknownArena > 0)
+                report.add("§7Left out: " + later + " already in the match log, " + unknownArena + " in arenas that don't exist any more.");
+            report.add("§7Between alts (not counted, as when played): §e" + alts);
+            for (final String arena : arenas) {
+                final long total = perArena.getOrDefault(arena, 0) + live.getOrDefault(arena, 0);
+                report.add("§7- §e" + arena + "§7: matches §e" + String.format("%,d", now.getOrDefault(arena, 0L)) + " §7-> §e" + String.format("%,d", total));
+            }
+            report.add("§7First played found for §e" + first.size() + "§7 player/arena pairs.");
+            if (lossesSince > 0)
+                report.add("§7Losses from before " + new java.util.Date(lossesSince) + ": §e" + lossesAdd.values().stream().mapToInt(Integer::intValue).sum()
+                        + "§7 across §e" + lossesAdd.size() + "§7 player/arena pairs. Most:");
+            lossesAdd.entrySet().stream().sorted(java.util.Map.Entry.<String, Integer>comparingByValue().reversed()).limit(8).forEach(e -> {
+                final String[] k = e.getKey().split("\\|");
+                final UUID u = UUID.fromString(k[0]);
+                final int wins = getWins(u, k[1]), losses = getLosses(u, k[1]);
+                report.add("§7  " + nameOf(u) + " §8(" + k[1] + ")§7: W/L " + ratio(wins, losses) + " -> " + ratio(wins, losses + e.getValue())
+                        + " §8(+" + e.getValue() + " losses)");
+            });
+            if (!unresolved.isEmpty())
+                report.add("§7Names not matched to a player (" + unresolved.size() + ", their part left out): §e" + unresolved.entrySet().stream()
+                        .sorted(java.util.Map.Entry.<String, Integer>comparingByValue().reversed()).limit(10)
+                        .map(e -> e.getKey() + " ×" + e.getValue()).collect(java.util.stream.Collectors.joining(", ")));
+            if (!apply)
+                return report;
+
+            c.setAutoCommit(false);
+            try {
+                try (PreparedStatement ps = c.prepareStatement("INSERT INTO arena_match_log (server_id, arena, ended_at, seconds, winners, losers, counted, rated,"
+                        + " duel, self_out, variant, source) VALUES (" + sid + ", ?, ?, -1, ?, ?, ?, ?, FALSE, ?, NULL, 'log')")) {
+                    for (final Object[] r : rows) {
+                        ps.setString(1, (String) r[0]);
+                        ps.setLong(2, (Long) r[1]);
+                        ps.setString(3, joined(List.of((String) r[2])));
+                        ps.setString(4, joined(List.of((String) r[3])));
+                        ps.setBoolean(5, (Boolean) r[4]);
+                        ps.setBoolean(6, (Boolean) r[4]);
+                        ps.setBoolean(7, (Boolean) r[5]);
+                        ps.addBatch();
+                    }
+                    ps.executeBatch();
+                }
+                try (PreparedStatement ensure = c.prepareStatement("INSERT IGNORE INTO arena_stats (server_id, uuid, arena, wins, win_streak, best_win_streak) VALUES ("
+                        + sid + ", ?, ?, 0, 0, 0)");
+                     PreparedStatement firstPs = c.prepareStatement("UPDATE arena_stats SET first_played = ? WHERE server_id=" + sid
+                             + " AND uuid=? AND arena=? AND (first_played <= 0 OR first_played > ?)");
+                     PreparedStatement lossPs = c.prepareStatement("UPDATE arena_stats SET losses = losses + ? WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
+                    for (final java.util.Map.Entry<String, Long> e : first.entrySet()) {
+                        final String[] k = e.getKey().split("\\|");
+                        ensure.setString(1, k[0]); ensure.setString(2, k[1]); ensure.addBatch();
+                        firstPs.setLong(1, e.getValue()); firstPs.setString(2, k[0]); firstPs.setString(3, k[1]); firstPs.setLong(4, e.getValue()); firstPs.addBatch();
+                    }
+                    ensure.executeBatch();
+                    firstPs.executeBatch();
+                    for (final java.util.Map.Entry<String, Integer> e : lossesAdd.entrySet()) {
+                        final String[] k = e.getKey().split("\\|");
+                        lossPs.setInt(1, e.getValue()); lossPs.setString(2, k[0]); lossPs.setString(3, k[1]); lossPs.addBatch();
+                    }
+                    lossPs.executeBatch();
+                }
+                try (PreparedStatement del = c.prepareStatement("DELETE FROM arena_matches WHERE server_id=" + sid + " AND arena=?");
+                     PreparedStatement ins = c.prepareStatement("INSERT INTO arena_matches (server_id, arena, matches, match_seconds) VALUES (" + sid + ", ?, ?, ?)");
+                     PreparedStatement secs = c.prepareStatement("SELECT match_seconds FROM arena_matches WHERE server_id=" + sid + " AND arena=?")) {
+                    for (final String arena : arenas) {
+                        long seconds = 0;
+                        secs.setString(1, arena);
+                        try (ResultSet rs = secs.executeQuery()) { if (rs.next()) seconds = rs.getLong(1); }
+                        del.setString(1, arena);
+                        del.executeUpdate();
+                        ins.setString(1, arena);
+                        ins.setLong(2, perArena.getOrDefault(arena, 0) + live.getOrDefault(arena, 0));
+                        ins.setLong(3, seconds);
+                        ins.executeUpdate();
+                    }
+                }
+                try (Statement s = c.createStatement()) {
+                    // Losses are complete now: no more "losses counted since"
+                    if (lossesSince > 0)
+                        s.executeUpdate("DELETE FROM arena_meta WHERE server_id=" + sid + " AND meta_key='losses_since'");
+                }
+                setMeta(c, "log_imported", String.valueOf(System.currentTimeMillis()));
+                c.commit();
+            } catch (final SQLException e) {
+                c.rollback();
+                throw e;
+            } finally {
+                c.setAutoCommit(true);
+            }
+        }
+        this.globalCache = null;
+        invalidateLeaderboards();
+        return report;
+    }
 
     /** One more match played in this arena (a counted one: not a duel, and not between alts), that took this long. */
     public synchronized void recordMatch(final String arena, final long seconds) {

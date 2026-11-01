@@ -851,6 +851,18 @@ public class Fight {
 
     // ── Results ─────────────────────────────────────────────────────────────
 
+    /** Writes this match to the match log, off the main thread. */
+    private void logMatch(final List<Player> winners, final List<Player> losers, final boolean counted, final boolean rated, final boolean selfOut) {
+        final long now = System.currentTimeMillis();
+        final StatsManager.MatchRecord record = new StatsManager.MatchRecord(this.arena.getArenaName(), now,
+                this.startedAt == 0 ? -1 : (int) ((now - this.startedAt) / 1000),
+                winners.stream().map(Player::getUniqueId).toList(), losers.stream().map(Player::getUniqueId).toList(),
+                counted, rated, this.duel, selfOut, this.variant == null ? null : this.variant.name());
+        final StatsManager stats = SpawnArena.statsManager;
+        if (stats != null)
+            Threads.async(() -> stats.logMatch(record));
+    }
+
     private void announceResult(final List<Player> winners, final List<Player> losers) {
         final String arenaPart = "arena".equals(this.arena.getArenaName()) ? "" : Arena.displayName(this.arena.getArenaName()) + " ";
 
@@ -862,6 +874,7 @@ public class Fight {
         final boolean selfOut = this.stats.untouched(losers) && losers.stream().noneMatch(this::hasQuit);
 
         if (this.duel) {
+            this.logMatch(winners, losers, false, false, selfOut);
             // Duels don't count for anything, so only the duelists are told
             final Component message = MiniMessage.miniMessage().deserialize(selfOut
                             ? "<dark_red><loser> took themselves out in a duel in the <arena>arena, <winner> <wins>!"
@@ -890,6 +903,7 @@ public class Fight {
                     }
         }
         final boolean countStats = !(alts && SpawnArena.settings.blockSameIpStats);
+        this.logMatch(winners, losers, countStats, countStats && !this.unranked, selfOut);
 
         final List<Integer> winnerStreaks = new ArrayList<>();
         final Map<Player, Integer> endedStreaks = new LinkedHashMap<>();

@@ -26,7 +26,7 @@ import java.util.UUID;
 public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
 
     private static final List<String> STATS = List.of("wins", "streak", "best_streak", "elo");
-    private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "resetcooldown", "payouts", "players", "log", "rollback", "migrate");
+    private static final List<String> SUBCOMMANDS = List.of("get", "set", "reset", "resetcooldown", "payouts", "players", "log", "rollback", "migrate", "importlog");
     private static final String ROLLBACK_PERMISSION = "spawnarena.arenastats.rollback";
 
     /** "3 Nov 2026 (2d ago)". */
@@ -51,6 +51,8 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
             return migrate(sender, args);
         if (args.length >= 1 && args[0].equalsIgnoreCase("players"))
             return players(sender);
+        if (args.length >= 1 && args[0].equalsIgnoreCase("importlog"))
+            return importLog(sender, args);
         if (args.length >= 1 && args[0].equalsIgnoreCase("log"))
             return log(sender, args);
         if (args.length >= 1 && args[0].equalsIgnoreCase("rollback"))
@@ -431,6 +433,51 @@ public final class ArenaStatsCommand implements CommandExecutor, TabCompleter {
         for (final me.zeronull.spawnarena.Arena a : SpawnArena.arenas)
             sender.sendMessage("§7- §e" + a.getArenaName() + "§7: §e" + counts.getOrDefault(a.getArenaName().toLowerCase(), 0));
         sender.sendMessage("§6Different players overall: §e" + total);
+        return true;
+    }
+
+    /**
+     * /arenastats importlog <file> [confirm]: history from matches read back from the server's logs
+     * (plugins/SpawnArena/import/<file>, one match a line: ended_at_ms, arena, winners, losers, self_out, tab-separated).
+     */
+    private boolean importLog(final CommandSender sender, final String[] args) {
+        if (!sender.hasPermission(ROLLBACK_PERMISSION)) {
+            sender.sendMessage("§cYou don't have permission!");
+            return true;
+        }
+        if (args.length < 2) {
+            sender.sendMessage("§cUsage: /arenastats importlog <file in plugins/SpawnArena/import> [confirm]");
+            return true;
+        }
+        final java.io.File folder = new java.io.File(SpawnArena.INSTANCE.getDataFolder(), "import");
+        final java.io.File file = new java.io.File(folder, args[1]);
+        if (!file.isFile() || !file.getParentFile().equals(folder)) {
+            sender.sendMessage("§cNo file " + args[1] + " in plugins/SpawnArena/import.");
+            return true;
+        }
+        final boolean apply = args.length >= 3 && args[2].equalsIgnoreCase("confirm");
+        final java.util.Set<String> arenas = new java.util.TreeSet<>();
+        SpawnArena.arenas.forEach(a -> arenas.add(a.getArenaName().toLowerCase()));
+        sender.sendMessage("§7Reading " + file.getName() + "...");
+        Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> {
+            try {
+                final List<StatsManager.LoggedMatch> matches = new java.util.ArrayList<>();
+                for (final String line : java.nio.file.Files.readAllLines(file.toPath())) {
+                    final String[] p = line.split("\t");
+                    if (p.length < 5)
+                        continue;
+                    matches.add(new StatsManager.LoggedMatch(Long.parseLong(p[0]), p[1].toLowerCase(),
+                            List.of(p[2].split(",")), List.of(p[3].split(",")), p[4].equals("1")));
+                }
+                for (final String line : SpawnArena.statsManager.importLoggedMatches(matches, arenas, apply))
+                    sender.sendMessage(line);
+                if (!apply)
+                    sender.sendMessage("§eNothing changed yet. Run §6/arenastats importlog " + file.getName() + " confirm§e to apply it (only once).");
+            } catch (final Exception e) {
+                SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE, "/arenastats importlog failed", e);
+                sender.sendMessage("§cImport failed (nothing was changed): " + e.getMessage());
+            }
+        });
         return true;
     }
 
