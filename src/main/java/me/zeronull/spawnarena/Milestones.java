@@ -1,6 +1,5 @@
 package me.zeronull.spawnarena;
 
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.minimessage.tag.resolver.Placeholder;
 import org.bukkit.Bukkit;
@@ -16,12 +15,6 @@ import java.util.UUID;
  */
 public final class Milestones {
     private Milestones() {}
-
-    /** "(match #3,969)" after a counted result. */
-    public static Component matchNumber(final long number) {
-        return number <= 0 ? Component.empty()
-                : MiniMessage.miniMessage().deserialize(" <dark_gray>(match #<n>)", Placeholder.unparsed("n", String.format("%,d", number)));
-    }
 
     /** What a match with this number pays as a milestone (the biggest milestone it's a multiple of), or 0. */
     static double rewardFor(final long number) {
@@ -54,7 +47,7 @@ public final class Milestones {
         return milestone;
     }
 
-    /** Pays a milestone to the winners still online and tells the server. On the results thread. */
+    /** Pays a milestone to the winners still online, each told under their result. On the results thread. */
     static void pay(final Fight fight, final long milestone, final List<Player> winners, final List<Player> losers) {
         final double amount = rewardFor(milestone);
         if (amount <= 0)
@@ -62,7 +55,6 @@ public final class Milestones {
         final String arenaName = fight.getArena().getArenaName();
         final String ordinal = String.format("%,d", milestone) + Grammar.ordinalSuffix(milestone);
         final List<UUID> beaten = losers.stream().map(Player::getUniqueId).toList();
-        final StringBuilder paidTo = new StringBuilder();
         for (final Player winner : winners) {
             if (!winner.isOnline())
                 continue;
@@ -73,21 +65,10 @@ public final class Milestones {
                 continue;
             }
             SpawnArena.statsManager.logPayout(winner.getUniqueId(), arenaName, amount, beaten, false);
-            winner.sendMessage(MiniMessage.miniMessage().deserialize("<gold><bold>+<amount></bold> <yellow>for winning the <ordinal> <arena> match!",
+            winner.sendMessage(MiniMessage.miniMessage().deserialize(
+                    "<gradient:#FFD700:#FF8C00><bold>MILESTONE!</bold></gradient> <yellow>You won the <gold><bold><ordinal></bold></gold> <arena> match: <green><bold>+<amount></bold></green> <yellow>bonus!",
                     Placeholder.unparsed("amount", StatsManager.formatMoney(amount)), Placeholder.unparsed("ordinal", ordinal),
                     Placeholder.unparsed("arena", Arena.displayName(arenaName))));
-            paidTo.append(paidTo.isEmpty() ? "" : " & ").append(winner.getName());
         }
-        if (paidTo.isEmpty())
-            return;
-        final Component message = MiniMessage.miniMessage().deserialize(
-                "<gradient:#FFD700:#FF8C00><bold>MILESTONE!</bold></gradient> <yellow><winner> won the <gold><bold><ordinal></bold></gold> <arena> match "
-                        + "and gets <green><bold><amount></bold></green>!",
-                Placeholder.unparsed("winner", paidTo.toString()), Placeholder.unparsed("ordinal", ordinal),
-                Placeholder.unparsed("arena", Arena.displayName(arenaName)), Placeholder.unparsed("amount", StatsManager.formatMoney(amount)));
-        Threads.callGlobal(() -> {
-            Fight.broadcast(fight.getArena(), message, winners, losers);
-            return null;
-        });
     }
 }

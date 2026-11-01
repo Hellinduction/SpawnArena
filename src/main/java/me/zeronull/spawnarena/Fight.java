@@ -963,10 +963,15 @@ public class Fight {
 
         // Announced on the global thread, as before; the rewards' messages come after it
         final Map<UUID, int[]> eloChanges = elo;
-        final Component number = Milestones.matchNumber(matchNumber);
+        final long number = matchNumber;
         Threads.callGlobal(() -> {
-            final net.kyori.adventure.text.event.HoverEvent<Component> statsHover = eloChanges.isEmpty() ? cardHover
-                    : net.kyori.adventure.text.event.HoverEvent.showText(this.stats.card(this, winners, losers, eloChanges));
+            // The card, with which match in the arena this was at the bottom
+            final net.kyori.adventure.text.event.HoverEvent<Component> statsHover = eloChanges.isEmpty() && number <= 0 ? cardHover
+                    : net.kyori.adventure.text.event.HoverEvent.showText((eloChanges.isEmpty() ? this.stats.card(this, winners, losers)
+                            : this.stats.card(this, winners, losers, eloChanges))
+                            .append(number <= 0 ? Component.empty() : Component.newline().append(MiniMessage.miniMessage().deserialize(
+                                    "<dark_gray>Match #<n> in <arena>", Placeholder.unparsed("n", String.format("%,d", number)),
+                                    Placeholder.unparsed("arena", Arena.displayName(this.arena.getArenaName()))))));
             for (final Player p : this.getMembers()) {
                 final int[] change = eloChanges.get(p.getUniqueId());
                 if (change != null && p.isOnline())
@@ -982,12 +987,12 @@ public class Fight {
                         Placeholder.unparsed("wins", winners.size() > 1 ? "win" : "wins"), // "Bot1 & Bot3 win"
                         Placeholder.component("loser", displayNames(losers)),
                         Placeholder.parsed("arena", arenaPart),
-                        Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners))).append(number).hoverEvent(statsHover),
+                        Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners))).hoverEvent(statsHover),
                         winners, losers);
             } else {
                 // A long streak just ended: that replaces the usual result message
                 for (final Map.Entry<Player, Integer> ended : endedStreaks.entrySet())
-                    this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut, winnerStreaks, number);
+                    this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut, winnerStreaks);
             }
             return null;
         });
@@ -1026,7 +1031,7 @@ public class Fight {
 
     private void announceStreakEnded(final Player loser, final int streak, final List<Player> winners, final List<Player> losers,
                                      final net.kyori.adventure.text.event.HoverEvent<Component> statsHover, final boolean selfOut,
-                                     final List<Integer> winnerStreaks, final Component matchNumber) {
+                                     final List<Integer> winnerStreaks) {
         // Worded and coloured like the usual "X beat Y in the sumo arena!" result; only the headline and the streak stand out
         final Component message = MiniMessage.miniMessage().deserialize(selfOut
                         ? "<dark_red><bold>STREAK ENDED!</bold> <loser> took themselves out in the <arena>arena, losing their "
@@ -1043,7 +1048,7 @@ public class Fight {
                 Placeholder.unparsed("streak", String.valueOf(streak)),
                 // The winner's own streak, like the usual result message has
                 Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners)),
-                Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : Arena.displayName(this.arena.getArenaName()) + " ")).append(matchNumber).hoverEvent(statsHover);
+                Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : Arena.displayName(this.arena.getArenaName()) + " ")).hoverEvent(statsHover);
 
         broadcast(this.getArena(), message, winners, losers);
 
