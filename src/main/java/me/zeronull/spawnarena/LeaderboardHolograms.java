@@ -377,6 +377,41 @@ public final class LeaderboardHolograms {
         }).orElse(false);
     }
 
+    /**
+     * After a result in this arena: its leaderboards show it now rather than at their next redraw (every
+     * UPDATE_INTERVAL_MS). Call off the main thread: the boards' new rows and everyone's places are read here first, so
+     * the redraw itself (on the global thread) only reads them from the cache. Reward and stats holograms, which read
+     * per viewer, keep their own timing.
+     */
+    public static void refreshArena(final String arena) {
+        final me.zeronull.spawnarena.StatsManager stats = me.zeronull.spawnarena.SpawnArena.statsManager;
+        if (stats == null)
+            return;
+        final List<Hologram> boards = new ArrayList<>();
+        for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
+            final String[] board = boardOf(h.getData().getName());
+            if (board == null || !board[0].equalsIgnoreCase(arena))
+                continue;
+            final String field = boardField(board[1]);
+            stats.getTopPlayersCached(board[0], field, me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT);
+            stats.getStanding(new java.util.UUID(0, 0), board[0], field); // everyone's place on it, for the "You" lines
+            boards.add(h);
+        }
+        if (!boards.isEmpty())
+            me.zeronull.spawnarena.Threads.global(() -> boards.forEach(Hologram::refreshForViewers));
+    }
+
+    /** The database field a board's stat reads (as the placeholders do). */
+    private static String boardField(final String stat) {
+        return switch (stat) {
+            case "streak" -> "win_streak";
+            case "best_streak" -> "best_win_streak";
+            case "ffa_streak" -> "ffa_best_streak";
+            case "playtime" -> "fight_seconds";
+            default -> stat; // wins, elo, ffa_kills, ffa_deaths, kdr, wlr
+        };
+    }
+
     /** Redraws every leaderboard hologram now (and brings older ones up to the current refresh interval). */
     public static int refreshAll() {
         int count = 0;

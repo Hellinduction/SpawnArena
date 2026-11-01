@@ -953,6 +953,8 @@ public class Fight {
             SpawnArena.statsManager.recordMatch(this.arena.arenaName, this.startedAt == 0 ? 0 : (System.currentTimeMillis() - this.startedAt) / 1000);
             elo = this.unranked ? Map.of() : SpawnArena.statsManager.recordElo(winners, losers, this.arena.arenaName);
             TopEloSuffix.refreshLater(); // a new #1 gets their suffix straight away
+            if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
+                LeaderboardHolograms.refreshArena(this.arena.arenaName);
         }
 
         // Announced on the global thread, as before; the rewards' messages come after it

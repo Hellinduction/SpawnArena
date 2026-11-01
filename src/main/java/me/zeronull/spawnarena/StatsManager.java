@@ -1393,6 +1393,8 @@ public class StatsManager {
             setField(e.getKey(), arena, "elo", e.getValue()[0]);
             countRatedGame(e.getKey(), arena);
         }
+        // Boards read between the win and this would otherwise keep the old Elo for TOP_CACHE_MILLIS
+        invalidateLeaderboards();
         return result;
     }
 
