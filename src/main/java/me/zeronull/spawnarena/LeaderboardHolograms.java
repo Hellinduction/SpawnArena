@@ -189,7 +189,7 @@ public final class LeaderboardHolograms {
             final String name = h.getData().getName();
             if (!name.startsWith(NAME_PREFIX))
                 continue;
-            final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
+            final String rest = boardPart(name);
             if (!rest.endsWith("_reward"))
                 continue;
 
@@ -241,7 +241,7 @@ public final class LeaderboardHolograms {
                 continue;
 
             // spawnarena_lb_<arena>_<stat|reward>_<4 digits>
-            final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
+            final String rest = boardPart(name);
             final List<String> lines;
             final int interval;
 
@@ -272,13 +272,31 @@ public final class LeaderboardHolograms {
         return new UpdateResult(updated, skipped);
     }
 
+    private static final String[] BOARD_STATS = {"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "playtime", "kdr", "wlr"};
+    private static final java.util.regex.Pattern BOARD_ID = java.util.regex.Pattern.compile("_\\d{4}(?=_|$)");
+
+    /**
+     * The &lt;arena&gt;_&lt;stat|reward&gt; part of spawnarena_lb_&lt;arena&gt;_&lt;stat|reward&gt;_&lt;4 digits&gt;, also for a copy that got
+     * something added after the digits (e.g. _bunnyspawn), so copies keep being updated like the original.
+     */
+    private static String boardPart(final String name) {
+        final String rest = name.substring(NAME_PREFIX.length());
+        final java.util.regex.Matcher id = BOARD_ID.matcher(rest);
+        while (id.find()) {
+            final String part = rest.substring(0, id.start());
+            if (part.endsWith("_reward") || java.util.Arrays.stream(BOARD_STATS).anyMatch(s -> part.endsWith("_" + s)))
+                return part;
+        }
+        return rest.replaceFirst("_\\d{4}$", "");
+    }
+
     /** A leaderboard hologram's {arena, stat}, read back from its name; null for reward holograms and unknown ones. */
     private static String[] boardOf(final String name) {
         if (!name.startsWith(NAME_PREFIX))
             return null;
         // spawnarena_lb_<arena>_<stat>_<4 digits>
-        final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
-        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "playtime", "kdr", "wlr"}) {
+        final String rest = boardPart(name);
+        for (final String s : BOARD_STATS) {
             if (rest.endsWith("_" + s)) {
                 final String arena = resolveArena(rest.substring(0, rest.length() - s.length() - 1));
                 return arena == null ? null : new String[]{arena, s};
@@ -325,7 +343,7 @@ public final class LeaderboardHolograms {
         int removed = 0;
         for (final String name : list()) {
             // spawnarena_lb_<arena>_<stat|reward>_<4 digits>
-            final String rest = name.substring(NAME_PREFIX.length()).replaceFirst("_\\d{4}$", "");
+            final String rest = boardPart(name);
             for (final String kind : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "reward"})
                 if (rest.equalsIgnoreCase(arena + "_" + kind) && remove(name)) {
                     removed++;
