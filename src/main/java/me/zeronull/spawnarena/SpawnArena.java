@@ -27,7 +27,7 @@ public class SpawnArena extends JavaPlugin {
     public void onEnable() {
 
         settings = ConfigHandler.getInstance().getSettingsConfig();
-        Arena.SPAWN_WORLD = settings.spawnWorld;
+        Arena.setSpawnWorlds(settings.spawnWorlds);
         Bukkit.getPluginManager().registerEvents(new QueueDistanceListener(), this);
 
         try {

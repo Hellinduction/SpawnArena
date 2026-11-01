@@ -81,7 +81,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
 
         Player player = (Player) sender;
 
-        if (!(player.getLocation().getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))) {
+        if (!Arena.isSpawnWorld(player.getWorld())) {
             sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cYou must be at spawn to use this command!"));
             return true;
         }

@@ -17,7 +17,7 @@ public class PlayerLeaveSpawn implements Listener {
             return;
         }
 
-        if (event.getTo().getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD)) {
+        if (Arena.isSpawnWorld(event.getTo().getWorld())) {
             return;
         }
 

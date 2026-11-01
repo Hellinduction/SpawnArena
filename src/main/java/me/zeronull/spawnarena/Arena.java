@@ -13,12 +13,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 public abstract class Arena extends ArenaOptions {
-    /** Loaded from settings.yml on enable. */
-    public static volatile String SPAWN_WORLD = "Spawn";
+    /** The spawn worlds' names in lower case, loaded from settings.yml on enable. */
+    private static volatile java.util.Set<String> SPAWN_WORLDS = java.util.Set.of("spawn");
 
-    /** The world arenas are in, or one of the worlds a MULTI crystal arena's matches are fought in. */
+    public static void setSpawnWorlds(final java.util.List<String> names) {
+        SPAWN_WORLDS = names.stream().map(n -> n.toLowerCase(java.util.Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    /** One of the spawn worlds (settings.yml spawnWorlds): where arenas are made, queued for and duelled in. */
+    public static boolean isSpawnWorld(final org.bukkit.World world) {
+        return world != null && SPAWN_WORLDS.contains(world.getName().toLowerCase(java.util.Locale.ROOT));
+    }
+
+    /** A spawn world, or one of the worlds a MULTI crystal arena's matches are fought in. */
     public static boolean isArenaWorld(final org.bukkit.World world) {
-        return world != null && (world.getName().equalsIgnoreCase(SPAWN_WORLD) || CrystalCopies.at(world) != null);
+        return isSpawnWorld(world) || (world != null && CrystalCopies.at(world) != null);
     }
 
     /**

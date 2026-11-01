@@ -139,8 +139,25 @@ public class ConfigHandler {
     public SettingsConfig getSettingsConfig() {
         final SpawnArena plugin = SpawnArena.getPlugin(SpawnArena.class);
         final java.nio.file.Path file = new File(plugin.getDataFolder(), "settings.yml").toPath();
+        migrateSpawnWorld(file);
         YamlConfigurations.update(file, SettingsConfig.class, SettingsConfig.PROPERTIES);
         return YamlConfigurations.load(file, SettingsConfig.class, SettingsConfig.PROPERTIES);
+    }
+
+    /** The old single "spawnWorld: X" becomes "spawnWorlds: [X]", so it isn't dropped for the default. */
+    private static void migrateSpawnWorld(final java.nio.file.Path file) {
+        try {
+            if (!java.nio.file.Files.exists(file))
+                return;
+            final String yaml = java.nio.file.Files.readString(file);
+            if (java.util.regex.Pattern.compile("(?m)^spawnWorlds:").matcher(yaml).find())
+                return;
+            final java.util.regex.Matcher m = java.util.regex.Pattern.compile("(?m)^spawnWorld:[ \t]*['\"]?([^'\"\r\n]*?)['\"]?[ \t]*$").matcher(yaml);
+            if (m.find())
+                java.nio.file.Files.writeString(file, yaml.substring(0, m.start()) + "spawnWorlds:\n  - '" + m.group(1).replace("'", "''") + "'" + yaml.substring(m.end()));
+        } catch (final java.io.IOException e) {
+            SpawnArena.INSTANCE.getLogger().warning("Couldn't move settings.yml's spawnWorld to spawnWorlds: " + e);
+        }
     }
 
     public void saveSettingsConfig(final SettingsConfig settings) {

@@ -16,7 +16,7 @@ public class TeleportKickOut implements Listener {
      */
     private static boolean staysInReach(final PlayerTeleportEvent event, final Arena arena) {
         final org.bukkit.Location to = event.getTo();
-        if (to == null || to.getWorld() == null || !to.getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
+        if (to == null || !Arena.isSpawnWorld(to.getWorld()))
             return false;
         final double max = SpawnArena.settings == null ? 64 : SpawnArena.settings.queueMaxDistance;
         return max <= 0 || arena.distanceFrom(to) <= max;

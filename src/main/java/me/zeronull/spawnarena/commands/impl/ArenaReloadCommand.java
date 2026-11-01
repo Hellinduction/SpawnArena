@@ -19,7 +19,7 @@ public final class ArenaReloadCommand implements CommandExecutor {
                              @NotNull String label, String[] args) {
         try {
             SpawnArena.settings = ConfigHandler.getInstance().getSettingsConfig();
-            Arena.SPAWN_WORLD = SpawnArena.settings.spawnWorld;
+            Arena.setSpawnWorlds(SpawnArena.settings.spawnWorlds);
         } catch (final Exception e) {
             SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Failed to reload settings.yml", e);
             sender.sendMessage("§csettings.yml has an error — kept the old settings. Check the console.");

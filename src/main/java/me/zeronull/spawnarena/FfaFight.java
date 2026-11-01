@@ -102,7 +102,7 @@ public final class FfaFight extends Fight {
                     + queue.getArena().getArenaName() + ".";
         if (player.isDead())
             return "You can't join while dead.";
-        if (!player.getLocation().getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
+        if (!Arena.isSpawnWorld(player.getWorld()))
             return "You must be at spawn to use this command!";
         if (player.getGameMode() == GameMode.SPECTATOR)
             return "You can't join while in spectator mode.";

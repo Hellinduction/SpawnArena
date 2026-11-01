@@ -117,7 +117,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return "You are already queued for another arena.";
         if (SpawnArena.arenas.hasFighter(player))
             return "You are already in a fight!";
-        if (!player.getLocation().getWorld().getName().equalsIgnoreCase(Arena.SPAWN_WORLD))
+        if (!Arena.isSpawnWorld(player.getWorld()))
             return "You must be at spawn to use this command!";
         if (player.getGameMode() == org.bukkit.GameMode.SPECTATOR)
             return "You can't join while in spectator mode.";
