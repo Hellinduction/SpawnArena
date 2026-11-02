@@ -543,6 +543,17 @@ public final class CrystalView implements Listener {
         touchedReal(at, null);
     }
 
+    /**
+     * As {@link #touchedReal(Location, String)}, by a player: not when they're allowed to build the arena (/arenabuild,
+     * or the crystal arena build permission), as that's staff editing it, which stays (copied on the next re-copy).
+     */
+    private static void touchedReal(final Location at, final Player player, final String by) {
+        if (me.zeronull.spawnarena.commands.impl.ArenaBuildCommand.isOn(player)
+                || player.hasPermission(me.zeronull.spawnarena.events.CrystalArenaListener.BUILD_BYPASS_PERMISSION))
+            return;
+        touchedReal(at, player.getName() + " " + by);
+    }
+
     /** As {@link #touchedReal(Location)}, saying what did it (for the log line when it's put back). */
     private static void touchedReal(final Location at, final String by) {
         if (VIEWS.isEmpty() || SpawnArena.arenas == null || CrystalCopies.at(at.getWorld()) != null || !Arena.isArenaWorld(at.getWorld()))
@@ -575,14 +586,14 @@ public final class CrystalView implements Listener {
             for (final BlockState state : multi.getReplacedBlockStates())
                 record(state.getBlock());
         record(e.getBlock());
-        touchedReal(e.getBlock().getLocation(), e.getPlayer().getName() + " placing " + e.getBlock().getType());
+        touchedReal(e.getBlock().getLocation(), e.getPlayer(), "placing " + e.getBlock().getType());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBreak(final BlockBreakEvent e) {
         record(e.getBlock());
         record(e.getBlock().getRelative(org.bukkit.block.BlockFace.UP)); // what stood on it
-        touchedReal(e.getBlock().getLocation(), e.getPlayer().getName() + " breaking " + e.getBlock().getType());
+        touchedReal(e.getBlock().getLocation(), e.getPlayer(), "breaking " + e.getBlock().getType());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -672,13 +683,13 @@ public final class CrystalView implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBucketEmpty(final PlayerBucketEmptyEvent e) {
         record(e.getBlock());
-        touchedReal(e.getBlock().getLocation(), e.getPlayer().getName() + " emptying a bucket");
+        touchedReal(e.getBlock().getLocation(), e.getPlayer(), "emptying a bucket");
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBucketFill(final PlayerBucketFillEvent e) {
         record(e.getBlock());
-        touchedReal(e.getBlock().getLocation(), e.getPlayer().getName() + " filling a bucket");
+        touchedReal(e.getBlock().getLocation(), e.getPlayer(), "filling a bucket");
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

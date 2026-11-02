@@ -63,7 +63,10 @@ public final class QueueMenu implements InventoryHolder {
         for (int i = 0; i < this.inventory.getSize(); i++)
             this.inventory.setItem(i, filler);
 
-        final FightMode current = arena.queue.modeOf(viewer);
+        // Queued here, or in the countdown of one of this arena's matches (clicking it backs out)
+        final me.zeronull.spawnarena.Fight counting = me.zeronull.spawnarena.commands.impl.JoinArenaQueueCommand.countdownOf(viewer);
+        final FightMode current = counting != null && counting.getArena().getArenaName().equalsIgnoreCase(arena.getArenaName())
+                ? counting.getMode() : arena.queue.modeOf(viewer);
 
         this.inventory.setItem(SLOT_1V1, item(Material.IRON_SWORD, "<white><bold>1v1</bold>", List.of(
                 "<gray>Players waiting: <white>" + arena.queue.size(FightMode.ONE_V_ONE),

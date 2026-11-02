@@ -67,6 +67,16 @@ public final class QueueMenuListener implements Listener {
             return;
         }
 
+        // In a countdown: any click backs out of it; another arena's queue or mode is then joined
+        final me.zeronull.spawnarena.Fight counting = JoinArenaQueueCommand.countdownOf(player);
+        if (counting != null) {
+            if (!JoinArenaQueueCommand.backOut(player, counting)
+                    || (counting.getArena().getArenaName().equalsIgnoreCase(arena.getArenaName()) && mode == counting.getMode()))
+                return;
+            me.zeronull.spawnarena.Threads.entityLater(player, () -> JoinArenaQueueCommand.join(player, arena, mode == null ? QueueMenu.autoMode(arena) : mode), 2L);
+            return;
+        }
+
         // Clicking the queue you're already in leaves it
         if (mode != null && arena.queue.modeOf(player) == mode) {
             arena.queue.leave(player, "left the queue");

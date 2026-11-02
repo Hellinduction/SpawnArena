@@ -32,18 +32,17 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return true;
         }
 
-        // In a countdown: running it again backs out (nobody's stats change; the others are requeued)
-        if (SpawnArena.arenas.hasFighter(player)) {
-            final Arena current = SpawnArena.arenas.of(player);
-            final me.zeronull.spawnarena.Fight fight = current == null ? null : current.getFight(player);
-            if (fight != null && fight.getState() == me.zeronull.spawnarena.FightState.COUNTDOWN) {
-                if (fight.cancelBecause(player, player.getName() + " left the queue, so the fight was cancelled.")) {
-                    player.sendMessage(ChatColor.YELLOW + "You left the queue.");
-                    return true;
-                }
-                player.sendMessage(ChatColor.RED + "Too late, the fight is starting!");
+        // In a countdown: running it again backs out (nobody's stats change; the others are requeued). The menu just
+        // opens: only clicking in it backs out
+        final me.zeronull.spawnarena.Fight counting = countdownOf(player);
+        if (counting != null) {
+            if (args.length >= 2 && args[1].equalsIgnoreCase("menu")) {
+                final Arena asked = SpawnArena.arenas.of(args[0]);
+                QueueMenu.open(player, asked != null && !asked.isFfa() ? asked : counting.getArena());
                 return true;
             }
+            backOut(player, counting);
+            return true;
         }
 
         if (args.length < 1) {
@@ -98,6 +97,25 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         }
         join(player, arena, mode);
         return true;
+    }
+
+    /** The fight this player is in the countdown of, or null. */
+    public static me.zeronull.spawnarena.Fight countdownOf(final Player player) {
+        if (!SpawnArena.arenas.hasFighter(player))
+            return null;
+        final Arena current = SpawnArena.arenas.of(player);
+        final me.zeronull.spawnarena.Fight fight = current == null ? null : current.getFight(player);
+        return fight != null && fight.getState() == me.zeronull.spawnarena.FightState.COUNTDOWN ? fight : null;
+    }
+
+    /** Backs out of this fight's countdown; false (and told so) if it's too late. */
+    public static boolean backOut(final Player player, final me.zeronull.spawnarena.Fight fight) {
+        if (fight.cancelBecause(player, player.getName() + " left the queue, so the fight was cancelled.")) {
+            player.sendMessage(ChatColor.YELLOW + "You left the queue.");
+            return true;
+        }
+        player.sendMessage(ChatColor.RED + "Too late, the fight is starting!");
+        return false;
     }
 
     /** Why this player can't queue for this arena right now, or null if they can. */
