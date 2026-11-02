@@ -225,8 +225,12 @@ public final class FfaFight extends Fight {
 
         final Location spawn = this.pickSpawn();
         this.spawnSpots.put(id, spawn);
+        Fight.stopMomentum(player); // no flying in with an elytra and rockets
         this.arena.teleportFighter(player, spawn).whenComplete((ok, error) ->
-                Threads.entity(player, () -> this.arrived(player, error == null && Boolean.TRUE.equals(ok))));
+                Threads.entity(player, () -> {
+                    Fight.stopMomentum(player);
+                    this.arrived(player, error == null && Boolean.TRUE.equals(ok));
+                }));
     }
 
     /** On the player's thread, once the teleport in is done (or failed). */

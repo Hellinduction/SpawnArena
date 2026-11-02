@@ -48,6 +48,8 @@ public final class CrystalView implements Listener {
      */
     private static final Map<UUID, Long> CLICKING = new ConcurrentHashMap<>();
     private static final long CLICKING_MILLIS = 5_000;
+    /** How long a spot put back to the real block is sent again with the regular resend. */
+    private static final long PUT_BACK_RESEND_MILLIS = 30_000;
 
     /** Every tick: the players and entities shown follow the real ones; every other tick, the blocks. */
     public static void start() {
@@ -116,6 +118,8 @@ public final class CrystalView implements Listener {
         private Map<Long, CrystalCopy> bubbles = new HashMap<>();
         /** What the viewers are being shown instead of the real block */
         private final Map<Long, BlockData> shown = new HashMap<>();
+        /** Spots that went back to the real block (a match ended, a bubble moved on) -> when; sent again for a while, as one lost packet would leave a viewer seeing the copy's block there for good. */
+        private final Map<Long, Long> putBack = new HashMap<>();
         private final Set<UUID> viewers = new HashSet<>();
         /** The fighters, shown to the watchers on spawn */
         private final CrystalViewPlayers fightersShown = new CrystalViewPlayers();
@@ -238,9 +242,11 @@ public final class CrystalView implements Listener {
                     continue;
                 if (want == null) {
                     this.shown.remove(p);
+                    this.putBack.put(p, System.currentTimeMillis());
                     changes.put(p, realData);
                 } else {
                     this.shown.put(p, want);
+                    this.putBack.remove(p);
                     changes.put(p, want);
                 }
             }
@@ -250,11 +256,20 @@ public final class CrystalView implements Listener {
             final Set<UUID> now = new HashSet<>();
             final boolean resend = clock % 100 == 0; // anything a viewer's game lost (a click on a fake block, a chunk reloaded)
             final long millis = System.currentTimeMillis();
+            Map<Long, BlockData> again = this.shown;
+            if (resend && !this.putBack.isEmpty()) {
+                this.putBack.values().removeIf(when -> millis - when > PUT_BACK_RESEND_MILLIS);
+                again = new HashMap<>(this.shown);
+                for (final long p : this.putBack.keySet())
+                    again.put(p, world.getBlockData(unpackX(p), unpackY(p), unpackZ(p)));
+            }
             for (final Player viewer : nowViewing) {
                 now.add(viewer.getUniqueId());
                 final Long clicking = CLICKING.get(viewer.getUniqueId());
                 final boolean clicked = clicking != null && clicking > millis && clock % 20 == 0;
-                if (resend || clicked || !this.viewers.contains(viewer.getUniqueId()))
+                if (resend)
+                    send(viewer, world, again);
+                else if (clicked || !this.viewers.contains(viewer.getUniqueId()))
                     send(viewer, world, this.shown);
                 else if (!changes.isEmpty())
                     send(viewer, world, changes);
@@ -367,6 +382,7 @@ public final class CrystalView implements Listener {
             }
             this.viewers.clear();
             this.shown.clear();
+            this.putBack.clear();
             this.fightersShown.close();
             this.watchersShown.values().forEach(CrystalViewPlayers::close);
             this.watchersShown.clear();

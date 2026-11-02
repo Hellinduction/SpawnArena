@@ -622,7 +622,27 @@ public class Fight {
 
         this.giveKit(fighter);
 
-        this.arena.teleportFighter(fighter, this.getSpawnOf(fighter)).whenComplete((ok, error) -> this.arrived(fighter));
+        // No flying start: an elytra and rockets (or a riptide trident) used at the end of the countdown would carry
+        // them across the arena the moment it starts (one hit wins Sumo). Stopped before the teleport and again once there
+        stopMomentum(fighter);
+        this.arena.teleportFighter(fighter, this.getSpawnOf(fighter)).whenComplete((ok, error) -> {
+            Threads.entity(fighter, () -> stopMomentum(fighter));
+            this.arrived(fighter);
+        });
+    }
+
+    /** On the fighter's thread: not gliding, no rocket boosting them, standing still. */
+    static void stopMomentum(final Player fighter) {
+        if (!fighter.isOnline())
+            return;
+        for (final org.bukkit.entity.Entity near : fighter.getNearbyEntities(8, 8, 8))
+            if (near instanceof org.bukkit.entity.Firework rocket && fighter.equals(rocket.getAttachedTo()))
+                rocket.remove();
+        fighter.setGliding(false);
+        if (fighter.isRiptiding())
+            fighter.setRiptiding(false); // a riptide trident's launch
+        fighter.setVelocity(new org.bukkit.util.Vector());
+        fighter.setFallDistance(0);
     }
 
     /** One fighter is in (or dropped out); once nobody is still on their way, the fight goes live. */
