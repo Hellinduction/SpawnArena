@@ -20,9 +20,9 @@ public final class ArenaInventoryOpenEvent implements Listener {
 
         // Onlookers can't open anything in a crystal arena (containers fighters placed, crafting tables...): a fighter's
         // things there are copies that go when the fight ends, so taking them out would be a dupe. Staff with
-        // /arenabuild on can
+        // /arenabuild on can. An ender chest is fine: it only ever holds the player's own things
         final org.bukkit.Location at = e.getInventory().getLocation();
-        if (at != null && at.getWorld() != null) {
+        if (at != null && at.getWorld() != null && e.getInventory().getType() != org.bukkit.event.inventory.InventoryType.ENDER_CHEST) {
             final Arena there = CrystalPvp.arenaAt(at);
             if (there != null && !CrystalPvp.isActiveFighter(there, player)
                     && !me.zeronull.spawnarena.commands.impl.ArenaBuildCommand.isOn(player)) {
@@ -54,5 +54,22 @@ public final class ArenaInventoryOpenEvent implements Listener {
             return;
 
         e.setCancelled(true);
+    }
+
+    /**
+     * MULTI crystal copy worlds carry copies of the real arena's WorldGuard regions, so where those deny using chests,
+     * ender chests there couldn't be opened either. Anyone not fighting may open one (it only holds their own things).
+     * After WorldGuard (HIGHEST), and only to allow: fighters stay under the crystal rules.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onEnderChestInCopy(final org.bukkit.event.player.PlayerInteractEvent e) {
+        if (e.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK || e.getClickedBlock() == null
+                || e.getClickedBlock().getType() != org.bukkit.Material.ENDER_CHEST
+                || e.useInteractedBlock() != org.bukkit.event.Event.Result.DENY
+                || CrystalCopies.at(e.getClickedBlock().getWorld()) == null || SpawnArena.arenas.hasFighter(e.getPlayer()))
+            return;
+        e.setUseInteractedBlock(org.bukkit.event.Event.Result.ALLOW);
+        if (e.useItemInHand() == org.bukkit.event.Event.Result.DENY)
+            e.setUseItemInHand(org.bukkit.event.Event.Result.DEFAULT);
     }
 }

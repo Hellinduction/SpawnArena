@@ -333,6 +333,10 @@ public final class CrystalPvp {
     public static Arena arenaNear(final Location loc, final int margin) {
         if (loc == null || loc.getWorld() == null || SpawnArena.arenas == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
             return null;
+        // In a MULTI arena's copy: that copy (its world has the arena's region under the same name)
+        final CrystalCopy copy = CrystalCopies.at(loc.getWorld());
+        if (copy != null)
+            return Regions.contains(copy, loc, margin) ? copy : null;
         for (final Arena arena : SpawnArena.arenas)
             if (arena.isCrystalPvp() && Regions.contains(arena, loc, margin))
                 return arena;

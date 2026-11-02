@@ -33,6 +33,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class WatchMenu implements InventoryHolder {
     private static final int VIEWING_SLOT = 10;
+    /** This close to the real arena (in its world), someone is already at the viewing arena. */
+    private static final double ALREADY_THERE_BLOCKS = 64;
     private static final int[] MATCH_SLOTS = {12, 13, 14, 15, 16, 21, 22, 23};
 
     /** Player watching a match in its copy -> that copy */
@@ -202,6 +204,11 @@ public final class WatchMenu implements InventoryHolder {
                 return;
             if (e.getSlot() == VIEWING_SLOT) {
                 player.closeInventory();
+                // Already there (in the real arena's world, by the arena): nothing to do
+                if (CrystalCopies.at(player.getWorld()) == null && real.distanceFrom(player.getLocation()) <= ALREADY_THERE_BLOCKS) {
+                    player.sendMessage(mm("<gray>You're already at the viewing arena."));
+                    return;
+                }
                 WATCHING.remove(player.getUniqueId());
                 Threads.teleport(player, deck(real, null));
                 return;
@@ -210,6 +217,10 @@ public final class WatchMenu implements InventoryHolder {
             if (copy == null)
                 return;
             player.closeInventory();
+            if (player.getWorld().equals(copy.world())) {
+                player.sendMessage(mm("<gray>You're already watching <white>match " + copy.index() + "<gray>."));
+                return;
+            }
             if (copy.getFights().isEmpty()) {
                 player.sendMessage(mm("<red>That match just ended."));
                 return;

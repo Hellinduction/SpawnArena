@@ -42,6 +42,12 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class CrystalView implements Listener {
     private static final Map<String, View> VIEWS = new ConcurrentHashMap<>();
     private static long clock;
+    /**
+     * Viewer -> until when (millis) their game gets the shown blocks again every second rather than every 5: they've
+     * been clicking blocks in the view, and the server's answer to a click (the real block) overwrites what they see.
+     */
+    private static final Map<UUID, Long> CLICKING = new ConcurrentHashMap<>();
+    private static final long CLICKING_MILLIS = 5_000;
 
     /** Every tick: the players and entities shown follow the real ones; every other tick, the blocks. */
     public static void start() {
@@ -115,6 +121,8 @@ public final class CrystalView implements Listener {
         private final CrystalViewPlayers fightersShown = new CrystalViewPlayers();
         /** The real arena was changed (no match is fought in it, so nothing else puts it back) */
         volatile boolean realTouched;
+        /** What changed it first since the last putting back (for the log) */
+        volatile String touchedBy;
         /** The matches' crystals, projectiles, items... sent to the watchers */
         private final CrystalViewEntities entities = new CrystalViewEntities();
         /** Copy -> the watchers, shown to the players in it */
@@ -153,6 +161,9 @@ public final class CrystalView implements Listener {
             if (this.realTouched && !this.real.isResetting()
                     && CrystalCopies.of(this.real).stream().allMatch(c -> c.getFights().isEmpty())) {
                 this.realTouched = false;
+                SpawnArena.INSTANCE.getLogger().info("Putting back the viewing arena of " + this.real.getArenaName() + " (changed by "
+                        + (this.touchedBy == null ? "something" : this.touchedBy) + ").");
+                this.touchedBy = null;
                 this.resetReal(world);
             }
             final List<Player> nowViewing = this.viewersIn(world);
@@ -238,9 +249,12 @@ public final class CrystalView implements Listener {
             // Who's watching: newcomers get everything, those who left get the real blocks back
             final Set<UUID> now = new HashSet<>();
             final boolean resend = clock % 100 == 0; // anything a viewer's game lost (a click on a fake block, a chunk reloaded)
+            final long millis = System.currentTimeMillis();
             for (final Player viewer : nowViewing) {
                 now.add(viewer.getUniqueId());
-                if (resend || !this.viewers.contains(viewer.getUniqueId()))
+                final Long clicking = CLICKING.get(viewer.getUniqueId());
+                final boolean clicked = clicking != null && clicking > millis && clock % 20 == 0;
+                if (resend || clicked || !this.viewers.contains(viewer.getUniqueId()))
                     send(viewer, world, this.shown);
                 else if (!changes.isEmpty())
                     send(viewer, world, changes);
@@ -389,6 +403,23 @@ public final class CrystalView implements Listener {
             }
         }
 
+        /** The shown blocks within {@code r} of this spot, sent to this viewer again (their game lost them to a click). */
+        void resendNear(final Player viewer, final int x, final int y, final int z, final int r) {
+            final World world = this.world();
+            if (world == null || !viewer.isOnline() || !viewer.getWorld().equals(world) || !this.viewers.contains(viewer.getUniqueId()))
+                return;
+            final Map<Long, BlockData> near = new HashMap<>();
+            for (int dx = -r; dx <= r; dx++)
+                for (int dy = -r; dy <= r; dy++)
+                    for (int dz = -r; dz <= r; dz++) {
+                        final long p = pack(x + dx, y + dy, z + dz);
+                        final BlockData data = this.shown.get(p);
+                        if (data != null)
+                            near.put(p, data);
+                    }
+            send(viewer, world, near);
+        }
+
         /** This viewer's game shows the real blocks again. */
         private void revert(final Player player, final World world) {
             final Map<Long, BlockData> back = new HashMap<>();
@@ -441,6 +472,58 @@ public final class CrystalView implements Listener {
         player.sendMultiBlockChange(out);
     }
 
+    // ── Viewers clicking the blocks they're shown ───────────────────────────
+
+    /**
+     * A viewer clicked, hit, broke or placed against a block in a MULTI arena's view: whatever the server answers (the
+     * real block, the click being refused) overwrites the fake blocks there in their game, so those around it are sent
+     * again a tick and three ticks later, and all of them every second for a while after.
+     */
+    private static void clickedInView(final Player player, final Block block) {
+        if (VIEWS.isEmpty() || block == null || CrystalCopies.at(block.getWorld()) != null)
+            return;
+        for (final View view : VIEWS.values()) {
+            final World world = view.world();
+            if (world == null || !world.equals(block.getWorld()) || view.real.distanceFrom(block.getLocation()) > 16)
+                continue;
+            CLICKING.put(player.getUniqueId(), System.currentTimeMillis() + CLICKING_MILLIS);
+            final int x = block.getX(), y = block.getY(), z = block.getZ();
+            Threads.globalLater(() -> view.resendNear(player, x, y, z, 2), 1L);
+            Threads.globalLater(() -> view.resendNear(player, x, y, z, 2), 3L);
+            return;
+        }
+    }
+
+    // Not ignoring cancelled ones: a refused click is exactly the one whose answer overwrites the view
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onViewerClick(final org.bukkit.event.player.PlayerInteractEvent e) {
+        if (e.getClickedBlock() != null && !SpawnArena.arenas.hasFighter(e.getPlayer()))
+            clickedInView(e.getPlayer(), e.getClickedBlock());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onViewerDig(final BlockDamageEvent e) {
+        if (!SpawnArena.arenas.hasFighter(e.getPlayer()))
+            clickedInView(e.getPlayer(), e.getBlock());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onViewerBreak(final BlockBreakEvent e) {
+        if (e.isCancelled() && !SpawnArena.arenas.hasFighter(e.getPlayer()))
+            clickedInView(e.getPlayer(), e.getBlock());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onViewerPlace(final BlockPlaceEvent e) {
+        if (e.isCancelled() && !SpawnArena.arenas.hasFighter(e.getPlayer()))
+            clickedInView(e.getPlayer(), e.getBlockAgainst());
+    }
+
+    @EventHandler
+    public void onViewerQuit(final org.bukkit.event.player.PlayerQuitEvent e) {
+        CLICKING.remove(e.getPlayer().getUniqueId());
+    }
+
     // ── What happens in the copies ──────────────────────────────────────────
 
     private static void record(final Block block) {
@@ -457,20 +540,28 @@ public final class CrystalView implements Listener {
      * match is on. Only changes made by players or explosions: grass spreading or ice melting don't count.
      */
     private static void touchedReal(final Location at) {
+        touchedReal(at, null);
+    }
+
+    /** As {@link #touchedReal(Location)}, saying what did it (for the log line when it's put back). */
+    private static void touchedReal(final Location at, final String by) {
         if (VIEWS.isEmpty() || SpawnArena.arenas == null || CrystalCopies.at(at.getWorld()) != null || !Arena.isArenaWorld(at.getWorld()))
             return;
         final Arena arena = SpawnArena.arenas.of(at);
         if (arena == null)
             return;
         final View view = VIEWS.get(arena.getArenaName().toLowerCase(Locale.ROOT));
-        if (view != null)
+        if (view != null) {
+            if (!view.realTouched || view.touchedBy == null)
+                view.touchedBy = (by == null ? "a change" : by) + " at " + at.getBlockX() + " " + at.getBlockY() + " " + at.getBlockZ();
             view.realTouched = true;
+        }
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlaceEntity(final org.bukkit.event.entity.EntityPlaceEvent e) {
         if (CrystalCopies.at(e.getEntity().getWorld()) == null)
-            touchedReal(e.getEntity().getLocation());
+            touchedReal(e.getEntity().getLocation(), (e.getPlayer() == null ? "" : e.getPlayer().getName() + " placing ") + e.getEntity().getType());
     }
 
     private static void record(final Collection<Block> blocks) {
@@ -484,21 +575,21 @@ public final class CrystalView implements Listener {
             for (final BlockState state : multi.getReplacedBlockStates())
                 record(state.getBlock());
         record(e.getBlock());
-        touchedReal(e.getBlock().getLocation());
+        touchedReal(e.getBlock().getLocation(), e.getPlayer().getName() + " placing " + e.getBlock().getType());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBreak(final BlockBreakEvent e) {
         record(e.getBlock());
         record(e.getBlock().getRelative(org.bukkit.block.BlockFace.UP)); // what stood on it
-        touchedReal(e.getBlock().getLocation());
+        touchedReal(e.getBlock().getLocation(), e.getPlayer().getName() + " breaking " + e.getBlock().getType());
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onEntityExplode(final EntityExplodeEvent e) {
         record(e.blockList());
         explosionAt(e.getLocation(), e.getYield());
-        touchedReal(e.getLocation());
+        touchedReal(e.getLocation(), e.getEntityType() + " exploding");
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -506,7 +597,7 @@ public final class CrystalView implements Listener {
         record(e.getBlock());
         record(e.blockList());
         explosionAt(e.getBlock().getLocation().add(0.5, 0.5, 0.5), e.getYield());
-        touchedReal(e.getBlock().getLocation());
+        touchedReal(e.getBlock().getLocation(), "a block explosion");
     }
 
     private static void explosionAt(final Location at, final float yield) {
@@ -581,13 +672,13 @@ public final class CrystalView implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBucketEmpty(final PlayerBucketEmptyEvent e) {
         record(e.getBlock());
-        touchedReal(e.getBlock().getLocation());
+        touchedReal(e.getBlock().getLocation(), e.getPlayer().getName() + " emptying a bucket");
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBucketFill(final PlayerBucketFillEvent e) {
         record(e.getBlock());
-        touchedReal(e.getBlock().getLocation());
+        touchedReal(e.getBlock().getLocation(), e.getPlayer().getName() + " filling a bucket");
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -615,12 +706,40 @@ public final class CrystalView implements Listener {
     }
 
     /**
-     * Someone shown as a fake is about to arrive in a world where it's shown (a fighter back on spawn), or leaving:
-     * the fake goes first, as their game can't have two of them.
+     * Someone shown as a fake is about to arrive in a world where it's shown (a fighter back on spawn), or leaving: the
+     * fake goes before they move (their game can't have two entities with one UUID, and would refuse the real one).
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(final org.bukkit.event.player.PlayerTeleportEvent e) {
+        if (e.getTo() != null && !e.getFrom().getWorld().equals(e.getTo().getWorld()))
+            forget(e.getPlayer());
+    }
+
+    /**
+     * Arrived: gone from every fake list, and shown to everyone there afresh, in case the game of someone who saw their
+     * fake got the real player before the fake had gone (it then drops the real one).
      */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onChangeWorld(final org.bukkit.event.player.PlayerChangedWorldEvent e) {
-        forget(e.getPlayer());
+        final Player arrived = e.getPlayer();
+        forget(arrived);
+        // Only into or out of a MULTI arena's copy: that's where fakes of them are shown
+        if (CrystalCopies.at(e.getFrom()) == null && CrystalCopies.at(arrived.getWorld()) == null)
+            return;
+        Threads.globalLater(() -> {
+            if (!arrived.isOnline())
+                return;
+            final List<Player> others = new ArrayList<>(arrived.getWorld().getPlayers());
+            others.remove(arrived);
+            for (final Player other : others)
+                if (other.canSee(arrived))
+                    other.hidePlayer(SpawnArena.INSTANCE, arrived);
+            Threads.globalLater(() -> {
+                for (final Player other : others)
+                    if (other.isOnline())
+                        other.showPlayer(SpawnArena.INSTANCE, arrived);
+            }, 2L);
+        }, 5L);
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

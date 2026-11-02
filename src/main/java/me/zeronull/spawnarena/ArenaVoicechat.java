@@ -32,9 +32,15 @@ public final class ArenaVoicechat implements VoicechatPlugin {
         SpawnArena.INSTANCE.getLogger().info("Hooked into Simple Voice Chat: separate fights in the same arena can't hear each other.");
     }
 
+    /**
+     * Unique to this load: Simple Voice Chat refuses a second plugin with an ID it already has, and it keeps the one from
+     * before a reload (PlugMan) registered for good, so under the same ID the new load would never be hooked in.
+     */
+    private static final String ID = "spawnarena-" + Long.toString(System.currentTimeMillis(), 36);
+
     @Override
     public String getPluginId() {
-        return "spawnarena";
+        return ID;
     }
 
     @Override
