@@ -131,6 +131,10 @@ public final class WatchMenu implements InventoryHolder {
                 return true;
             }
             final Arena arena = SpawnArena.arenas.of(args[0]);
+            if (arena == null) {
+                player.sendMessage(ChatColor.RED + "No arena called '" + args[0] + "'.");
+                return true;
+            }
             if (!(arena instanceof SavableArena real) || CrystalCopies.of(real).isEmpty()) {
                 player.sendMessage(ChatColor.RED + "That arena's matches can't be watched this way (it isn't a MULTI crystal arena).");
                 return true;

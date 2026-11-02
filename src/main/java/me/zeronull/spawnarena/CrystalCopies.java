@@ -90,7 +90,7 @@ public final class CrystalCopies {
                 final CrystalCopy existing = copies.stream().filter(c -> c.index() == index).findFirst().orElseThrow();
                 existing.sync();
                 if (recopy && existing.getFights().isEmpty())
-                    work.add(copyArena(real, spawn, existing.world()));
+                    work.add(copyArena(real, spawn, existing.world(), true));
                 decorate(real, spawn, existing.world());
                 continue;
             }
@@ -109,7 +109,7 @@ public final class CrystalCopies {
             copies.add(copy);
             BY_WORLD.put(world.getUID(), copy);
             if (recopy || isNew)
-                work.add(copyArena(real, spawn, world));
+                work.add(copyArena(real, spawn, world, !isNew));
             decorate(real, spawn, world);
         }
         copies.sort(Comparator.comparingInt(CrystalCopy::index));
@@ -256,12 +256,17 @@ public final class CrystalCopies {
      * way.
      */
     static BlockVector3[] box(final SavableArena real, final World spawn) {
+        return box(real, spawn, true);
+    }
+
+    /** With {@code useCopyRegion} false: the box without the &lt;arena&gt;_copy region (the region and its margin). */
+    private static BlockVector3[] box(final SavableArena real, final World spawn, final boolean useCopyRegion) {
         final RegionManager manager = Arena.ArenaUtils.REGION_CONTAINER.get(BukkitAdapter.adapt(spawn));
         if (manager == null)
             return null;
         final int lowest = spawn.getMinHeight(), highest = spawn.getMaxHeight() - 1;
         BlockVector3 min, max;
-        final ProtectedRegion area = manager.getRegion(real.getArenaName() + "_copy");
+        final ProtectedRegion area = useCopyRegion ? manager.getRegion(real.getArenaName() + "_copy") : null;
         if (area != null) {
             min = area.getMinimumPoint();
             max = area.getMaximumPoint();
@@ -285,14 +290,53 @@ public final class CrystalCopies {
                 BlockVector3.at(max.x(), Math.min(highest, max.y()), max.z())};
     }
 
-    private static CompletableFuture<Void> copyArena(final SavableArena real, final World spawn, final World world) {
+    /**
+     * Copies the arena into the copy's world. Into a world that already had a copy, what the last copy covered is
+     * emptied first: a smaller box this time (an &lt;arena&gt;_copy region added since) mustn't leave the rest of the old
+     * one standing. A world copied into before its box was remembered is emptied as far as the old way could reach (the
+     * region and its margin).
+     */
+    private static CompletableFuture<Void> copyArena(final SavableArena real, final World spawn, final World world, final boolean hadCopy) {
         final BlockVector3[] box = box(real, spawn);
         if (box == null) {
             SpawnArena.INSTANCE.getLogger().warning("Crystal arena " + real.getArenaName() + " has no WorldGuard region, so it can't be copied.");
             return CompletableFuture.completedFuture(null);
         }
+        BlockVector3[] old = hadCopy ? lastBox(world) : null;
+        if (hadCopy && old == null)
+            old = box(real, spawn, false);
+        final BlockVector3[] clear = old;
         SpawnArena.INSTANCE.getLogger().info("Copying crystal arena " + real.getArenaName() + " into " + world.getName() + "...");
-        return WorldEditUtils.copyBox(spawn, world, box[0], box[1]);
+        return WorldEditUtils.copyBox(spawn, world, box[0], box[1], clear == null ? null : clear[0], clear == null ? null : clear[1])
+                .thenRun(() -> rememberBox(world, box));
+    }
+
+    private static java.io.File boxFile(final World world) {
+        return new java.io.File(world.getWorldFolder(), "spawnarena-copied-box.txt");
+    }
+
+    /** The box last copied into this world ("x y z x y z"), or null if it isn't known. */
+    private static BlockVector3[] lastBox(final World world) {
+        try {
+            final java.io.File file = boxFile(world);
+            if (!file.isFile())
+                return null;
+            final String[] n = java.nio.file.Files.readString(file.toPath()).trim().split("\\s+");
+            return new BlockVector3[]{
+                    BlockVector3.at(Integer.parseInt(n[0]), Integer.parseInt(n[1]), Integer.parseInt(n[2])),
+                    BlockVector3.at(Integer.parseInt(n[3]), Integer.parseInt(n[4]), Integer.parseInt(n[5]))};
+        } catch (final Exception e) {
+            return null;
+        }
+    }
+
+    private static void rememberBox(final World world, final BlockVector3[] box) {
+        try {
+            java.nio.file.Files.writeString(boxFile(world).toPath(), box[0].x() + " " + box[0].y() + " " + box[0].z() + " "
+                    + box[1].x() + " " + box[1].y() + " " + box[1].z());
+        } catch (final Exception e) {
+            SpawnArena.INSTANCE.getLogger().warning("Couldn't note the box copied into " + world.getName() + ": " + e);
+        }
     }
 
     /**

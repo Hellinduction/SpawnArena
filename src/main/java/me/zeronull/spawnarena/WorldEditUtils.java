@@ -107,9 +107,21 @@ public final class WorldEditUtils {
      * future completes once it's done, failed or not (failures are logged).
      */
     public static CompletableFuture<Void> copyBox(final org.bukkit.World from, final org.bukkit.World to, final BlockVector3 min, final BlockVector3 max) {
+        return copyBox(from, to, min, max, null, null);
+    }
+
+    /** As {@link #copyBox(org.bukkit.World, org.bukkit.World, BlockVector3, BlockVector3)}, emptying {@code clearMin}..{@code clearMax} in {@code to} first (if given). */
+    public static CompletableFuture<Void> copyBox(final org.bukkit.World from, final org.bukkit.World to, final BlockVector3 min, final BlockVector3 max,
+                                                  final BlockVector3 clearMin, final BlockVector3 clearMax) {
         final CompletableFuture<Void> done = new CompletableFuture<>();
         final Runnable copy = () -> {
             try {
+                if (clearMin != null && clearMax != null) {
+                    try (EditSession target = WorldEdit.getInstance().newEditSession(BukkitAdapter.adapt(to))) {
+                        target.setBlocks((com.sk89q.worldedit.regions.Region) new com.sk89q.worldedit.regions.CuboidRegion(BukkitAdapter.adapt(to), clearMin, clearMax),
+                                com.sk89q.worldedit.world.block.BlockTypes.AIR.getDefaultState());
+                    }
+                }
                 // Into a clipboard first, then pasted: the usual //copy, //paste way, which both WorldEdit and FAWE do reliably
                 final com.sk89q.worldedit.regions.CuboidRegion region = new com.sk89q.worldedit.regions.CuboidRegion(BukkitAdapter.adapt(from), min, max);
                 final com.sk89q.worldedit.extent.clipboard.BlockArrayClipboard clipboard = new com.sk89q.worldedit.extent.clipboard.BlockArrayClipboard(region);
