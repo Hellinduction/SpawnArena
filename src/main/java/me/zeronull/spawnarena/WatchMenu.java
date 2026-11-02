@@ -82,7 +82,7 @@ public final class WatchMenu implements InventoryHolder {
             final List<Player> members = fight.getMembers();
             final List<String> names = new ArrayList<>();
             for (final Player p : members)
-                names.add((fight.isFighter(p) ? "<white>" : "<dark_gray><strikethrough>") + p.getName() + "</strikethrough>");
+                names.add(fight.isFighter(p) ? "<white>" + p.getName() + "</white>" : "<dark_gray><strikethrough>" + p.getName() + "</strikethrough></dark_gray>");
             final ItemStack head = item(Material.PLAYER_HEAD, "<gold><bold>Match " + copy.index() + "</bold>", List.of(
                     String.join(" <gray>vs</gray> ", names),
                     "<gray>" + fight.getMode().label(), "",
