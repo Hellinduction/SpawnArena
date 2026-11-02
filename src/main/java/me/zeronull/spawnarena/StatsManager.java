@@ -347,7 +347,7 @@ public class StatsManager {
                 }
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] deleteArenaData: " + e.getMessage());
+            warn("deleteArenaData: " + e.getMessage());
         }
         rewardCache.clear();
         lastResults.clear();
@@ -378,7 +378,7 @@ public class StatsManager {
             ps.setString(1, uuid.toString());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] releaseBet: " + e.getMessage());
+            warn("releaseBet: " + e.getMessage());
         }
     }
 
@@ -392,7 +392,7 @@ public class StatsManager {
             }
             st.executeUpdate("DELETE FROM bet_escrow WHERE server_id=" + sid);
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] takeHeldBets: " + e.getMessage());
+            warn("takeHeldBets: " + e.getMessage());
         }
         return held;
     }
@@ -436,7 +436,7 @@ public class StatsManager {
                 c.setAutoCommit(true);
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] takeOwedItems: " + e.getMessage());
+            warn("takeOwedItems: " + e.getMessage());
             return List.of();
         }
         return items;
@@ -467,7 +467,7 @@ public class StatsManager {
             ps.setLong(9, System.currentTimeMillis());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] logStatChange: " + e.getMessage());
+            warn("logStatChange: " + e.getMessage());
         }
         Bukkit.getLogger().info(String.format("[SpawnArena] [Stat change] %s %s %s%s%s%s", actorName, action, targetName,
                 arena == null ? "" : " in " + arena, field == null ? "" : " " + field,
@@ -496,7 +496,7 @@ public class StatsManager {
                     out.add(readAudit(rs));
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getAudit: " + e.getMessage());
+            warn("getAudit: " + e.getMessage());
         }
         return out;
     }
@@ -529,7 +529,7 @@ public class StatsManager {
                     out.add(readAudit(rs));
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getRollbackable: " + e.getMessage());
+            warn("getRollbackable: " + e.getMessage());
         }
         return out;
     }
@@ -564,7 +564,7 @@ public class StatsManager {
             ps.setLong(1, id);
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] markRolledBack: " + e.getMessage());
+            warn("markRolledBack: " + e.getMessage());
         }
     }
 
@@ -582,7 +582,7 @@ public class StatsManager {
             ps.setLong(3, System.currentTimeMillis());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordTeammate: " + e.getMessage());
+            warn("recordTeammate: " + e.getMessage());
         }
         recentTeammatesCache.remove(uuid);
     }
@@ -604,7 +604,7 @@ public class StatsManager {
                     mates.add(UUID.fromString(rs.getString(1)));
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getRecentTeammates: " + e.getMessage());
+            warn("getRecentTeammates: " + e.getMessage());
             return mates;
         }
         recentTeammatesCache.put(uuid, mates);
@@ -631,7 +631,7 @@ public class StatsManager {
             ps.setLong(7, System.currentTimeMillis());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] logPayout: " + e.getMessage());
+            warn("logPayout: " + e.getMessage());
         }
     }
 
@@ -656,7 +656,7 @@ public class StatsManager {
                 }
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getPayouts: " + e.getMessage());
+            warn("getPayouts: " + e.getMessage());
         }
         return payouts;
     }
@@ -679,7 +679,7 @@ public class StatsManager {
                     totals.add(new OpponentTotal(UUID.fromString(rs.getString("opponent")), rs.getInt("n"), rs.getDouble("total")));
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getTopPayoutOpponents: " + e.getMessage());
+            warn("getTopPayoutOpponents: " + e.getMessage());
         }
         return totals;
     }
@@ -694,7 +694,7 @@ public class StatsManager {
             ps.setLong(4, System.currentTimeMillis());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] logBetBonus: " + e.getMessage());
+            warn("logBetBonus: " + e.getMessage());
         }
     }
 
@@ -713,7 +713,7 @@ public class StatsManager {
                     return new double[]{rs.getDouble(1), rs.getDouble(2)};
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getMoneyMade: " + e.getMessage());
+            warn("getMoneyMade: " + e.getMessage());
         }
         return new double[]{0, 0};
     }
@@ -730,7 +730,7 @@ public class StatsManager {
                 counts.put("", rs.next() ? rs.getInt(1) : 0);
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getPlayerCounts: " + e.getMessage());
+            warn("getPlayerCounts: " + e.getMessage());
         }
         return counts;
     }
@@ -745,7 +745,7 @@ public class StatsManager {
                     return new double[]{rs.getLong(1), rs.getDouble(2)};
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getPayoutTotals: " + e.getMessage());
+            warn("getPayoutTotals: " + e.getMessage());
         }
         return new double[]{0, 0};
     }
@@ -784,7 +784,7 @@ public class StatsManager {
                 return earned;
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getEarnedToday: " + e.getMessage());
+            warn("getEarnedToday: " + e.getMessage());
             return Double.MAX_VALUE; // fail closed: treat as capped
         }
     }
@@ -815,7 +815,7 @@ public class StatsManager {
             ps.setDouble(3, amount);
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] addEarnedToday: " + e.getMessage());
+            warn("addEarnedToday: " + e.getMessage());
         }
         dailyCache.remove(uuid);
     }
@@ -840,7 +840,7 @@ public class StatsManager {
                 }
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] loadNames: " + e.getMessage());
+            warn("loadNames: " + e.getMessage());
         }
         namesLoaded = true;
         // One Mojang lookup at a time, well under their rate limit
@@ -886,7 +886,7 @@ public class StatsManager {
                 ps.setLong(3, System.currentTimeMillis());
                 ps.executeUpdate();
             } catch (SQLException e) {
-                Bukkit.getLogger().warning("[SpawnArena] rememberName: " + e.getMessage());
+                warn("rememberName: " + e.getMessage());
             }
             invalidateLeaderboards();
         });
@@ -937,7 +937,7 @@ public class StatsManager {
             ps.setLong(3, System.currentTimeMillis());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordIp: " + e.getMessage());
+            warn("recordIp: " + e.getMessage());
         }
     }
 
@@ -953,7 +953,7 @@ public class StatsManager {
                 return rs.next();
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] sharesIp: " + e.getMessage());
+            warn("sharesIp: " + e.getMessage());
             return true; // fail closed: don't pay if we can't check
         }
     }
@@ -971,7 +971,7 @@ public class StatsManager {
             mac.init(new javax.crypto.spec.SecretKeySpec(ipSecret, "HmacSHA256"));
             return java.util.HexFormat.of().formatHex(mac.doFinal(address.getAddress()));
         } catch (Exception e) {
-            Bukkit.getLogger().warning("[SpawnArena] hashIp: " + e.getMessage());
+            warn("hashIp: " + e.getMessage());
             return null;
         }
     }
@@ -988,7 +988,7 @@ public class StatsManager {
             java.nio.file.Files.writeString(file, java.util.HexFormat.of().formatHex(secret));
             this.ipSecret = secret;
         } catch (Exception e) {
-            Bukkit.getLogger().warning("[SpawnArena] Couldn't load ip-secret.key, using a temporary key: " + e.getMessage());
+            warn("Couldn't load ip-secret.key, using a temporary key: " + e.getMessage());
             this.ipSecret = new byte[32];
             new java.security.SecureRandom().nextBytes(this.ipSecret);
         }
@@ -1029,7 +1029,7 @@ public class StatsManager {
             ps.setString(3, result.length() > 128 ? result.substring(0, 128) : result);
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] setLastResult: " + e.getMessage());
+            warn("setLastResult: " + e.getMessage());
         }
     }
 
@@ -1050,7 +1050,7 @@ public class StatsManager {
                 return result;
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getLastResult: " + e.getMessage());
+            warn("getLastResult: " + e.getMessage());
             return "-";
         }
     }
@@ -1116,7 +1116,7 @@ public class StatsManager {
                 return state;
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getRewardState: " + e.getMessage());
+            warn("getRewardState: " + e.getMessage());
             // Fail closed: treat as just rewarded so a DB hiccup can't be farmed (not cached)
             return new RewardState(now, null, 0);
         }
@@ -1157,7 +1157,7 @@ public class StatsManager {
             rewardCache.put(winner + ":" + arena.toLowerCase(),
                     new CachedReward(System.currentTimeMillis(), new RewardState(state.lastReward(), loser, 0)));
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] noteWinAgainst: " + e.getMessage());
+            warn("noteWinAgainst: " + e.getMessage());
         }
     }
 
@@ -1180,7 +1180,7 @@ public class StatsManager {
             rewardCache.put(uuid + ":" + arena.toLowerCase(),
                     new CachedReward(System.currentTimeMillis(), new RewardState(epochMillis, opponent, payouts)));
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordPayout: " + e.getMessage());
+            warn("recordPayout: " + e.getMessage());
         }
     }
 
@@ -1196,7 +1196,7 @@ public class StatsManager {
                 ps.setString(2, arena.toLowerCase());
             return ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] clearRewardCooldown: " + e.getMessage());
+            warn("clearRewardCooldown: " + e.getMessage());
             return -1;
         } finally {
             final String prefix = uuid + ":";
@@ -1322,7 +1322,7 @@ public class StatsManager {
             final String v = getMeta(c, "losses_since");
             return v == null ? 0 : Long.parseLong(v);
         } catch (SQLException | NumberFormatException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getLossesSince: " + e.getMessage());
+            warn("getLossesSince: " + e.getMessage());
             return 0;
         }
     }
@@ -1362,7 +1362,7 @@ public class StatsManager {
                     return rs.getInt(1);
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getElo: " + e.getMessage());
+            warn("getElo: " + e.getMessage());
         }
         return START_ELO;
     }
@@ -1406,7 +1406,7 @@ public class StatsManager {
             ps.setString(2, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] countRatedGame: " + e.getMessage());
+            warn("countRatedGame: " + e.getMessage());
         }
     }
 
@@ -1475,7 +1475,7 @@ public class StatsManager {
                 return rs.next() ? rs.getInt(1) : 0;
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getField(" + field + "): " + e.getMessage());
+            warn("getField(" + field + "): " + e.getMessage());
             return 0;
         }
     }
@@ -1506,7 +1506,7 @@ public class StatsManager {
             ps.setString(5, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordWin: " + e.getMessage());
+            warn("recordWin: " + e.getMessage());
         }
         invalidateLeaderboards();
         return getWinStreak(player.getUniqueId(), arena);
@@ -1529,7 +1529,7 @@ public class StatsManager {
             ps.setString(4, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordLoss: " + e.getMessage());
+            warn("recordLoss: " + e.getMessage());
         }
         invalidateLeaderboards();
     }
@@ -1557,7 +1557,7 @@ public class StatsManager {
             ps.setString(6, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordFfaKill: " + e.getMessage());
+            warn("recordFfaKill: " + e.getMessage());
         }
         invalidateLeaderboards();
     }
@@ -1572,7 +1572,7 @@ public class StatsManager {
             ps.setString(2, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordFfaDeath: " + e.getMessage());
+            warn("recordFfaDeath: " + e.getMessage());
         }
         invalidateLeaderboards();
     }
@@ -1591,7 +1591,7 @@ public class StatsManager {
                     return new LostStreak(rs.getInt("lost_streak"), rs.getLong("lost_at"));
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getLostStreak: " + e.getMessage());
+            warn("getLostStreak: " + e.getMessage());
         }
         return new LostStreak(0, 0);
     }
@@ -1610,7 +1610,7 @@ public class StatsManager {
             ps.setString(3, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] addFightSeconds: " + e.getMessage());
+            warn("addFightSeconds: " + e.getMessage());
         }
         invalidateLeaderboards();
     }
@@ -1642,7 +1642,7 @@ public class StatsManager {
             ps.setString(i, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] setField(" + field + "): " + e.getMessage());
+            warn("setField(" + field + "): " + e.getMessage());
         }
         invalidateLeaderboards();
     }
@@ -1684,7 +1684,7 @@ public class StatsManager {
             ps.setString(10, m.variant());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] logMatch: " + e.getMessage());
+            warn("logMatch: " + e.getMessage());
         }
     }
 
@@ -1956,7 +1956,7 @@ public class StatsManager {
                 }
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] recordMatch: " + e.getMessage());
+            warn("recordMatch: " + e.getMessage());
             return 0;
         }
     }
@@ -1967,7 +1967,7 @@ public class StatsManager {
             final String v = getMeta(c, "milestone_pending_" + arena.toLowerCase());
             return v == null ? 0 : Long.parseLong(v);
         } catch (SQLException | NumberFormatException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getPendingMilestone: " + e.getMessage());
+            warn("getPendingMilestone: " + e.getMessage());
             return 0;
         }
     }
@@ -1982,7 +1982,7 @@ public class StatsManager {
             if (milestone > 0)
                 setMeta(c, key, String.valueOf(milestone));
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] setPendingMilestone: " + e.getMessage());
+            warn("setPendingMilestone: " + e.getMessage());
         }
     }
 
@@ -2062,7 +2062,7 @@ public class StatsManager {
             this.globalFetchedAt = System.currentTimeMillis();
             return fresh;
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getGlobalStats: " + e.getMessage());
+            warn("getGlobalStats: " + e.getMessage());
             return cached;
         }
     }
@@ -2079,7 +2079,7 @@ public class StatsManager {
                 return rs.next() ? rs.getLong(1) : 0;
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getMatchesPlayed: " + e.getMessage());
+            warn("getMatchesPlayed: " + e.getMessage());
             return 0;
         }
     }
@@ -2159,7 +2159,7 @@ public class StatsManager {
             }
             return ranks;
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getStanding: " + e.getMessage());
+            warn("getStanding: " + e.getMessage());
             return null;
         }
     }
@@ -2177,7 +2177,7 @@ public class StatsManager {
             ps.setString(4, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] played: " + e.getMessage());
+            warn("played: " + e.getMessage());
         }
     }
 
@@ -2191,7 +2191,7 @@ public class StatsManager {
                 return rs.next() ? new long[]{rs.getLong(1), rs.getLong(2)} : new long[]{0, 0};
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getPlayed: " + e.getMessage());
+            warn("getPlayed: " + e.getMessage());
             return new long[]{0, 0};
         }
     }
@@ -2202,7 +2202,7 @@ public class StatsManager {
             final String v = getMeta(c, "played_since");
             return v == null ? 0 : Long.parseLong(v);
         } catch (SQLException | NumberFormatException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getPlayedSince: " + e.getMessage());
+            warn("getPlayedSince: " + e.getMessage());
             return 0;
         }
     }
@@ -2217,7 +2217,7 @@ public class StatsManager {
             ps.setString(2, arena.toLowerCase());
             ps.executeUpdate();
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] ensure: " + e.getMessage());
+            warn("ensure: " + e.getMessage());
         }
     }
 
@@ -2251,7 +2251,7 @@ public class StatsManager {
                 }
             }
         } catch (SQLException e) {
-            Bukkit.getLogger().warning("[SpawnArena] getTopPlayers: " + e.getMessage());
+            warn("getTopPlayers: " + e.getMessage());
         }
         return entries;
     }
@@ -2525,6 +2525,15 @@ public class StatsManager {
         }
     }
 
+    /**
+     * A database problem, logged; not once this is closed: after a reload, plugins still holding the old SpawnArena
+     * (FancyHolograms' placeholders) keep asking it for a while, and every such call fails.
+     */
+    private void warn(final String message) {
+        if (this.dataSource != null && !this.dataSource.isClosed())
+            Bukkit.getLogger().warning("[SpawnArena] " + message);
+    }
+
     public void close() {
         if (dataSource == null || dataSource.isClosed())
             return;
@@ -2540,7 +2549,7 @@ public class StatsManager {
             } catch (SQLException e) {
                 // After a successful SHUTDOWN, closing the connection always reports the database as already closed
                 if (!shutDown)
-                    Bukkit.getLogger().warning("[SpawnArena] H2 shutdown: " + e.getMessage());
+                    warn("H2 shutdown: " + e.getMessage());
             }
         }
 
