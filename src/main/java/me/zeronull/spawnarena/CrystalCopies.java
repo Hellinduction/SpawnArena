@@ -114,6 +114,11 @@ public final class CrystalCopies {
         }
         copies.sort(Comparator.comparingInt(CrystalCopy::index));
         COPIES.put(real.getArenaName().toLowerCase(Locale.ROOT), List.copyOf(copies));
+        // The server's combat logger mustn't treat the copies as somewhere new (or tag fighters going in and out of them)
+        final List<String> names = new ArrayList<>();
+        for (final CrystalCopy copy : copies)
+            names.add(copy.world().getName());
+        CombatLoggerWorlds.include(names);
         return CompletableFuture.allOf(work.toArray(new CompletableFuture[0]));
     }
 

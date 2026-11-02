@@ -147,6 +147,14 @@ public final class SettingsConfig {
             "Not used when there's a WorldGuard region called <arena>_copy (e.g. crystal_copy): then exactly that is copied."})
     public int crystalCopyMargin = 32;
 
+    @Comment({"MULTI crystal arenas' copy worlds are added to your combat logger's list of worlds it leaves alone when they're",
+            "made: the YAML file (from the server folder) and the list in it (keys joined with dots), then this console",
+            "command reloads it. Only missing names are added, at the end of the list; a copy of the file is kept first.",
+            "Empty file = off."})
+    public String combatLoggerWorldsFile = "plugins/Economy/config.yml";
+    public String combatLoggerWorldsSection = "COMBAT-MANAGER.EXCLUDED-WORLDS";
+    public String combatLoggerWorldsReload = "economy reload";
+
     @Comment({"MULTI crystal arenas: players on spawn see every match at once in the real arena (fighters as mannequins, blocks",
             "changed in any match, the newest change winning). Around each fighter their own match's blocks always show:",
             "this many blocks out to the sides..."})
