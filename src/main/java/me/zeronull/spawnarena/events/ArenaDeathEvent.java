@@ -39,6 +39,13 @@ public class ArenaDeathEvent implements Listener {
         fight.eliminate(player);
     }
 
+    // A teleport after being sent back from a fight (/spawn, /tpa, a portal...) ends the no-damage moment after it
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(final org.bukkit.event.player.PlayerTeleportEvent e) {
+        if (!SpawnArena.arenas.hasFighter(e.getPlayer()))
+            Fight.teleportedAfterFight(e.getPlayer(), e.getTo());
+    }
+
     // Runs last (HIGHEST, and registered after the listeners that re-allow arena damage) and only for
     // damage that will really happen, so e.g. fall damage WorldGuard cancels can't count as a death
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -48,6 +55,12 @@ public class ArenaDeathEvent implements Listener {
         }
 
         Player defender = (Player) event.getEntity();
+
+        // Just sent back from a fight: the rest of that fight's blasts (same tick) mustn't reach them where they are now
+        if (!SpawnArena.arenas.hasFighter(defender) && Fight.justOut(defender)) {
+            event.setCancelled(true);
+            return;
+        }
 
         if (!SpawnArena.arenas.hasActiveFight()) {
             return;

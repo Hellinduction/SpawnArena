@@ -145,6 +145,7 @@ public final class PlayerPreFightData {
             if (inside != null)
                 destination = inside.exitFor(this.player);
         }
+        Fight.sentBackTo(this.player, destination); // before the teleport: it's not one of theirs
         FoliaUtils.teleport(this.player, destination);
 
         // These 2 just assume they were at this before

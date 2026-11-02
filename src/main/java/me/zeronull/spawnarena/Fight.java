@@ -53,6 +53,55 @@ public class Fight {
      * tick when they're on another thread). They're treated like fighters meanwhile: no dropping items.
      */
     public static final Set<UUID> AWAITING_RESTORE = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    /**
+     * Players just out of a fight -> until when no damage reaches them. The hit that ends a crystal fight often lands in
+     * the same tick as other explosions: those would otherwise hit the loser after they've been sent back, and could kill
+     * them for real outside the arena.
+     */
+    private static final Map<UUID, JustOut> JUST_OUT = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long JUST_OUT_MILLIS = 2_000;
+
+    /** Until when; and where they were sent back to (null until then). Going anywhere else ends it. */
+    private record JustOut(long until, java.util.concurrent.atomic.AtomicReference<Location> sentBackTo) {}
+
+    /**
+     * Out of a fight in the last JUST_OUT_MILLIS and still where they were sent back: damage is cancelled. Being somewhere
+     * else (another world, or more than a few blocks off) ends it: that catches a teleport even where none is reported
+     * (Folia fires no teleport event).
+     */
+    public static boolean justOut(final Player player) {
+        final JustOut out = JUST_OUT.get(player.getUniqueId());
+        if (out == null)
+            return false;
+        final Location back = out.sentBackTo().get();
+        if (System.currentTimeMillis() < out.until() && (back == null || !movedAway(back, player.getLocation())))
+            return true;
+        JUST_OUT.remove(player.getUniqueId(), out);
+        return false;
+    }
+
+    private static boolean movedAway(final Location back, final Location now) {
+        return back.getWorld() != now.getWorld() || back.distanceSquared(now) > 8 * 8;
+    }
+
+    /** Where this player was just sent back to after their fight (their own teleports from there end the protection). */
+    public static void sentBackTo(final Player player, final Location destination) {
+        final JustOut out = JUST_OUT.get(player.getUniqueId());
+        if (out != null && destination != null)
+            out.sentBackTo().set(destination.clone());
+    }
+
+    /** They teleported (or changed world): anywhere but where they were sent back ends their protection. */
+    public static void teleportedAfterFight(final Player player, final Location to) {
+        final JustOut out = JUST_OUT.get(player.getUniqueId());
+        final Location back = out == null ? null : out.sentBackTo().get();
+        if (back != null && to != null && (back.getWorld() != to.getWorld() || back.distanceSquared(to) > 2 * 2))
+            JUST_OUT.remove(player.getUniqueId(), out);
+    }
+
+    private static void markJustOut(final Player player) {
+        JUST_OUT.put(player.getUniqueId(), new JustOut(System.currentTimeMillis() + JUST_OUT_MILLIS, new java.util.concurrent.atomic.AtomicReference<>()));
+    }
     ScheduledTask starting;
     /** Bets taken from fighters for this fight (see Bets), until settled or refunded. */
     private final Map<UUID, Double> bets = new java.util.concurrent.ConcurrentHashMap<>();
@@ -643,6 +692,7 @@ public class Fight {
         }
 
         // Teammate still fighting: this player is out now, the match goes on
+        markJustOut(player);
         AWAITING_RESTORE.add(player.getUniqueId());
         Threads.entity(player, () -> this.restore(player));
         this.showTo(player);
@@ -749,6 +799,7 @@ public class Fight {
         for (final UUID id : new ArrayList<>(this.fightingSince.keySet()))
             this.countFightTime(id);
         for (final Player p : this.getMembers()) {
+            markJustOut(p);
             AnticheatExempt.remove(p.getUniqueId());
             ArenaProjectileDupeFix.discardProjectiles(p);
             if (!this.restored.contains(p.getUniqueId()))
