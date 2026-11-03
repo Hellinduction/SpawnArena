@@ -322,6 +322,8 @@ public final class LeaderboardHolograms {
             text.setText(lines);
             text.setTextUpdateInterval(interval);
             text.setTextShadow(true);
+            if (text.getVisibilityDistance() < VISIBILITY_DISTANCE)
+                text.setVisibilityDistance(VISIBILITY_DISTANCE);
             h.forceUpdate();
             h.refreshForViewers();
             updated++;
