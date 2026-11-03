@@ -67,8 +67,14 @@ public final class CrystalCopies {
         if (!supported() || SpawnArena.arenas == null)
             return;
         for (final Arena arena : SpawnArena.arenas)
-            if (arena instanceof SavableArena real && real.isCrystalPvp() && real.getArenaMode() == ArenaMode.MULTI)
-                setUp(real, false);
+            if (arena instanceof SavableArena real && real.isCrystalPvp() && real.getArenaMode() == ArenaMode.MULTI) {
+                // A free-for-all runs in the arena itself: no copies, nor a viewing arena that would be put back under it
+                if (real.isFfa())
+                    SpawnArena.INSTANCE.getLogger().warning(real.getArenaName() + " is set to both MULTI and free-for-all: it runs as a "
+                            + "free-for-all, without copies. Turn one of them off with /togglearenamode.");
+                else
+                    setUp(real, false);
+            }
     }
 
     /**

@@ -99,10 +99,19 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             return true;
         }
 
+        // MULTI and free-for-all don't go together (a free-for-all is one session, in the arena itself): it goes off first
         if (arena.isFfa()) {
-            sender.sendMessage(ChatColor.RED + "Free-for-all arenas always run one session (SINGLE). Turn it off with /togglearenamode "
-                    + arena.getArenaName() + " ffa.");
-            return true;
+            synchronized (arena) {
+                final String busy = whyBusy(arena);
+                if (busy != null) {
+                    sender.sendMessage(ChatColor.RED + arena.getArenaName() + " is a free-for-all, which has to go off for MULTI: "
+                            + busy + " Try again once it's empty.");
+                    return true;
+                }
+                arena.setFfa(false);
+                arena.save(config -> config.ffa = false);
+            }
+            sender.sendMessage(ChatColor.YELLOW + "Free-for-all is off for " + arena.getArenaName() + " (it can't be MULTI as well).");
         }
 
         if (arena.isCrystalPvp()) {
@@ -156,6 +165,18 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
      * joining also takes, so nobody can get in between the check and the change.
      */
     private static void toggleFfa(final CommandSender player, final SavableArena arena) {
+        // A MULTI crystal arena's real arena is its viewing arena (put back whenever it's changed): back to SINGLE first
+        if (!arena.isFfa() && arena.isCrystalPvp() && arena.getArenaMode() == ArenaMode.MULTI) {
+            if (me.zeronull.spawnarena.CrystalCopies.of(arena).stream().anyMatch(copy -> !copy.getFights().isEmpty())) {
+                player.sendMessage(ChatColor.RED + arena.getArenaName() + " is in MULTI mode, which has to go off for a free-for-all, "
+                        + "and there are matches going on in its copies. Try again once they're over.");
+                return;
+            }
+            arena.setArenaMode(ArenaMode.SINGLE.name());
+            arena.save(config -> config.arenaMode = ArenaMode.SINGLE.name());
+            me.zeronull.spawnarena.CrystalCopies.retire(arena);
+            player.sendMessage(ChatColor.YELLOW + "Set " + arena.getArenaName() + " back to SINGLE (a free-for-all can't be MULTI as well).");
+        }
         final boolean nowFfa;
         synchronized (arena) {
             final String busy = whyBusy(arena);

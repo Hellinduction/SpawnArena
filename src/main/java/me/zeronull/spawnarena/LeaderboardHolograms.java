@@ -414,9 +414,26 @@ public final class LeaderboardHolograms {
      * count them as seeing a hologram, so never send it again: leaderboards right in front of them stayed invisible.
      */
     public static final class WorldChange implements org.bukkit.event.Listener {
+        /** A teleport this far (or into another world) gets the holograms around them shown afresh too. */
+        private static final double FAR = 64;
+
         @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.MONITOR)
         public void onChangeWorld(final org.bukkit.event.player.PlayerChangedWorldEvent e) {
-            final org.bukkit.entity.Player player = e.getPlayer();
+            reshowLater(e.getPlayer());
+        }
+
+        /**
+         * Teleporting far and back within a second or so (FancyHolograms checks who's in range once a second): their game
+         * dropped the holograms with the area, but FancyHolograms never noticed they'd gone, so never sent them again.
+         */
+        @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.MONITOR, ignoreCancelled = true)
+        public void onTeleport(final org.bukkit.event.player.PlayerTeleportEvent e) {
+            final Location from = e.getFrom(), to = e.getTo();
+            if (to != null && from.getWorld() != null && from.getWorld().equals(to.getWorld()) && from.distanceSquared(to) > FAR * FAR)
+                reshowLater(e.getPlayer());
+        }
+
+        private static void reshowLater(final org.bukkit.entity.Player player) {
             me.zeronull.spawnarena.Threads.entityLater(player, () -> {
                 if (!player.isOnline() || !org.bukkit.Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
                     return;
