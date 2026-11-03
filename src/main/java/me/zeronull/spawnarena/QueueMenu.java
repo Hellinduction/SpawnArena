@@ -120,6 +120,11 @@ public final class QueueMenu implements InventoryHolder {
     /** Marks this menu's buttons, so one that somehow ends up anywhere else can be recognised and removed. */
     private static final org.bukkit.NamespacedKey BUTTON = new org.bukkit.NamespacedKey(SpawnArena.INSTANCE, "queue_menu_button");
 
+    /** Marks an item as a menu button (this menu's, or another SpawnArena menu's), so it's removed wherever else it turns up. */
+    public static void markButton(final ItemMeta meta) {
+        meta.getPersistentDataContainer().set(BUTTON, org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
+    }
+
     public static boolean isButton(final ItemStack item) {
         if (item == null || !item.hasItemMeta())
             return false;
@@ -138,7 +143,9 @@ public final class QueueMenu implements InventoryHolder {
             return false;
         for (final Component line : lore) {
             final String text = plain.serialize(line);
-            if (text.startsWith("Matches in progress:") || text.equals("Joins whichever queue has"))
+            if (text.startsWith("Matches in progress:") || text.equals("Joins whichever queue has")
+                    // the watch menu's (/arenawatch)
+                    || text.equals("Every match at once,") || text.equals("Click to watch up close") || text.equals("Matches show up here"))
                 return true;
         }
         return false;

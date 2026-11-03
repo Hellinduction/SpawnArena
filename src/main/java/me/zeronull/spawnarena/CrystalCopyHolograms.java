@@ -13,8 +13,8 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * A MULTI crystal arena's leaderboard holograms (see {@link LeaderboardHolograms}) standing in its copied area, copied
- * into each copy at the same spot. Never saved; kept showing what the real ones show (their lines are placeholders that
+ * A MULTI crystal arena's leaderboard holograms (see {@link LeaderboardHolograms}), and the name holograms of the NPCs
+ * copied with it (linked to an NPC), standing in its copied area, copied into each copy at the same spot. Never saved; kept showing what the real ones show (their lines are placeholders that
  * update by themselves, so only a changed layout needs passing on); gone when the copies are retired or the server stops.
  * Only touch this class after checking FancyHolograms is enabled: it links against its API.
  */
@@ -29,7 +29,10 @@ final class CrystalCopyHolograms {
         return "sa_copy_" + world.getName() + "_" + original;
     }
 
-    /** Copies the arena's leaderboard holograms in the box (in {@code from}) into {@code to}, replacing earlier copies. */
+    /**
+     * Copies the arena's leaderboard holograms and NPC name holograms in the box (in {@code from}) into {@code to},
+     * replacing earlier copies. A name hologram goes with the copy of its NPC (see {@link CrystalCopyNpcs#copyName}).
+     */
     static void copy(final String arena, final World from, final World to, final BlockVector3 min, final BlockVector3 max) {
         removeFrom(to);
         final HologramManager manager = FancyHologramsPlugin.get().getHologramManager();
@@ -38,10 +41,13 @@ final class CrystalCopyHolograms {
         for (final Hologram h : new ArrayList<>(manager.getHolograms())) {
             final HologramData d = h.getData();
             final Location at = d.getLocation();
-            if (!d.getName().startsWith(prefix) || at == null || !from.equals(at.getWorld()) || !inside(at, min, max))
+            final String npc = d.getLinkedNpcName();
+            if ((!d.getName().startsWith(prefix) && npc == null) || at == null || !from.equals(at.getWorld()) || !inside(at, min, max))
                 continue;
             final String name = copyName(to, d.getName());
             final HologramData copy = d.copy(name);
+            if (npc != null)
+                copy.setLinkedNpcName(CrystalCopyNpcs.copyName(npc, to));
             final Location there = at.clone();
             there.setWorld(to);
             copy.setLocation(there);

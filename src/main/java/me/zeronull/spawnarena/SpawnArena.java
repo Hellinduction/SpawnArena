@@ -190,6 +190,17 @@ public class SpawnArena extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // Its menus close: once reloaded, this copy's menus aren't recognised as its own, so nothing would stop their
+        // buttons being taken out
+        for (final org.bukkit.entity.Player p : Bukkit.getOnlinePlayers())
+            try {
+                if (p.getOpenInventory().getTopInventory().getHolder() instanceof QueueMenu
+                        || p.getOpenInventory().getTopInventory().getHolder() instanceof WatchMenu)
+                    p.closeInventory();
+                QueueMenu.purge(p);
+            } catch (final RuntimeException ignored) {
+                // Folia: not this player's thread at shutdown; the purge on join (and the new load's checks) cover it
+            }
         // Only when Simple Voice Chat is there: the hook's class can't even load without it
         if (Bukkit.getPluginManager().getPlugin("voicechat") != null) {
             try {

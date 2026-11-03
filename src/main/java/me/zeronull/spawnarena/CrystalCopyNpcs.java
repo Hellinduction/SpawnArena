@@ -36,7 +36,7 @@ final class CrystalCopyNpcs {
             there.setWorld(to);
             final Map<ActionTrigger, List<NpcAction.NpcActionData>> actions = new HashMap<>();
             d.getActions().forEach((trigger, list) -> actions.put(trigger, new ArrayList<>(list)));
-            final NpcData copy = new NpcData(UUID.randomUUID().toString(), d.getName() + "_" + to.getName(), d.getCreator(),
+            final NpcData copy = new NpcData(UUID.randomUUID().toString(), copyName(d.getName(), to), d.getCreator(),
                     d.getDisplayName(), d.getSkinData(), there, d.isShowInTab(), d.isSpawnEntity(), d.isCollidable(),
                     d.isGlowing(), d.getGlowingColor(), d.getType(), new HashMap<>(d.getEquipment()), d.isTurnToPlayer(),
                     d.getTurnToPlayerDistance(), d.getOnClick(), actions, d.getInteractionCooldown(), d.getScale(),
@@ -56,6 +56,11 @@ final class CrystalCopyNpcs {
             MADE.put(to.getUID(), made);
             SpawnArena.INSTANCE.getLogger().info("Copied " + made.size() + " NPC(s) into " + to.getName());
         }
+    }
+
+    /** The name of an NPC's copy in this copy world. */
+    static String copyName(final String original, final World world) {
+        return original + "_" + world.getName();
     }
 
     private static boolean inside(final Location at, final BlockVector3 min, final BlockVector3 max) {

@@ -39,6 +39,10 @@ public final class WatchMenu implements InventoryHolder {
 
     /** Player watching a match in its copy -> that copy */
     private static final Map<UUID, CrystalCopy> WATCHING = new ConcurrentHashMap<>();
+    /** Player sent out of a copy's void -> when (falling keeps firing until the teleport is done) */
+    private static final Map<UUID, Long> RESCUED = new ConcurrentHashMap<>();
+    /** Player watching a match in a copy -> where they were before (outside the copies), to go back to when it ends */
+    private static final Map<UUID, Location> CAME_FROM = new ConcurrentHashMap<>();
 
     private final String arenaName;
     private final Inventory inventory;
@@ -105,12 +109,18 @@ public final class WatchMenu implements InventoryHolder {
             lines.add(mm(line));
         meta.lore(lines);
         meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+        QueueMenu.markButton(meta); // one that somehow leaves the menu is taken away again
         item.setItemMeta(meta);
         return item;
     }
 
     private static Component mm(final String text) {
         return MiniMessage.miniMessage().deserialize(text).decorationIfAbsent(TextDecoration.ITALIC, TextDecoration.State.FALSE);
+    }
+
+    /** A spot to send a watcher back to: still there (its world loaded) and not in a copy. */
+    private static boolean usable(final Location at) {
+        return at != null && at.getWorld() != null && Bukkit.getWorld(at.getWorld().getUID()) != null && CrystalCopies.at(at.getWorld()) == null;
     }
 
     /** Where watchers stand: the arena's exit (its deck), in the real arena or in a copy. */
@@ -179,14 +189,16 @@ public final class WatchMenu implements InventoryHolder {
                     final CrystalCopy copy = e.getValue();
                     if (p == null || !p.getWorld().equals(copy.world())) {
                         WATCHING.remove(e.getKey()); // left by themselves
+                        CAME_FROM.remove(e.getKey());
                         continue;
                     }
                     final boolean over = copy.getFights().stream().noneMatch(f -> f.getState() == FightState.IN_FIGHT
                             || f.getState() == FightState.PRE_FIGHT_START || f.getState() == FightState.COUNTDOWN);
                     if (over && !SpawnArena.arenas.hasFighter(p)) {
                         WATCHING.remove(e.getKey());
-                        Threads.teleport(p, deck(copy.real(), null));
-                        p.sendMessage(mm("<gray>That match is over: back to the viewing arena."));
+                        final Location from = CAME_FROM.remove(e.getKey());
+                        Threads.teleport(p, usable(from) ? from : deck(copy.real(), null));
+                        p.sendMessage(mm(usable(from) ? "<gray>That match is over: back to where you were." : "<gray>That match is over: back to the viewing arena."));
                     }
                 }
             }, 20L, 20L);
@@ -203,20 +215,21 @@ public final class WatchMenu implements InventoryHolder {
             if (!(arena instanceof SavableArena real))
                 return;
             if (e.getSlot() == VIEWING_SLOT) {
-                player.closeInventory();
+                closeLater(player);
                 // Already there (in the real arena's world, by the arena): nothing to do
                 if (CrystalCopies.at(player.getWorld()) == null && real.distanceFrom(player.getLocation()) <= ALREADY_THERE_BLOCKS) {
                     player.sendMessage(mm("<gray>You're already at the viewing arena."));
                     return;
                 }
                 WATCHING.remove(player.getUniqueId());
+                CAME_FROM.remove(player.getUniqueId());
                 Threads.teleport(player, deck(real, null));
                 return;
             }
             final CrystalCopy copy = menu.matches.get(e.getSlot());
             if (copy == null)
                 return;
-            player.closeInventory();
+            closeLater(player);
             if (player.getWorld().equals(copy.world())) {
                 player.sendMessage(mm("<gray>You're already watching <white>match " + copy.index() + "<gray>."));
                 return;
@@ -226,8 +239,68 @@ public final class WatchMenu implements InventoryHolder {
                 return;
             }
             WATCHING.put(player.getUniqueId(), copy);
+            // From one match to another: still back to where they were before the first
+            if (CrystalCopies.at(player.getWorld()) == null)
+                CAME_FROM.put(player.getUniqueId(), player.getLocation());
             Threads.teleport(player, deck(real, copy));
             player.sendMessage(mm("<gray>Watching <white>match " + copy.index() + "<gray>. You'll be back in the viewing arena when it ends."));
+        }
+
+        /**
+         * Closes the menu a tick later: closing it inside the click event, before the server has undone the cancelled
+         * click on the player's screen, can leave the clicked button in their inventory.
+         */
+        private static void closeLater(final Player player) {
+            Threads.entityLater(player, () -> {
+                if (player.getOpenInventory().getTopInventory().getHolder() instanceof WatchMenu)
+                    player.closeInventory();
+                QueueMenu.purge(player);
+            }, 1L);
+        }
+
+        /**
+         * Nothing stops someone watching in a copy walking off its edge: falling into the void there (or taking void
+         * damage) sends them to that copy's deck instead. Not its fighters: falling out is part of their match.
+         */
+        @EventHandler(ignoreCancelled = true)
+        public void onFallOut(final org.bukkit.event.player.PlayerMoveEvent e) {
+            if (e.getTo().getY() >= e.getTo().getWorld().getMinHeight() - 8 || e.getFrom().getBlockY() == e.getTo().getBlockY())
+                return;
+            rescue(e.getPlayer());
+        }
+
+        @EventHandler(ignoreCancelled = true)
+        public void onVoid(final org.bukkit.event.entity.EntityDamageEvent e) {
+            if (e.getCause() == org.bukkit.event.entity.EntityDamageEvent.DamageCause.VOID && e.getEntity() instanceof Player p && rescue(p))
+                e.setCancelled(true);
+        }
+
+        private static boolean rescue(final Player player) {
+            final CrystalCopy copy = CrystalCopies.at(player.getWorld());
+            if (copy == null || SpawnArena.arenas.hasFighter(player))
+                return false;
+            final long now = System.currentTimeMillis();
+            final Long last = RESCUED.put(player.getUniqueId(), now);
+            if (last != null && now - last < 1_000)
+                return true; // on their way already
+            player.setFallDistance(0);
+            player.setVelocity(new org.bukkit.util.Vector());
+            Threads.teleport(player, deck(copy.real(), copy));
+            return true;
+        }
+
+        /** Again after every other plugin: nothing may take this menu's click back off cancelled. */
+        @EventHandler(priority = org.bukkit.event.EventPriority.HIGHEST)
+        public void onClickLast(final InventoryClickEvent e) {
+            if (e.getView().getTopInventory().getHolder() instanceof WatchMenu)
+                e.setCancelled(true);
+        }
+
+        /** Whatever happened while it was open, none of its buttons leave with them. */
+        @EventHandler
+        public void onClose(final org.bukkit.event.inventory.InventoryCloseEvent e) {
+            if (e.getInventory().getHolder() instanceof WatchMenu && e.getPlayer() instanceof Player p)
+                Threads.entityLater(p, () -> QueueMenu.purge(p), 1L);
         }
 
         @EventHandler
@@ -237,12 +310,15 @@ public final class WatchMenu implements InventoryHolder {
         }
     }
 
-    /** On shutdown: everyone watching in a copy goes back to the viewing arena (the copies' worlds stay, empty). */
+    /** On shutdown: everyone watching in a copy goes back to where they were, or the viewing arena (the copies' worlds stay, empty). */
     public static void sendEveryoneBack() {
         for (final CrystalCopy copy : CrystalCopies.all())
             for (final Player p : copy.world().getPlayers())
-                if (!SpawnArena.arenas.hasFighter(p))
-                    p.teleport(deck(copy.real(), null));
+                if (!SpawnArena.arenas.hasFighter(p)) {
+                    final Location from = CAME_FROM.get(p.getUniqueId());
+                    p.teleport(usable(from) ? from : deck(copy.real(), null));
+                }
         WATCHING.clear();
+        CAME_FROM.clear();
     }
 }
