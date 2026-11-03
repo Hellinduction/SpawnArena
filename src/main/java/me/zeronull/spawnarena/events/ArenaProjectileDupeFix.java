@@ -21,26 +21,47 @@ import java.util.UUID;
 /**
  * Fighters' inventories are snapshotted before a fight and restored after it, so any trident/arrow
  * thrown during the fight that survives the fight is a duplicate (loyalty tridents fly back to the
- * owner, stuck ones can be picked up). Every projectile a fighter launches is tracked and deleted
- * when their fight ends.
+ * owner, stuck ones can be picked up). Every projectile a fighter launches (pearls, potions, XP bottles,
+ * snowballs... too: nothing of their match lands after it) and every XP orb they made (a bottle, a kill)
+ * is tracked and deleted when their fight ends.
  */
 public final class ArenaProjectileDupeFix implements Listener {
     private static final Map<UUID, Set<Projectile>> TRACKED = new java.util.concurrent.ConcurrentHashMap<>();
+    /** Fighter -> the XP orbs their bottles or kills made during their fight */
+    private static final Map<UUID, Set<org.bukkit.entity.ExperienceOrb>> ORBS = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static void discardProjectiles(final Player fighter) {
         if (fighter == null)
             return;
 
+        final Set<org.bukkit.entity.Entity> gone = new java.util.HashSet<>();
         final Set<Projectile> projectiles = TRACKED.remove(fighter.getUniqueId());
-        if (projectiles == null)
-            return;
+        if (projectiles != null)
+            gone.addAll(projectiles);
+        final Set<org.bukkit.entity.ExperienceOrb> orbs = ORBS.remove(fighter.getUniqueId());
+        if (orbs != null)
+            gone.addAll(orbs);
 
         // Each on its own thread (on Folia it may have flown somewhere else)
-        for (final Projectile projectile : projectiles)
-            me.zeronull.spawnarena.Threads.entity(projectile, () -> {
-                if (projectile.isValid())
-                    projectile.remove();
+        for (final org.bukkit.entity.Entity entity : gone)
+            me.zeronull.spawnarena.Threads.entity(entity, () -> {
+                if (entity.isValid())
+                    entity.remove();
             });
+    }
+
+    /** An XP orb a fighter's bottle or kill made (Paper says whose): theirs to lose when their fight ends. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onOrb(final org.bukkit.event.entity.EntitySpawnEvent e) {
+        if (!(e.getEntity() instanceof org.bukkit.entity.ExperienceOrb orb) || !SpawnArena.arenas.hasActiveFight())
+            return;
+        for (final UUID id : new UUID[]{orb.getTriggerEntityId(), orb.getSourceEntityId()}) {
+            final Player player = id == null ? null : org.bukkit.Bukkit.getPlayer(id);
+            if (player != null && SpawnArena.arenas.hasFighter(player)) {
+                ORBS.computeIfAbsent(player.getUniqueId(), k -> java.util.concurrent.ConcurrentHashMap.newKeySet()).add(orb);
+                return;
+            }
+        }
     }
 
     private static boolean isTracked(final Projectile projectile) {
@@ -53,9 +74,7 @@ public final class ArenaProjectileDupeFix implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onProjectileLaunch(final ProjectileLaunchEvent e) {
-        if (!(e.getEntity() instanceof AbstractArrow projectile)) // arrows, spectral arrows and tridents
-            return;
-
+        final Projectile projectile = e.getEntity();
         final ProjectileSource source = projectile.getShooter();
         if (!(source instanceof Player shooter))
             return;
