@@ -504,8 +504,7 @@ public final class CrystalArenaListener implements Listener {
      * the arena tag is what counts while its fight is on).
      */
     private static boolean mayPickUp(final Player player, final org.bukkit.entity.Item item) {
-        final String arenaName = CrystalPvp.matchOf(item);
-        final Arena arena = arenaName == null ? null : SpawnArena.arenas.of(arenaName);
+        final Arena arena = CrystalPvp.matchArena(item);
         return arena != null && CrystalPvp.activeFight(arena) != null && CrystalPvp.isActiveFighter(arena, player);
     }
 

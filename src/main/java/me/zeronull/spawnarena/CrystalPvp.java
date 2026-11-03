@@ -444,12 +444,23 @@ public final class CrystalPvp {
         return item.getPersistentDataContainer().get(ITEM_KEY, org.bukkit.persistence.PersistentDataType.STRING);
     }
 
-    /** True if this is a match item from a fight that's still going (so it should stay). */
-    public static boolean isLiveMatchItem(final Entity entity) {
+    /**
+     * The arena whose fight dropped this match item, or null: in a MULTI arena's copy world that copy (it has the real
+     * arena's name, so looking the name up would give the real arena, which never has a fight of its own).
+     */
+    public static Arena matchArena(final Entity entity) {
         final String arenaName = matchOf(entity);
         if (arenaName == null || SpawnArena.arenas == null)
-            return false;
-        final Arena arena = SpawnArena.arenas.of(arenaName);
+            return null;
+        final CrystalCopy copy = CrystalCopies.at(entity.getWorld());
+        if (copy != null)
+            return copy.getArenaName().equalsIgnoreCase(arenaName) ? copy : null;
+        return SpawnArena.arenas.of(arenaName);
+    }
+
+    /** True if this is a match item from a fight that's still going (so it should stay). */
+    public static boolean isLiveMatchItem(final Entity entity) {
+        final Arena arena = matchArena(entity);
         final Track track = arena == null ? null : TRACKS.get(arena);
         return track != null && track.items.contains(entity.getUniqueId());
     }
