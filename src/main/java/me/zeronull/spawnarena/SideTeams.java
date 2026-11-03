@@ -32,6 +32,8 @@ final class SideTeams {
     private record Shown(Fight fight, NamedTextColor colour, String team, Component prefix, Component suffix) {}
 
     private static final Map<UUID, Shown> SHOWN = new ConcurrentHashMap<>();
+    /** A fighter's glowing projectile (pearl, arrow, trident) -> the fighter, while it's around: on a team of its own */
+    private static final Map<UUID, UUID> PROJECTILES = new ConcurrentHashMap<>();
 
     private SideTeams() {}
 
@@ -138,8 +140,52 @@ final class SideTeams {
         }
     }
 
+    private static String projectileTeam(final UUID projectile) {
+        return "sa_p" + projectile.toString().substring(0, 8);
+    }
+
+    /**
+     * A projectile this fighter just launched glows in the colour they're seen in (green/red to their match, the fight's
+     * colour to everyone else, on the viewing arena too: its fake there has the same UUID). False if they aren't shown.
+     */
+    static boolean showProjectile(final org.bukkit.entity.Entity projectile, final UUID fighter) {
+        final Shown shown = SHOWN.get(fighter);
+        if (shown == null || !ready())
+            return false;
+        final UUID id = projectile.getUniqueId();
+        if (PROJECTILES.putIfAbsent(id, fighter) != null)
+            return true;
+        for (final Player viewer : Bukkit.getOnlinePlayers())
+            try {
+                final Object team = newTeam.newInstance(newScoreboard.newInstance(), projectileTeam(id));
+                setColor.invoke(team, formatting.getField(colourFor(shown, fighter, viewer).toString().toUpperCase(java.util.Locale.ROOT)).get(null));
+                @SuppressWarnings("unchecked") final Collection<String> entries = (Collection<String>) getPlayers.invoke(team);
+                entries.add(id.toString());
+                send(viewer, addOrModify.invoke(null, team, true));
+            } catch (final ReflectiveOperationException | RuntimeException e) {
+                SpawnArena.INSTANCE.getLogger().warning("Couldn't colour a projectile for " + viewer.getName() + ": " + e);
+            }
+        return true;
+    }
+
+    /** That projectile's gone: its team too. */
+    static void hideProjectile(final UUID projectile) {
+        if (PROJECTILES.remove(projectile) == null || !ready())
+            return;
+        try {
+            final Object packet = removePacket.invoke(null, newTeam.newInstance(newScoreboard.newInstance(), projectileTeam(projectile)));
+            for (final Player viewer : Bukkit.getOnlinePlayers())
+                send(viewer, packet);
+        } catch (final ReflectiveOperationException | RuntimeException e) {
+            SpawnArena.INSTANCE.getLogger().warning("Couldn't take a projectile's colour off: " + e);
+        }
+    }
+
     /** Off their side team, back to their usual one (TAB's). Safe to call more than once. */
     static void hide(final Player fighter) {
+        for (final Map.Entry<UUID, UUID> e : new java.util.ArrayList<>(PROJECTILES.entrySet()))
+            if (e.getValue().equals(fighter.getUniqueId()))
+                hideProjectile(e.getKey());
         final Shown shown = SHOWN.remove(fighter.getUniqueId());
         if (shown == null || !ready())
             return;

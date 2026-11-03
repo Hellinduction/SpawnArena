@@ -23,16 +23,20 @@ final class CrystalViewEntities {
     private static Class<?> packetClass;
     private static Object zero;
 
-    /** A match entity shown on spawn: its own id there, and where it was last sent to. */
+    /**
+     * A match entity shown on spawn: its own id there, and where it was last sent to. Its UUID is the real one's (which
+     * a watcher's game never has: it's in another world), so a glowing projectile's team colours the fake too.
+     */
     private static final class Fake {
         final int id = Bukkit.getUnsafe().nextEntityId();
-        final UUID uuid = UUID.randomUUID();
+        final UUID uuid;
         final Entity real;
         double x, y, z;
         float yaw, pitch;
 
         Fake(final Entity real) {
             this.real = real;
+            this.uuid = real.getUniqueId();
         }
     }
 

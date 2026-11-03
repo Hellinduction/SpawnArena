@@ -174,6 +174,25 @@ public final class FightGlow implements Listener {
             }, delay);
     }
 
+    /** A glowing fighter's pearl, arrow or trident glows in their colour while it's around (with the green/red sides). */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onLaunch(final org.bukkit.event.entity.ProjectileLaunchEvent e) {
+        final org.bukkit.entity.Projectile projectile = e.getEntity();
+        if (!(projectile instanceof org.bukkit.entity.EnderPearl || projectile instanceof org.bukkit.entity.AbstractArrow)
+                || !(projectile.getShooter() instanceof Player shooter) || !GLOWING.containsKey(shooter.getUniqueId()))
+            return;
+        Threads.entityLater(projectile, () -> {
+            if (projectile.isValid() && SideTeams.showProjectile(projectile, shooter.getUniqueId()))
+                projectile.setGlowing(true);
+        }, 1L);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onProjectileGone(final org.bukkit.event.entity.EntityRemoveEvent e) {
+        if (e.getEntity() instanceof org.bukkit.entity.Projectile)
+            SideTeams.hideProjectile(e.getEntity().getUniqueId());
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(final PlayerQuitEvent e) {
         PacketTeams.forget(e.getPlayer());

@@ -48,6 +48,11 @@ public final class CrystalView implements Listener {
      */
     private static final Map<UUID, Long> CLICKING = new ConcurrentHashMap<>();
     private static final long CLICKING_MILLIS = 5_000;
+
+    /** A fighter's pearl landing in a copy: shown as a small bubble on the viewing arena until {@code until}. */
+    private record Landing(CrystalCopy copy, int x, int y, int z, long until) {}
+    private static final List<Landing> LANDINGS = new java.util.concurrent.CopyOnWriteArrayList<>();
+    private static final long LANDING_MILLIS = 1_500;
     /** How long a spot put back to the real block is sent again with the regular resend. */
     private static final long PUT_BACK_RESEND_MILLIS = 30_000;
 
@@ -192,12 +197,21 @@ public final class CrystalView implements Listener {
             final int radius = Math.max(0, SpawnArena.settings == null ? 3 : SpawnArena.settings.crystalViewBubbleRadius);
             final int below = Math.max(0, SpawnArena.settings == null ? 2 : SpawnArena.settings.crystalViewBubbleBelow);
             final int above = Math.max(0, SpawnArena.settings == null ? 2 : SpawnArena.settings.crystalViewBubbleAbove);
-            final double reach = (radius + 0.5) * (radius + 0.5);
             for (final Fighter fighter : fighters) {
                 final Location at = fighter.player.getLocation();
                 final int fx = at.getBlockX(), fy = at.getBlockY(), fz = at.getBlockZ();
-                for (int dx = -radius; dx <= radius; dx++)
-                    for (int dz = -radius; dz <= radius; dz++) {
+                // A little thinner while a fighter of another match is close, so the two don't swallow each other's
+                // surroundings (never under 2 around them: they're never seen standing on air)
+                int r = radius;
+                for (final Fighter other : fighters)
+                    if (other.copy != fighter.copy) {
+                        final double d = Math.hypot(other.player.getLocation().getX() - at.getX(), other.player.getLocation().getZ() - at.getZ());
+                        if (d < 2 * radius + 1)
+                            r = Math.min(r, Math.max(Math.min(2, radius), (int) Math.floor(d / 2)));
+                    }
+                final double reach = (r + 0.5) * (r + 0.5);
+                for (int dx = -r; dx <= r; dx++)
+                    for (int dz = -r; dz <= r; dz++) {
                         if (dx * dx + dz * dz > reach)
                             continue;
                         for (int y = fy - below; y <= fy + 1 + above; y++) {
@@ -212,6 +226,15 @@ public final class CrystalView implements Listener {
                         }
                     }
             }
+            // Where a fighter's pearl just landed: a small bubble of its copy for a moment (the ground it hit)
+            final long landingNow = System.currentTimeMillis();
+            LANDINGS.removeIf(l -> landingNow > l.until());
+            for (final Landing l : LANDINGS)
+                if (CrystalCopies.of(this.real).contains(l.copy()))
+                    for (int dx = -1; dx <= 1; dx++)
+                        for (int dy = -1; dy <= 1; dy++)
+                            for (int dz = -1; dz <= 1; dz++)
+                                bubbles.putIfAbsent(pack(l.x() + dx, l.y() + dy, l.z() + dz), l.copy());
             this.dirty.addAll(this.bubbles.keySet());
             this.dirty.addAll(bubbles.keySet());
             this.bubbles = bubbles;
@@ -571,6 +594,17 @@ public final class CrystalView implements Listener {
                 || player.hasPermission(me.zeronull.spawnarena.events.CrystalArenaListener.BUILD_BYPASS_PERMISSION))
             return;
         touchedReal(at, player.getName() + " " + by);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPearlLands(final org.bukkit.event.entity.ProjectileHitEvent e) {
+        if (!(e.getEntity() instanceof org.bukkit.entity.EnderPearl pearl) || !(pearl.getShooter() instanceof Player))
+            return;
+        final CrystalCopy copy = CrystalCopies.at(pearl.getWorld());
+        if (copy == null || copy.getFights().isEmpty())
+            return;
+        final Location at = pearl.getLocation();
+        LANDINGS.add(new Landing(copy, at.getBlockX(), at.getBlockY(), at.getBlockZ(), System.currentTimeMillis() + LANDING_MILLIS));
     }
 
     /** As {@link #touchedReal(Location)}, saying what did it (for the log line when it's put back). */
