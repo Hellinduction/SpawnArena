@@ -221,9 +221,11 @@ public final class WatchMenu implements InventoryHolder {
                     player.sendMessage(mm("<gray>You're already at the viewing arena."));
                     return;
                 }
+                // Watching a match: back to where they were before it, as when it ends
+                final Location from = CrystalCopies.at(player.getWorld()) != null ? CAME_FROM.get(player.getUniqueId()) : null;
                 WATCHING.remove(player.getUniqueId());
                 CAME_FROM.remove(player.getUniqueId());
-                Threads.teleport(player, deck(real, null));
+                Threads.teleport(player, usable(from) ? from : deck(real, null));
                 return;
             }
             final CrystalCopy copy = menu.matches.get(e.getSlot());
@@ -242,8 +244,24 @@ public final class WatchMenu implements InventoryHolder {
             // From one match to another: still back to where they were before the first
             if (CrystalCopies.at(player.getWorld()) == null)
                 CAME_FROM.put(player.getUniqueId(), player.getLocation());
-            Threads.teleport(player, deck(real, copy));
-            player.sendMessage(mm("<gray>Watching <white>match " + copy.index() + "<gray>. You'll be back in the viewing arena when it ends."));
+            Threads.teleport(player, sameSpot(real, copy, player.getLocation()));
+            player.sendMessage(mm("<gray>Watching <white>match " + copy.index() + "<gray>. You'll be back where you were when it ends."));
+        }
+
+        /**
+         * Where someone picking a match lands in its copy: the same spot they're standing on, if they're at the viewing
+         * arena (or watching another match) and not in its fighting space; otherwise its deck.
+         */
+        private static Location sameSpot(final SavableArena real, final CrystalCopy copy, final Location at) {
+            final boolean inCopy = CrystalCopies.at(at.getWorld()) != null;
+            final Location onSpawn = at.clone();
+            if (inCopy)
+                onSpawn.setWorld(real.spawnPoint1.getWorld());
+            final boolean byArena = (inCopy || at.getWorld().equals(real.spawnPoint1.getWorld()))
+                    && real.distanceFrom(onSpawn) <= ALREADY_THERE_BLOCKS;
+            if (!byArena || real.isInFightingSpace(onSpawn))
+                return deck(real, copy);
+            return copy.here(onSpawn);
         }
 
         /**

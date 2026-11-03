@@ -294,19 +294,22 @@ public final class CrystalView implements Listener {
             return out;
         }
 
-        /** Each copy with a match on shows the watchers (not anyone in spectator mode or vanished) to its fighters. */
+        /**
+         * Each copy with a match on shows the watchers (not anyone in spectator mode or vanished) to its fighters, and
+         * only to them: those watching that match up close in the copy see just its own fighters and watchers.
+         */
         private void showWatchers(final List<Fighter> fighters, final List<Player> viewers) {
-            final Set<CrystalCopy> live = new HashSet<>();
+            final Map<CrystalCopy, List<Player>> live = new HashMap<>();
             for (final Fighter fighter : fighters)
-                live.add(fighter.copy);
+                live.computeIfAbsent(fighter.copy, c -> new ArrayList<>()).add(fighter.player);
             final List<Player> watching = new ArrayList<>(viewers.size());
             for (final Player viewer : viewers)
                 if (viewer.getGameMode() != GameMode.SPECTATOR && !isVanished(viewer))
                     watching.add(viewer);
-            for (final CrystalCopy copy : live)
-                this.watchersShown.computeIfAbsent(copy, c -> new CrystalViewPlayers()).update(watching, copy.world().getPlayers());
+            live.forEach((copy, itsFighters) ->
+                    this.watchersShown.computeIfAbsent(copy, c -> new CrystalViewPlayers()).update(watching, itsFighters));
             this.watchersShown.entrySet().removeIf(e -> {
-                if (live.contains(e.getKey()))
+                if (live.containsKey(e.getKey()))
                     return false;
                 e.getValue().close();
                 return true;
