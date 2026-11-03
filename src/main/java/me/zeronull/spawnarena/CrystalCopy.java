@@ -23,6 +23,24 @@ public final class CrystalCopy extends Arena {
         this.sync();
     }
 
+    /** Saved on the copy's world while a match there hasn't been put back yet (see {@link CrystalCopies#setUp}). */
+    private static final org.bukkit.NamespacedKey IN_USE = new org.bukkit.NamespacedKey(SpawnArena.INSTANCE, "copy_in_use");
+
+    /** A match is starting here: until it's put back, a restart copies the arena in again (its blocks may be left). */
+    public void markInUse() {
+        this.world.getPersistentDataContainer().set(IN_USE, org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
+    }
+
+    /** Put back after its match. */
+    public void markClean() {
+        Threads.global(() -> this.world.getPersistentDataContainer().remove(IN_USE));
+    }
+
+    /** A match here was never put back (the server stopped or SpawnArena was reloaded during it, or it crashed). */
+    public static boolean leftInUse(final org.bukkit.World world) {
+        return world.getPersistentDataContainer().has(IN_USE, org.bukkit.persistence.PersistentDataType.BYTE);
+    }
+
     /** The real arena this is a copy of. */
     public SavableArena real() {
         return this.real;

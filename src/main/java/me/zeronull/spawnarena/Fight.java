@@ -492,6 +492,8 @@ public class Fight {
             this.fightState = FightState.PRE_FIGHT_START;
             this.arriving.addAll(this.getFighters());
         }
+        if (this.arena instanceof CrystalCopy copy)
+            copy.markInUse();
         Arena.ArenaUtils.kickOutLingeringPlayers(this.arena);
         // Crystal arenas: the snapshot started with the countdown and is almost always ready by now; if it isn't,
         // the fighters are only sent in once it is (and the fight is called off if it failed)
@@ -856,10 +858,14 @@ public class Fight {
         if ((this.getArena() instanceof SavableArena || this.getArena() instanceof CrystalCopy) && this.getArena().getArenaMode() == ArenaMode.SINGLE) {
             final java.util.concurrent.CompletableFuture<Void> reset = cleaned.thenCompose(ignored -> {
                 try {
-                    return this.getArena() instanceof CrystalCopy copy ? copy.resetArena() : ((SavableArena) this.getArena()).resetArena();
+                    return this.getArena() instanceof CrystalCopy copy ? copy.resetArena().thenRun(copy::markClean)
+                            : ((SavableArena) this.getArena()).resetArena();
                 } catch (final Exception e) {
-                    SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE,
-                            "Couldn't reset arena " + this.getArena(), e);
+                    if (this.getArena() instanceof CrystalCopy && !SpawnArena.INSTANCE.isEnabled())
+                        SpawnArena.INSTANCE.getLogger().info(this.getArena() + " is copied in again when SpawnArena next starts.");
+                    else
+                        SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.SEVERE,
+                                "Couldn't reset arena " + this.getArena(), e);
                     return java.util.concurrent.CompletableFuture.completedFuture(null);
                 }
             });

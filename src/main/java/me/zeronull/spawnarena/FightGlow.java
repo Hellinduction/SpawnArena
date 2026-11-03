@@ -157,6 +157,23 @@ public final class FightGlow implements Listener {
         SideTeams.showRunningTo(joined);
     }
 
+    /**
+     * Into another world (watching a MULTI crystal match in its copy, say): their game may drop the teams it was sent and
+     * TAB sends its own again, so running fights' colours are sent again too, after TAB's.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onChangeWorld(final org.bukkit.event.player.PlayerChangedWorldEvent e) {
+        final Player player = e.getPlayer();
+        for (final long delay : new long[]{5L, 40L})
+            Threads.entityLater(player, () -> {
+                if (!player.isOnline() || GLOWING.isEmpty())
+                    return;
+                if (!TabColours.usable())
+                    PacketTeams.showRunningTo(player);
+                SideTeams.showRunningTo(player);
+            }, delay);
+    }
+
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(final PlayerQuitEvent e) {
         PacketTeams.forget(e.getPlayer());

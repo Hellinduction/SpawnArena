@@ -155,6 +155,13 @@ public final class WatchMenu implements InventoryHolder {
                 player.sendMessage(ChatColor.RED + "You can't do that while fighting.");
                 return true;
             }
+            // As /joinarenaqueue: by the arena (in its world, within queueMaxDistance), or in one of its copies
+            final CrystalCopy in = CrystalCopies.at(player.getWorld());
+            final double range = SpawnArena.settings == null ? 64 : SpawnArena.settings.queueMaxDistance;
+            if ((in == null || !in.real().equals(real)) && range > 0 && real.distanceFrom(player.getLocation()) > range) {
+                player.sendMessage(ChatColor.RED + "You are too far from that arena!");
+                return true;
+            }
             player.openInventory(new WatchMenu(real).getInventory());
             return true;
         }

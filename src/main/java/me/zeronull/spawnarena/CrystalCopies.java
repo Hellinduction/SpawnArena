@@ -90,7 +90,7 @@ public final class CrystalCopies {
                 final CrystalCopy existing = copies.stream().filter(c -> c.index() == index).findFirst().orElseThrow();
                 existing.sync();
                 if (recopy && existing.getFights().isEmpty())
-                    work.add(copyArena(real, spawn, existing.world(), true));
+                    work.add(copyArena(real, spawn, existing.world(), true).thenRun(existing::markClean));
                 decorate(real, spawn, existing.world());
                 continue;
             }
@@ -108,8 +108,11 @@ public final class CrystalCopies {
             final CrystalCopy copy = new CrystalCopy(real, world, index);
             copies.add(copy);
             BY_WORLD.put(world.getUID(), copy);
-            if (recopy || isNew)
-                work.add(copyArena(real, spawn, world, !isNew));
+            final boolean leftOver = !isNew && CrystalCopy.leftInUse(world);
+            if (leftOver)
+                SpawnArena.INSTANCE.getLogger().info("A match in " + name + " was never put back: copying the arena in again.");
+            if (recopy || isNew || leftOver)
+                work.add(copyArena(real, spawn, world, !isNew).thenRun(copy::markClean));
             decorate(real, spawn, world);
         }
         copies.sort(Comparator.comparingInt(CrystalCopy::index));
