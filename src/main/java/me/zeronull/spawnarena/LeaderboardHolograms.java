@@ -12,6 +12,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 /** Only touch this class after checking FancyHolograms is enabled — it links against its API. */
 public final class LeaderboardHolograms {
+    /** How far away the boards show (FancyHolograms' own default is only 20 blocks). */
+    private static final int VISIBILITY_DISTANCE = 64;
     public static final String NAME_PREFIX = "spawnarena_lb_";
     private static final int UPDATE_INTERVAL_MS = 5_000;
 
@@ -81,6 +83,7 @@ public final class LeaderboardHolograms {
         data.setTextUpdateInterval(UPDATE_INTERVAL_MS);
         data.setTextShadow(true);
         data.setPersistent(true);
+        data.setVisibilityDistance(VISIBILITY_DISTANCE);
 
         final Hologram hologram = manager.create(data);
         manager.addHologram(hologram);
@@ -143,6 +146,7 @@ public final class LeaderboardHolograms {
         data.setTextUpdateInterval(REWARD_UPDATE_INTERVAL_MS);
         data.setTextShadow(true);
         data.setPersistent(true);
+        data.setVisibilityDistance(VISIBILITY_DISTANCE);
 
         final Hologram hologram = manager.create(data);
         manager.addHologram(hologram);
@@ -187,6 +191,7 @@ public final class LeaderboardHolograms {
         data.setTextUpdateInterval(UPDATE_INTERVAL_MS);
         data.setTextShadow(true);
         data.setPersistent(true);
+        data.setVisibilityDistance(VISIBILITY_DISTANCE);
 
         final Hologram hologram = manager.create(data);
         manager.addHologram(hologram);
@@ -401,6 +406,31 @@ public final class LeaderboardHolograms {
             me.zeronull.spawnarena.Threads.global(() -> boards.forEach(Hologram::refreshForViewers));
     }
 
+    /**
+     * Into another world (a MULTI crystal copy and back, say): a moment later, every hologram near them there is shown
+     * to them afresh. Their game drops what it was showing when they change world, and FancyHolograms could still
+     * count them as seeing a hologram, so never send it again: leaderboards right in front of them stayed invisible.
+     */
+    public static final class WorldChange implements org.bukkit.event.Listener {
+        @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.MONITOR)
+        public void onChangeWorld(final org.bukkit.event.player.PlayerChangedWorldEvent e) {
+            final org.bukkit.entity.Player player = e.getPlayer();
+            me.zeronull.spawnarena.Threads.entityLater(player, () -> {
+                if (!player.isOnline() || !org.bukkit.Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
+                    return;
+                final org.bukkit.World world = player.getWorld();
+                for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
+                    final Location at = h.getData().getLocation();
+                    if (at == null || !world.equals(at.getWorld()))
+                        continue;
+                    if (h.isViewer(player))
+                        h.forceHideHologram(player);
+                    h.forceUpdateShownStateFor(player);
+                }
+            }, 30L);
+        }
+    }
+
     /** The database field a board's stat reads (as the placeholders do). */
     private static String boardField(final String stat) {
         return switch (stat) {
@@ -412,7 +442,7 @@ public final class LeaderboardHolograms {
         };
     }
 
-    /** Redraws every leaderboard hologram now (and brings older ones up to the current refresh interval). */
+    /** Redraws every leaderboard hologram now (and brings older ones up to the current refresh interval and distance). */
     public static int refreshAll() {
         int count = 0;
         for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
@@ -421,6 +451,8 @@ public final class LeaderboardHolograms {
             final int interval = h.getData().getName().contains(REWARD_TAG) ? REWARD_UPDATE_INTERVAL_MS : UPDATE_INTERVAL_MS;
             if (h.getData() instanceof TextHologramData text && text.getTextUpdateInterval() != interval)
                 text.setTextUpdateInterval(interval);
+            if (h.getData().getVisibilityDistance() < VISIBILITY_DISTANCE)
+                h.getData().setVisibilityDistance(VISIBILITY_DISTANCE);
             h.refreshForViewers();
             count++;
         }

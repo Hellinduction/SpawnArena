@@ -124,8 +124,10 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new MatchSounds(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new FightGlow(), this);
 
-        if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
+        if (Bukkit.getPluginManager().isPluginEnabled("FancyHolograms")) {
             LeaderboardHolograms.startReadyEffects();
+            Bukkit.getServer().getPluginManager().registerEvents(new LeaderboardHolograms.WorldChange(), this);
+        }
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaSpectatorGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaBoundaryGuard(), this);
