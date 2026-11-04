@@ -273,6 +273,18 @@ public class StatsManager {
                     "source VARCHAR(8) NOT NULL DEFAULT 'live')");
             if (!hasIndex(c, "arena_match_log", "arena_match_log_arena")) // MySQL has no CREATE INDEX IF NOT EXISTS
                 s.execute("CREATE INDEX arena_match_log_arena ON arena_match_log (server_id, arena, ended_at)");
+            // What's looked up by arena (leaderboards, totals) or by player (payout history, bonuses, owed items, the
+            // audit log): small tables here, but a big server's (or a MySQL database shared by a network's) grow large
+            if (!hasIndex(c, "arena_stats", "arena_stats_arena"))
+                s.execute("CREATE INDEX arena_stats_arena ON arena_stats (server_id, arena)");
+            if (!hasIndex(c, "arena_payouts", "arena_payouts_player"))
+                s.execute("CREATE INDEX arena_payouts_player ON arena_payouts (server_id, uuid, paid_at)");
+            if (!hasIndex(c, "arena_bet_bonuses", "arena_bet_bonuses_player"))
+                s.execute("CREATE INDEX arena_bet_bonuses_player ON arena_bet_bonuses (server_id, uuid)");
+            if (!hasIndex(c, "owed_items", "owed_items_player"))
+                s.execute("CREATE INDEX owed_items_player ON owed_items (server_id, uuid)");
+            if (!hasIndex(c, "stat_audit", "stat_audit_actor"))
+                s.execute("CREATE INDEX stat_audit_actor ON stat_audit (server_id, actor, changed_at)");
             s.execute("CREATE TABLE IF NOT EXISTS player_ips (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "ip_hash VARCHAR(64) NOT NULL, " +
