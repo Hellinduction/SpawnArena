@@ -158,7 +158,7 @@ public final class FfaFight extends Fight {
         synchronized (arena) {
             final String problem = cantJoin(player, arena);
             if (problem != null) {
-                player.sendMessage(ChatColor.RED + problem);
+                player.sendMessage(leaveLinked(problem));
                 return;
             }
             FfaFight existing = sessionOf(arena);
@@ -306,7 +306,8 @@ public final class FfaFight extends Fight {
         player.sendMessage(MiniMessage.miniMessage().deserialize(
                 "<green>You're in the <white><arena></white> free-for-all! Everyone here is your opponent.</green> "
                         + "<gray>Your things are kept: you get them back as they were when you die or leave. Leave with "
-                        + "<yellow>/leavearena</yellow> once you're out of combat.",
+                        + "<click:run_command:'/leavearena'><hover:show_text:'<gray>Click to leave the free-for-all'><yellow><u>/leavearena</u></yellow></hover></click>"
+                        + " once you're out of combat.",
                 Placeholder.unparsed("arena", arenaName)));
         this.tellInside(MiniMessage.miniMessage().deserialize("<gray><name> joined the free-for-all <dark_gray>(<count>)",
                 Placeholder.component("name", player.displayName()),
@@ -324,14 +325,24 @@ public final class FfaFight extends Fight {
         this.endIfEmpty();
     }
 
+    /** {@code text} in red, with any "/leavearena" in it clickable (it runs it). */
+    public static Component leaveLinked(final String text) {
+        return Component.text(text, net.kyori.adventure.text.format.NamedTextColor.RED).replaceText(b -> b.matchLiteral("/leavearena")
+                .replacement(Component.text("/leavearena", net.kyori.adventure.text.format.NamedTextColor.YELLOW)
+                        .decorate(net.kyori.adventure.text.format.TextDecoration.UNDERLINED)
+                        .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/leavearena"))
+                        .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(
+                                Component.text("Click to leave the free-for-all", net.kyori.adventure.text.format.NamedTextColor.GRAY)))));
+    }
+
     /** The spawn point furthest from everyone already fighting (either one when nobody is). */
     private Location pickSpawn() {
         return this.pickSpawn(null);
     }
 
     /**
-     * As {@link #pickSpawn()}, not counting {@code except} (the one being placed) among those fighting. A spawn point
-     * someone's fighting near (within {@link #TAKEN_WITHIN}), or with blocks in the way, a hole under it, lava or an end
+     * As {@link #pickSpawn()}, not counting {@code except} (the one being placed) among those fighting. In a crystal
+     * arena, a spawn point someone's fighting near (within {@link #TAKEN_WITHIN}), or with blocks in the way, a hole under it, lava or an end
      * crystal by it, is taken: when both are, the safe spot in the arena furthest from everyone is used instead.
      */
     private Location pickSpawn(final Player except) {
@@ -340,6 +351,12 @@ public final class FfaFight extends Fight {
             return a != null ? a : b;
         final List<Player> fighting = new ArrayList<>(this.getFighters());
         fighting.remove(except);
+        // Small arenas (sumo) have their spawns close together: only crystal arenas look further
+        if (!this.arena.isCrystalPvp()) {
+            if (fighting.isEmpty())
+                return java.util.concurrent.ThreadLocalRandom.current().nextBoolean() ? a : b;
+            return nearestFighter(a, fighting) >= nearestFighter(b, fighting) ? a : b;
+        }
         final List<Location> free = new ArrayList<>();
         for (final Location spot : List.of(a, b))
             if (isSafeSpot(spot) && nearestFighter(spot, fighting) > TAKEN_WITHIN * TAKEN_WITHIN)
@@ -378,7 +395,7 @@ public final class FfaFight extends Fight {
 
     private void findBackupSpots() {
         final Location a = this.arena.spawnPoint1, b = this.arena.spawnPoint2;
-        if (a == null || b == null || a.getWorld() == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
+        if (!this.arena.isCrystalPvp() || a == null || b == null || a.getWorld() == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
             return;
         final com.sk89q.worldguard.protection.managers.RegionManager manager =
                 Arena.ArenaUtils.REGION_CONTAINER.get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(a.getWorld()));

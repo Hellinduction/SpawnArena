@@ -44,7 +44,7 @@ public class ArenaCommandEvent implements Listener {
                     || label.equals("joinarenaqueue") || label.equals("spawnarena:joinarenaqueue"))
                 return;
             event.setCancelled(true);
-            player.sendMessage(ChatColor.RED + "You can't use commands in a free-for-all. Leave with /leavearena (out of combat).");
+            player.sendMessage(me.zeronull.spawnarena.FfaFight.leaveLinked("You can't use commands in a free-for-all. Leave with /leavearena (out of combat)."));
             return;
         }
 
