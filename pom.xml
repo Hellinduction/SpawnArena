@@ -147,7 +147,8 @@
         <dependency>
             <groupId>de.oliver</groupId>
             <artifactId>FancyNpcs</artifactId>
-            <version>2.12.1</version>
+            <!-- The newest one published (servers run newer ones fine: the parts used are the same) -->
+            <version>2.11.0</version>
             <scope>provided</scope>
             <optional>true</optional>
         </dependency>

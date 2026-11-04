@@ -14,15 +14,16 @@ import java.util.List;
 
 public abstract class Arena extends ArenaOptions {
     /** The spawn worlds' names in lower case, loaded from settings.yml on enable. */
-    private static volatile java.util.Set<String> SPAWN_WORLDS = java.util.Set.of("spawn");
+    /** Lower case; empty = every world */
+    private static volatile java.util.Set<String> SPAWN_WORLDS = java.util.Set.of();
 
     public static void setSpawnWorlds(final java.util.List<String> names) {
         SPAWN_WORLDS = names.stream().map(n -> n.toLowerCase(java.util.Locale.ROOT)).collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
-    /** One of the spawn worlds (settings.yml spawnWorlds): where arenas are made, queued for and duelled in. */
+    /** One of the spawn worlds (settings.yml spawnWorlds; none listed = any world): where arenas are made, queued for and duelled in. */
     public static boolean isSpawnWorld(final org.bukkit.World world) {
-        return world != null && SPAWN_WORLDS.contains(world.getName().toLowerCase(java.util.Locale.ROOT));
+        return world != null && (SPAWN_WORLDS.isEmpty() || SPAWN_WORLDS.contains(world.getName().toLowerCase(java.util.Locale.ROOT)));
     }
 
     /** A spawn world, or one of the worlds a MULTI crystal arena's matches are fought in. */

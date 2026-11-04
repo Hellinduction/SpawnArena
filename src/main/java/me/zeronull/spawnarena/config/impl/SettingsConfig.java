@@ -10,8 +10,8 @@ public final class SettingsConfig {
     public static final YamlConfigurationProperties PROPERTIES = YamlConfigurationProperties.newBuilder().build();
 
     @Comment({"Worlds that count as spawn: players must be in one to create arenas, toggle arena modes, join queues and duel.",
-            "Arenas can be in any of them."})
-    public java.util.List<String> spawnWorlds = new java.util.ArrayList<>(java.util.List.of("Spawn"));
+            "Arenas can be in any of them. Empty = every world counts (e.g. spawnWorlds: [\"world\"] to keep it to one)."})
+    public java.util.List<String> spawnWorlds = new java.util.ArrayList<>();
 
     @Comment({"How far (in blocks) a queued player can walk from their arena's WorldGuard region before",
             "being removed from the queue. Also cancels a fight that's still counting down. 0 disables it."})

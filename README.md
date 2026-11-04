@@ -1,6 +1,6 @@
 # SpawnArena
 
-An arena plugin at the spawn, made for the AquaMC Minecraft server. Built for LeafMC/Paper 1.21.11, and runs on Folia (see below for what differs there).
+An arena plugin at the spawn, made for the AquaMC Minecraft server, but not tied to it: any server can build it and use it. Built for LeafMC/Paper 1.21.11, and runs on Folia (see below for what differs there).
 
 # How to build the jar
 
@@ -19,7 +19,28 @@ Don't add `shade:shade` to the command: shading already runs during `package`, a
 
 - Java 21+, Paper/LeafMC 1.21.11 (or Folia 1.21.11)
 - WorldGuard, plus WorldEdit **or** FastAsyncWorldEdit (detected automatically)
-- Optional: Vault + an economy plugin (win rewards and `/arenabet`), PlaceholderAPI (stats placeholders), FancyHolograms (leaderboard and reward holograms), TAB (fight outlines keep their colour with TAB's nametags), Simple Voice Chat (separate fights in one arena can't hear each other)
+- Optional, each used only if it's there:
+  - Vault + an economy plugin: win rewards and `/arenabet`
+  - PlaceholderAPI: stats placeholders (`%spawnarena_...%`)
+  - FancyHolograms: leaderboard, reward and stats holograms (`/arenaleaderboard`)
+  - FancyNpcs: NPCs standing in a MULTI crystal arena are copied into its copies
+  - TAB: fight outlines keep their colour with TAB's nametags
+  - LuckPerms: the top-Elo suffix (`topEloSuffix`)
+  - Simple Voice Chat: separate fights in one arena can't hear each other; spectators of MULTI crystal matches hear the fighters
+  - Vulcan or bunnyAC: Ice Rink and Moon Gravity players aren't flagged for sliding or jumping
+  - SKFriends: friends are kept together in 2v2 teams
+  - A combat logger: MULTI crystal copy worlds can be added to its list of worlds it leaves alone (`combatLoggerWorlds...` in `settings.yml`; off unless that file and list exist)
+
+# Getting started
+
+1. Put the jar in `plugins/` with WorldGuard and WorldEdit (or FAWE), start the server, and look through `plugins/SpawnArena/settings.yml`. Every option is explained in it.
+2. `spawnWorlds` in `settings.yml`: the worlds players must be in to queue, duel and set up arenas. Empty (the default) means every world.
+3. Build the arena, stand in it and run `/arenasetup`: the wizard asks for the type (normal, sumo, crystal PvP...), the spawn points, the region and the options, and saves a copy of the build to paste back after fights.
+4. `/setarenaexit <arena>` where people should be sent if they're in the arena during a fight.
+5. Players join with `/joinarenaqueue <arena>` (an NPC can run it for them). `/togglearenamode <arena>` switches between one fight at a time (SINGLE) and several at once (MULTI; for crystal PvP each match is fought in its own copy of the arena, on Paper/Leaf only), and `/togglearenamode <arena> ffa` makes it a free-for-all.
+6. Leaderboards: `/arenaleaderboard spawn <arena> <stat>` where you're standing.
+
+Stats are kept in an H2 file in the plugin folder by default; `database.yml` switches to MySQL/MariaDB (several servers can share one database).
 
 # Velocity bridge
 
