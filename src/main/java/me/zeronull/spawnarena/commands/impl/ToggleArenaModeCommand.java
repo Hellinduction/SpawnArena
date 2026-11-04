@@ -112,6 +112,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
                 arena.save(config -> config.ffa = false);
             }
             sender.sendMessage(ChatColor.YELLOW + "Free-for-all is off for " + arena.getArenaName() + " (it can't be MULTI as well).");
+            redrawHolograms();
         }
 
         if (arena.isCrystalPvp()) {
@@ -198,6 +199,18 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
                     + "no wins, rewards or bets there.");
         } else {
             player.sendMessage(ChatColor.YELLOW + "Free-for-all is off for " + arena.getArenaName() + ": it's back to normal queued matches.");
+        }
+        redrawHolograms();
+    }
+
+    /** Stats holograms show different lines for a free-for-all: every SpawnArena hologram is redrawn with the current layout. */
+    private static void redrawHolograms() {
+        if (!org.bukkit.Bukkit.getPluginManager().isPluginEnabled("FancyHolograms"))
+            return;
+        try {
+            me.zeronull.spawnarena.LeaderboardHolograms.updateAll();
+        } catch (final LinkageError | RuntimeException e) {
+            SpawnArena.INSTANCE.getLogger().warning("Couldn't redraw the leaderboard holograms: " + e);
         }
     }
 
