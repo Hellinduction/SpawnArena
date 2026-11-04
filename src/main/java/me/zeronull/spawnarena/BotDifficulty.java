@@ -10,12 +10,12 @@ import org.bukkit.Material;
  * it is near the edge.
  */
 public enum BotDifficulty {
-    //   label      colour          icon                    reach turn noise react swing  miss  wtap  strafe jumpRst edge kbTaken combo  sprintJump sneak aimAt
-    EASY("Easy", "<green>", Material.LIME_DYE, 2.6, 8, 7, 8, 10, 15, 0.35, 0.0, 0.0, 0.0, 0.45, 1.0, false, 0.0, 0.0, 0.9),
-    MEDIUM("Medium", "<yellow>", Material.YELLOW_DYE, 2.75, 12, 5, 7, 8, 12, 0.25, 0.3, 0.3, 0.15, 0.6, 1.0, false, 0.05, 0.15, 1.15),
-    HARD("Hard", "<red>", Material.RED_DYE, 3.0, 32, 1.5, 4, 5, 7, 0.15, 0.95, 0.75, 0.35, 1.0, 1.0, false, 0.35, 0.7, 1.4),
-    CHEATER("Superior Gaming Chair", "<dark_purple>", Material.PURPLE_DYE, 3.4, 48, 0.8, 2, 5, 6, 0.06, 1.0, 0.9, 0.55, 1.0, 0.85, false, 0.45, 0.85, 1.55),
-    COMBO("Combo", "<gold>", Material.BLAZE_POWDER, 2.75, 12, 5, 7, 6, 9, 0.25, 0.3, 0.3, 0.15, 0.6, 1.0, true, 0.05, 0.15, 1.15);
+    //   label      colour          icon                    reach turn noise react swing  miss  wtap  strafe jumpRst edge kbTaken combo  sprintJump sneak aimAt sTap
+    EASY("Easy", "<green>", Material.LIME_DYE, 2.6, 8, 7, 8, 10, 15, 0.35, 0.0, 0.0, 0.0, 0.45, 1.0, false, 0.0, 0.0, 0.9, 0.0),
+    MEDIUM("Medium", "<yellow>", Material.YELLOW_DYE, 2.85, 14, 4.5, 6, 8, 11, 0.2, 0.4, 0.35, 0.2, 0.65, 1.0, false, 0.08, 0.2, 1.2, 0.0),
+    HARD("Hard", "<red>", Material.RED_DYE, 3.0, 36, 1.3, 3, 5, 7, 0.12, 0.95, 0.75, 0.45, 1.0, 1.0, false, 0.35, 0.7, 1.4, 0.4),
+    CHEATER("Superior Gaming Chair", "<dark_purple>", Material.PURPLE_DYE, 3.4, 48, 0.8, 2, 5, 6, 0.06, 1.0, 0.9, 0.55, 1.0, 0.85, false, 0.45, 0.85, 1.55, 0.5),
+    COMBO("Combo", "<gold>", Material.BLAZE_POWDER, 2.75, 12, 5, 7, 3, 4, 0.25, 0.3, 0.3, 0.15, 0.6, 1.0, true, 0.05, 0.15, 1.15, 0.0);
 
     public final String label, colour;
     public final Material icon;
@@ -43,12 +43,14 @@ public enum BotDifficulty {
     public final double aimHeight;
     /** When it's losing, it may start rage cheating (bhopping, more reach): the Superior Gaming Chair. */
     public final boolean rageCheats;
+    /** Chance that, after a hit, it taps backwards (an S-tap) rather than just letting go of forward (a W-tap). */
+    public final double sTapChance;
 
     BotDifficulty(final String label, final String colour, final Material icon, final double reach, final double turnSpeed,
                   final double aimNoise, final int reactionTicks, final int minSwingTicks, final int maxSwingTicks,
                   final double missChance, final double wTapChance, final double strafe, final double jumpResetChance,
                   final double edgeCaution, final double knockbackTaken, final boolean combo, final double sprintJumpChance,
-                  final double sneakChance, final double aimHeight) {
+                  final double sneakChance, final double aimHeight, final double sTapChance) {
         this.label = label;
         this.colour = colour;
         this.icon = icon;
@@ -68,6 +70,7 @@ public enum BotDifficulty {
         this.sprintJumpChance = sprintJumpChance;
         this.sneakChance = sneakChance;
         this.aimHeight = aimHeight;
+        this.sTapChance = sTapChance;
         this.rageCheats = "CHEATER".equals(this.name());
     }
 

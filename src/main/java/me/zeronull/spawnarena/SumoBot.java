@@ -39,6 +39,8 @@ public final class SumoBot {
     private static final double EYE = 1.62;
     /** Chance a losing Superior Gaming Chair bot starts rage cheating, and how far it reaches then. */
     private static final double RAGE_CHANCE = 0.5, RAGE_REACH = 4.0;
+    /** A speed hack's bhop speed (blocks a tick): a sprint-jump peaks at about 0.36. */
+    private static final double BHOP_SPEED = 0.5;
 
     private final BotFight fight;
     private final Player target;
@@ -66,6 +68,11 @@ public final class SumoBot {
     /** Hits it took and landed this match: a Superior Gaming Chair bot that's losing may start rage cheating. */
     private volatile int hitsTaken, hitsLanded;
     private volatile boolean rageRolled, rage;
+    /** Rage bhop: its speed in the air (a speed hack's, set every tick); after a hit it's knocked about for a moment first. */
+    private double bhopSpeed;
+    private volatile long knockedUntil;
+    /** Moving backwards until this tick (an S-tap after a hit). */
+    private long sTapUntil;
     /** Where its opponent was, the last few ticks: it acts on where they were reactionTicks ago. */
     private final Deque<Vector> seen = new ArrayDeque<>();
 
@@ -195,9 +202,11 @@ public final class SumoBot {
         final double jolt = 4 + this.level.aimNoise * 3;
         this.noiseYaw += random.nextGaussian() * jolt;
         this.noisePitch += random.nextGaussian() * jolt * 0.5;
-        this.nextSwingAt = Math.max(this.nextSwingAt, this.tick + this.level.reactionTicks + random.nextInt(3));
+        if (!this.level.combo) // with no hit delay, it's all about clicking straight back
+            this.nextSwingAt = Math.max(this.nextSwingAt, this.tick + this.level.reactionTicks + random.nextInt(3));
         this.hitNext = true;
         this.hitsTaken++;
+        this.knockedUntil = this.tick + 6;
         if (this.level.rageCheats && !this.rageRolled && this.hitsTaken >= 3
                 && (this.hitsTaken - this.hitsLanded >= 4 || this.nearEdge(b.getLocation()))) {
             this.rageRolled = true;
@@ -310,6 +319,8 @@ public final class SumoBot {
         // Like a player: keeps pushing in, sprinting (each hit's knockback makes the gap), backing off only when right
         // on top of them; strafing when close
         double ahead = distance < 1.3 ? -0.6 : 1;
+        if (this.tick < this.sTapUntil)
+            ahead = -1; // S-tap: a quick step back
         double across = 0;
         if (this.level.strafe > 0 && distance < 5) {
             if (this.tick >= this.strafeUntil) {
@@ -359,23 +370,48 @@ public final class SumoBot {
             this.sprinting = true;
         final boolean sprint = this.sprinting && ahead > 0.5 && !sneak;
         final boolean ground = b.isOnGround();
-        final double accel = (ground ? (sprint ? SPRINT : WALK) : (sprint ? AIR_SPRINT : AIR_WALK)) * (sneak ? 0.3 : 1)
-                * (this.rage && !ground ? 2.2 : 1); // rage: speed in the air, as bhop cheats give
+        if (this.rage && !sneak && this.tick >= this.knockedUntil) {
+            this.bhop(b, input, ground, random);
+            return;
+        }
+        this.bhopSpeed = 0;
+        final double accel = (ground ? (sprint ? SPRINT : WALK) : (sprint ? AIR_SPRINT : AIR_WALK)) * (sneak ? 0.3 : 1);
         final Vector velocity = b.getVelocity().add(input.multiply(accel));
 
         // Jumping: a jump-reset just after it's hit, or a sprint-jump in to close the gap
         final boolean jumpReset = this.jumpResetNext;
         this.jumpResetNext = false;
-        final boolean wantJump = !sneak && (jumpReset || (this.rage && sprint)
+        final boolean wantJump = !sneak && (jumpReset
                 || (sprint && distance > 3 && distance < 6 && random.nextDouble() < this.level.sprintJumpChance * 0.15));
-        if (wantJump && ground && (this.rage || this.tick >= this.jumpCooldownUntil)) {
+        if (wantJump && ground && this.tick >= this.jumpCooldownUntil) {
             velocity.setY(JUMP);
             if (sprint || jumpReset)
-                velocity.add(facing(this.yaw).multiply(SPRINT_JUMP_BOOST * (this.rage ? 1.6 : 1)));
+                velocity.add(facing(this.yaw).multiply(SPRINT_JUMP_BOOST));
             this.jumpCooldownUntil = this.tick + 10;
             this.jumpedIn = !jumpReset && this.level.sprintJumpChance >= 0.3; // Hard and up crouch on landing
         }
         b.setVelocity(velocity);
+    }
+
+    /**
+     * Rage cheating, the way a hacked client's speed bhop moves: a hop the moment it lands (now and then a low one),
+     * its speed set well above a sprint-jump's on each hop and only bleeding off slowly in the air (no air friction),
+     * and it steers instantly in the air (strafe), straight at its opponent or away from the edge.
+     */
+    private void bhop(final Mannequin b, final Vector input, final boolean ground, final ThreadLocalRandom random) {
+        final Vector dir = input.clone().setY(0);
+        if (dir.lengthSquared() < 1.0E-4)
+            dir.copy(facing(this.yaw));
+        dir.normalize();
+        double y = b.getVelocity().getY();
+        if (ground) {
+            y = random.nextDouble() < 0.3 ? 0.31 : JUMP;
+            this.bhopSpeed = Math.max(this.bhopSpeed * 1.08, BHOP_SPEED) * (0.96 + random.nextDouble() * 0.08);
+            this.bhopSpeed = Math.min(this.bhopSpeed, BHOP_SPEED * 1.25);
+        } else {
+            this.bhopSpeed *= 0.985;
+        }
+        b.setVelocity(dir.multiply(this.bhopSpeed).setY(y));
     }
 
     /** No floor within a couple of blocks in some direction. */
@@ -448,7 +484,10 @@ public final class SumoBot {
             // A sprint hit slows the hitter and ends their sprint; w-tapping gets it back sooner
             b.setVelocity(b.getVelocity().multiply(new Vector(0.6, 1, 0.6)));
             this.sprinting = false;
-            this.sprintAgainAt = this.tick + (random.nextDouble() < this.level.wTapChance ? 2 + random.nextInt(3) : 15 + random.nextInt(20));
+            final boolean tap = random.nextDouble() < this.level.wTapChance;
+            this.sprintAgainAt = this.tick + (tap ? 2 + random.nextInt(3) : 15 + random.nextInt(20));
+            if (tap && random.nextDouble() < this.level.sTapChance)
+                this.sTapUntil = this.tick + 2 + random.nextInt(3);
         }
     }
 

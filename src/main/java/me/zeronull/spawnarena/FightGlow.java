@@ -198,6 +198,19 @@ public final class FightGlow implements Listener {
         PacketTeams.forget(e.getPlayer());
     }
 
+    /**
+     * A sumo bot's outline, as its opponent sees it: red (the other side) when sides are shown, otherwise the fight's
+     * colour; null when fights don't glow.
+     */
+    public static NamedTextColor botOutline(final Fight fight) {
+        if (!enabled())
+            return null;
+        if (sides())
+            return NamedTextColor.RED;
+        final java.util.List<Integer> colours = COLOUR_OF.get(fight);
+        return colours == null || colours.isEmpty() ? NamedTextColor.RED : COLOURS[colours.get(0)];
+    }
+
     // ── colouring ───────────────────────────────────────────────────────────
 
     private static boolean sides() {
