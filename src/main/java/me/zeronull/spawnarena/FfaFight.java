@@ -193,6 +193,7 @@ public final class FfaFight extends Fight {
         this.nextReset = System.currentTimeMillis() + resetMillis();
         this.pickVariant();
         this.ticker = Threads.globalTimer(task -> this.tick(), 20L, 20L);
+        this.arenaReady.whenComplete((ready, error) -> this.findBackupSpots());
     }
 
     /** On the player's thread. */
@@ -328,16 +329,129 @@ public final class FfaFight extends Fight {
         return this.pickSpawn(null);
     }
 
-    /** As {@link #pickSpawn()}, not counting {@code except} (the one being placed) among those fighting. */
+    /**
+     * As {@link #pickSpawn()}, not counting {@code except} (the one being placed) among those fighting. A spawn point
+     * someone's fighting near (within {@link #TAKEN_WITHIN}), or with blocks in the way, a hole under it, lava or an end
+     * crystal by it, is taken: when both are, the safe spot in the arena furthest from everyone is used instead.
+     */
     private Location pickSpawn(final Player except) {
         final Location a = this.arena.spawnPoint1, b = this.arena.spawnPoint2;
         if (a == null || b == null)
             return a != null ? a : b;
         final List<Player> fighting = new ArrayList<>(this.getFighters());
         fighting.remove(except);
-        if (fighting.isEmpty())
+        final List<Location> free = new ArrayList<>();
+        for (final Location spot : List.of(a, b))
+            if (isSafeSpot(spot) && nearestFighter(spot, fighting) > TAKEN_WITHIN * TAKEN_WITHIN)
+                free.add(spot);
+        if (free.size() == 2 && fighting.isEmpty())
             return java.util.concurrent.ThreadLocalRandom.current().nextBoolean() ? a : b;
-        return nearestFighter(a, fighting) >= nearestFighter(b, fighting) ? a : b;
+        if (!free.isEmpty())
+            return free.size() == 1 || nearestFighter(a, fighting) >= nearestFighter(b, fighting) ? free.get(0) : free.get(1);
+
+        // Both taken: the safe spot furthest from everyone, if it's further than the spawn points are
+        Location best = null;
+        double bestDistance = -1;
+        for (final Location spot : this.backupSpots) {
+            final double distance = nearestFighter(spot, fighting);
+            if (distance > bestDistance && isSafeSpot(spot)) {
+                best = spot;
+                bestDistance = distance;
+            }
+        }
+        final Location fallback = nearestFighter(a, fighting) >= nearestFighter(b, fighting) ? a : b;
+        final boolean fallbackSafe = isSafeSpot(fallback);
+        if (best != null && (!fallbackSafe || bestDistance > nearestFighter(fallback, fighting)))
+            return best.clone();
+        return fallback;
+    }
+
+    /** A spawn point counts as taken while someone is fighting this close to it (blocks). */
+    private static final double TAKEN_WITHIN = 8;
+
+    /**
+     * Safe spots across the arena to spawn in when both spawn points are taken: solid ground with room to stand, near the
+     * spawn points' height (not on walls or pillars), away from the region's edge. Worked out when the session starts and
+     * after every reset, on the arena's own thread, and each checked again just before it's used.
+     */
+    private volatile List<Location> backupSpots = List.of();
+
+    private void findBackupSpots() {
+        final Location a = this.arena.spawnPoint1, b = this.arena.spawnPoint2;
+        if (a == null || b == null || a.getWorld() == null || !Arena.ArenaUtils.WORLD_EDIT_SUPPORT)
+            return;
+        final com.sk89q.worldguard.protection.managers.RegionManager manager =
+                Arena.ArenaUtils.REGION_CONTAINER.get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(a.getWorld()));
+        final com.sk89q.worldguard.protection.regions.ProtectedRegion region = manager == null ? null : manager.getRegion(this.arena.getArenaName());
+        if (region == null)
+            return;
+        final org.bukkit.World world = a.getWorld();
+        final com.sk89q.worldedit.math.BlockVector3 min = region.getMinimumPoint(), max = region.getMaximumPoint();
+        // Near the spawn points' height, inside the region (its edge is checked at that height too)
+        final int level = Math.min(a.getBlockY(), b.getBlockY());
+        final int low = Math.max(min.y() + 1, level - 3), high = Math.min(max.y() - 2, Math.max(a.getBlockY(), b.getBlockY()) + 3);
+        final Location centre = new Location(world, (min.x() + max.x()) / 2.0, a.getY(), (min.z() + max.z()) / 2.0);
+        Threads.supplyAt(centre, () -> {
+            final List<Location> spots = new ArrayList<>();
+            for (int x = min.x() + 2; x <= max.x() - 2; x += 2)
+                for (int z = min.z() + 2; z <= max.z() - 2; z += 2) {
+                    // Away from the edge: the region goes on 2 blocks every way
+                    if (!region.contains(x - 2, level, z) || !region.contains(x + 2, level, z)
+                            || !region.contains(x, level, z - 2) || !region.contains(x, level, z + 2))
+                        continue;
+                    if (Threads.FOLIA && !Bukkit.isOwnedByCurrentRegion(world, x >> 4, z >> 4))
+                        continue;
+                    for (int y = high; y >= low; y--) {
+                        final Location feet = new Location(world, x + 0.5, y, z + 0.5, a.getYaw(), 0);
+                        if (isSafeSpot(feet)) {
+                            spots.add(feet);
+                            break;
+                        }
+                    }
+                }
+            return spots;
+        }).whenComplete((spots, error) -> {
+            if (error != null)
+                SpawnArena.INSTANCE.getLogger().warning("Couldn't find spare spawn spots in " + this.arena.getArenaName() + ": " + error);
+            else
+                this.backupSpots = List.copyOf(spots);
+        });
+    }
+
+    /**
+     * Whether a player put here would be standing safely: solid ground (not a hazard) under their feet, two blocks of
+     * air (no liquid, fire or anything solid) to stand in, no lava next to them and no end crystal within a few blocks.
+     * Where this thread can't read the blocks (Folia, another region's), it's taken as safe.
+     */
+    private static boolean isSafeSpot(final Location feet) {
+        final org.bukkit.World world = feet.getWorld();
+        if (world == null || !world.isChunkLoaded(feet.getBlockX() >> 4, feet.getBlockZ() >> 4))
+            return false;
+        if (Threads.FOLIA && !Bukkit.isOwnedByCurrentRegion(feet))
+            return true;
+        final org.bukkit.block.Block ground = feet.getBlock().getRelative(org.bukkit.block.BlockFace.DOWN);
+        if (!ground.getType().isSolid() || hazard(ground.getType()))
+            return false;
+        for (int up = 0; up <= 1; up++) {
+            final org.bukkit.block.Block b = feet.getBlock().getRelative(0, up, 0);
+            if (!b.isPassable() || b.isLiquid() || hazard(b.getType()))
+                return false;
+        }
+        for (final org.bukkit.block.BlockFace side : new org.bukkit.block.BlockFace[]{org.bukkit.block.BlockFace.NORTH,
+                org.bukkit.block.BlockFace.SOUTH, org.bukkit.block.BlockFace.EAST, org.bukkit.block.BlockFace.WEST}) {
+            final Material type = feet.getBlock().getRelative(side).getType();
+            if (type == Material.LAVA || hazard(type))
+                return false;
+        }
+        return world.getNearbyEntities(feet, 3, 3, 3, e -> e instanceof org.bukkit.entity.EnderCrystal).isEmpty();
+    }
+
+    private static boolean hazard(final Material type) {
+        return switch (type) {
+            case LAVA, FIRE, SOUL_FIRE, MAGMA_BLOCK, CAMPFIRE, SOUL_CAMPFIRE, CACTUS, SWEET_BERRY_BUSH, WITHER_ROSE,
+                 POWDER_SNOW, COBWEB, POINTED_DRIPSTONE, RESPAWN_ANCHOR -> true;
+            default -> false;
+        };
     }
 
     private static double nearestFighter(final Location spawn, final List<Player> fighting) {
@@ -799,6 +913,7 @@ public final class FfaFight extends Fight {
                 })
                 .thenCompose(ignored -> CrystalPvp.takeSnapshot(this))
                 .whenComplete((ok, error) -> {
+                    this.findBackupSpots(); // the floor is back as it was
                     if (error != null)
                         SpawnArena.INSTANCE.getLogger().log(java.util.logging.Level.WARNING,
                                 "Couldn't reset crystal free-for-all " + this.arena.getArenaName(), error);
