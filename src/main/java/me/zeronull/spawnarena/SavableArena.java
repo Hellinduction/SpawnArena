@@ -228,6 +228,7 @@ public final class SavableArena extends Arena {
                 config.thirdRewardMultiplier, config.thirdRewardCooldownMinutes);
         this.setEgapCooldownSeconds(config.egapCooldownSeconds);
         this.setDisplayName(config.displayName);
+        this.setTotemLimit(config.totemLimit);
         this.setFfaRewards(config.ffaStreakReward, config.ffaStreakRewardTens, config.ffaStreakRewardCooldownMinutes, config.ffaSameVictimMinutes);
         // A MULTI crystal arena's copies follow: set up if it just became one, dropped if it no longer is
         if (this.isCrystalPvp() && this.getArenaMode() == ArenaMode.MULTI) {

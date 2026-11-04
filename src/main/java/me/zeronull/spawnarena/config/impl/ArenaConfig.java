@@ -58,6 +58,10 @@ public final class ArenaConfig {
     @Comment("Minutes between win rewards for the #3 current win streak")
     public int thirdRewardCooldownMinutes = 20;
 
+    @Comment("Totems of Undying that can save each fighter per fight (in a free-for-all, each time they come in); once\n"
+            + "they're used up, a held totem doesn't save them. Shown in their action bar. 0 = no limit. Set with /arenatotems.")
+    public int totemLimit = 0;
+
     @Comment("Free-for-all only (it has no wins): money paid for reaching a kill streak of 5, 15, 25... 0 disables it.")
     public double ffaStreakReward = 50000;
 

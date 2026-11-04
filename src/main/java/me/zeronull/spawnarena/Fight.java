@@ -142,6 +142,9 @@ public class Fight {
     private volatile ScheduledTask shrinkTask;
     /** MULTI Ice Rink: shows the fake ice again every second (anything that resyncs the real floor is undone). */
     private volatile ScheduledTask iceTask;
+    /** Totems each fighter has popped this fight (in a free-for-all, since they last came in), for the arena's totemLimit. */
+    private final Map<UUID, Integer> totemsUsed = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile ScheduledTask totemTask;
 
     /** Picks this match's random sumo variant and gets Ice Rink's or Shrinking Platform's floor ready. */
     protected void pickVariant() {
@@ -676,11 +679,55 @@ public class Fight {
             }, 20L, 20L);
         if (this.variant == SumoVariant.SHRINK)
             this.shrinkTask = SumoShrink.start(this);
+        // With a totem limit, everyone's totems left stay in their action bar (a free-for-all has its own bar)
+        if (this.arena.getTotemLimit() > 0)
+            this.totemTask = Threads.globalTimer(task -> {
+                if (this.fightState != FightState.IN_FIGHT) {
+                    task.cancel();
+                    return;
+                }
+                for (final Player p : this.getFighters())
+                    Threads.entity(p, () -> {
+                        if (p.isOnline() && this.isFighter(p))
+                            p.sendActionBar(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(this.totemsBar(p)));
+                    });
+            }, 0L, 20L);
         if (this.mode == FightMode.TWO_V_TWO)
             Threads.async(() -> TeamPicker.remember(this.teamA, this.teamB));
         this.performHideLogic();
         this.startTickCounter();
         FightGlow.start(this);
+    }
+
+    // ── Totem limit ─────────────────────────────────────────────────────────
+
+    /** How many more totems can save this fighter here: -1 with no limit (the arena's totemLimit is 0). */
+    public int totemsLeft(final Player fighter) {
+        final int limit = this.arena.getTotemLimit();
+        return limit <= 0 ? -1 : Math.max(0, limit - this.totemsUsed.getOrDefault(fighter.getUniqueId(), 0));
+    }
+
+    /** A totem just saved them: counted towards the limit, and their action bar shows what's left straight away. */
+    public void totemPopped(final Player fighter) {
+        if (this.arena.getTotemLimit() <= 0)
+            return;
+        this.totemsUsed.merge(fighter.getUniqueId(), 1, Integer::sum);
+        if (!this.isFfa())
+            fighter.sendActionBar(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(this.totemsBar(fighter)));
+    }
+
+    /** They're starting afresh (a free-for-all, coming back in): no totems used. */
+    protected void forgetTotems(final UUID fighter) {
+        this.totemsUsed.remove(fighter);
+    }
+
+    /** "Totems left: 1/2" (MiniMessage), or "No totems left" in red; empty with no limit. */
+    public String totemsBar(final Player fighter) {
+        final int left = this.totemsLeft(fighter);
+        if (left < 0)
+            return "";
+        return left == 0 ? "<red>No totems left</red>"
+                : "<gold>Totems left: <white>" + left + "</white><gray>/" + this.arena.getTotemLimit() + "</gray></gold>";
     }
 
     /**
@@ -847,6 +894,7 @@ public class Fight {
         if (shrink != null && !shrink.isCancelled())
             shrink.cancel();
         this.tryCancel(this.iceTask);
+        this.tryCancel(this.totemTask);
         SumoShrink.clear(this);
         final java.util.concurrent.CompletableFuture<Void> cleaned = this.variant == SumoVariant.ICE || this.variant == SumoVariant.SHRINK
                 ? CrystalPvp.cleanup(this).thenCompose(ignored -> SumoIce.thaw(this.arena))

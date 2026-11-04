@@ -111,6 +111,17 @@ public abstract class ArenaOptions {
         this.displayName = name == null ? "" : name.trim();
     }
 
+    /** Totems that can save each fighter per fight; 0 = no limit. */
+    private volatile int totemLimit;
+
+    public int getTotemLimit() {
+        return this.totemLimit;
+    }
+
+    public void setTotemLimit(final int limit) {
+        this.totemLimit = Math.max(0, limit);
+    }
+
     // Free-for-all kill streak payouts
     private volatile double ffaStreakReward, ffaStreakRewardTens;
     private volatile int ffaStreakRewardCooldownMinutes, ffaSameVictimMinutes;

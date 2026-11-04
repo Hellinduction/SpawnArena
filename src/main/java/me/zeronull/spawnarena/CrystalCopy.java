@@ -77,6 +77,7 @@ public final class CrystalCopy extends Arena {
                 this.real.rewardMultiplierFor(3), this.real.rewardCooldownMinutesFor(3));
         this.setEgapCooldownSeconds(this.real.getEgapCooldownSeconds());
         this.setDisplayName(this.real.getDisplayName());
+        this.setTotemLimit(this.real.getTotemLimit());
     }
 
     /** The same spot in this copy's world. */

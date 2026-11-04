@@ -82,15 +82,18 @@ public class ArenaDeathEvent implements Listener {
             return;
         }
 
-        // Let a held totem pop, unless it's damage a totem can't save them from (the void, /kill)
+        final Fight fight = arena.getFight(defender);
+
+        // Let a held totem pop, unless it's damage a totem can't save them from (the void, /kill) or they've used
+        // up the arena's totem limit (then it's a death, and the totem stays in their hand)
         final boolean totemCanSave = event.getCause() != EntityDamageEvent.DamageCause.VOID
-                && event.getCause() != EntityDamageEvent.DamageCause.KILL;
+                && event.getCause() != EntityDamageEvent.DamageCause.KILL
+                && (fight == null || fight.totemsLeft(defender) != 0);
         if (totemCanSave && (defender.getInventory().getItemInOffHand().getType() == BYPASS_ITEM
                 || defender.getInventory().getItemInMainHand().getType() == BYPASS_ITEM)) {
             return;
         }
 
-        final Fight fight = arena.getFight(defender);
         // Counted now, though it's cancelled: eliminating them can end the fight and send the stats card
         if (fight != null && fight.getState() == me.zeronull.spawnarena.FightState.IN_FIGHT)
             FightStatsListener.record(event, fight, defender);

@@ -275,6 +275,7 @@ public final class FfaFight extends Fight {
             admitted = teleported && player.isOnline() && this.getState() == FightState.IN_FIGHT && this.arena.isOpen() && this.joining.remove(player);
             if (admitted) {
                 this.payVictims.remove(player.getUniqueId());
+                this.forgetTotems(player.getUniqueId());
                 this.alive.add(player);
                 this.fightingSince.put(player.getUniqueId(), System.currentTimeMillis());
             }
@@ -1029,7 +1030,8 @@ public final class FfaFight extends Fight {
                         : "<green>/leavearena to leave</green>";
                 p.sendActionBar(MiniMessage.miniMessage().deserialize(
                         "<gold><bold>FFA</bold></gold> <dark_gray>·</dark_gray> <gray>Kill streak <white><streak></white> "
-                                + "<dark_gray>·</dark_gray> <gray><count></gray> <dark_gray>·</dark_gray> " + status,
+                                + "<dark_gray>·</dark_gray> <gray><count></gray> <dark_gray>·</dark_gray> " + status
+                                + (this.totemsLeft(p) < 0 ? "" : " <dark_gray>·</dark_gray> " + this.totemsBar(p)),
                         Placeholder.unparsed("streak", String.valueOf(this.streaks.getOrDefault(p.getUniqueId(), 0))),
                         Placeholder.unparsed("count", Grammar.count(count, "player"))));
             });

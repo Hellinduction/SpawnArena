@@ -97,7 +97,9 @@ public final class FightStatsListener implements Listener {
         if (!(e.getEntity() instanceof Player player))
             return;
         final Fight fight = fightOf(player);
-        if (fight != null)
+        if (fight != null) {
             fight.stats().totemPopped(player);
+            fight.totemPopped(player);
+        }
     }
 }

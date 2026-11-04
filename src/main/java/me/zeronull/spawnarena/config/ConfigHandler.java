@@ -129,6 +129,7 @@ public class ConfigHandler {
                     config.thirdRewardMultiplier, config.thirdRewardCooldownMinutes);
             arena.setEgapCooldownSeconds(config.egapCooldownSeconds);
             arena.setDisplayName(config.displayName);
+            arena.setTotemLimit(config.totemLimit);
             arena.setFfaRewards(config.ffaStreakReward, config.ffaStreakRewardTens, config.ffaStreakRewardCooldownMinutes, config.ffaSameVictimMinutes);
 
             arenas.add(arena);
