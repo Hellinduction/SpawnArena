@@ -31,6 +31,10 @@ import java.util.UUID;
  *   %spawnarena_reward_last_<arena>%       last win's result, e.g. "+$50k" or "Not paid: on cooldown"
  *   %spawnarena_reward_today% / %spawnarena_reward_dailycap% / %spawnarena_reward_dailyleft%
  *   %spawnarena_reward_dailyreset%      " · resets in 5h 12m" (empty with no daily cap)
+ *   %spawnarena_ffa_<kills|deaths|kdr|streak|best_streak>_<arena>%  free-for-all stats (streak: the kill streak
+ *       they're on right now in that free-for-all, 0 when not in it; best_streak: their best ever)
+ *   Leaderboards take any type from BoardStats (wins, streak, best_streak, elo, wlr, playtime, ffa_kills, ffa_deaths,
+ *       ffa_kdr, ffa_streak (live), ffa_best_streak) in top_player_ / top_value_ and my_rank_ / my_value_
  *   %spawnarena_queue_<1v1|2v2|total>_<arena>%    players waiting
  *   %spawnarena_matches_<1v1|2v2|total>_<arena>%  matches in progress
  */
@@ -69,13 +73,19 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
             return "";
         final boolean rank = params.startsWith("my_rank_");
         final String rest = params.substring(rank ? "my_rank_".length() : "my_value_".length());
-        String stat = null;
-        for (final String s : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "playtime", "kdr", "wlr"})
-            if (rest.endsWith("_" + s)) { stat = s; break; }
-        if (stat == null)
+        final String[] board = BoardStats.split(rest);
+        if (board == null)
             return null;
-        final String field = statToField(stat);
-        final String arena = rest.substring(0, rest.length() - stat.length() - 1);
+        final String arena = board[0];
+        if (BoardStats.isLive(board[1])) {
+            // Only while they're in that free-for-all
+            final List<FfaFight.LiveStreak> live = FfaFight.liveStreaks(arena);
+            for (int i = 0; i < live.size(); i++)
+                if (live.get(i).id().equals(player.getUniqueId()))
+                    return rank ? "#" + (i + 1) : String.valueOf(live.get(i).streak());
+            return rank ? "not fighting" : "-";
+        }
+        final String field = BoardStats.field(board[1]);
         final StatsManager.Standing standing = SpawnArena.statsManager.getStanding(player.getUniqueId(), arena, field);
         if (standing == null)
             return "...";
@@ -119,14 +129,10 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         if (parts.length >= 2) {
             final String type = parts[0];
 
-            // Free-for-all: ffa_kills_<arena>, ffa_deaths_<arena>, ffa_streak_<arena> (best kill streak)
-            if (player != null && type.equals("ffa") && parts.length >= 3) {
-                final String field = statToField("ffa_" + parts[1]);
-                if (field == null)
-                    return null;
-                final String arena = String.join("_", java.util.Arrays.copyOfRange(parts, 2, parts.length));
-                return String.valueOf(SpawnArena.statsManager.getField(player.getUniqueId(), arena, field));
-            }
+            // Free-for-all: ffa_kills_<arena>, ffa_deaths_<arena>, ffa_kdr_<arena>, ffa_streak_<arena> (the kill streak
+            // they're on right now), ffa_best_streak_<arena> (their best)
+            if (player != null && type.equals("ffa") && parts.length >= 3)
+                return ffa(player, params.substring("ffa_".length()));
 
             // Ratios and losses: kdr_<arena> (free-for-all K/D), wlr_<arena> (W/L), losses_<arena>
             if (player != null && (type.equals("kdr") || type.equals("wlr") || type.equals("losses"))) {
@@ -165,16 +171,23 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
                 }
                 if (rank < 1 || rank > TOP_CACHE_SIZE) return null;
 
-                // stat is the segment(s) before the rank; best_streak and the ffa_ stats span two segments
-                final boolean bestStreak = parts.length >= 6
-                        && parts[parts.length - 3].equals("best") && parts[parts.length - 2].equals("streak");
-                final boolean ffaStat = !bestStreak && parts.length >= 6 && parts[parts.length - 3].equals("ffa")
-                        && statToField("ffa_" + parts[parts.length - 2]) != null;
-                final String stat = bestStreak ? "best_streak" : ffaStat ? "ffa_" + parts[parts.length - 2] : parts[parts.length - 2];
-                final int arenaEnd = parts.length - (bestStreak || ffaStat ? 3 : 2);
-                final String arena = String.join("_", java.util.Arrays.copyOfRange(parts, 2, arenaEnd));
+                // <arena>_<stat> is everything between "top_player_" and the rank; the stat can be several segments
+                final String[] board = BoardStats.split(String.join("_", java.util.Arrays.copyOfRange(parts, 2, parts.length - 1)));
+                if (board == null) return null;
+                final String arena = board[0];
 
-                final String dbField = statToField(stat);
+                if (BoardStats.isLive(board[1])) {
+                    final List<FfaFight.LiveStreak> live = FfaFight.liveStreaks(arena);
+                    if (rank > live.size()) return "-";
+                    final FfaFight.LiveStreak entry = live.get(rank - 1);
+                    return switch (subType) {
+                        case "player" -> entry.name();
+                        case "value" -> String.valueOf(entry.streak());
+                        default -> null;
+                    };
+                }
+
+                final String dbField = BoardStats.field(board[1]);
                 if (dbField == null) return null;
 
                 final List<StatsManager.LeaderboardEntry> top = cachedTop(arena, dbField);
@@ -290,20 +303,26 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         return StatsManager.formatMoney(amount);
     }
 
-    private static String statToField(String stat) {
-        return switch (stat.toLowerCase()) {
-            case "wins" -> "wins";
-            case "streak" -> "win_streak";
-            case "best_streak", "best" -> "best_win_streak";
-            case "elo" -> "elo";
-            case "ffa_kills" -> "ffa_kills";
-            case "ffa_deaths" -> "ffa_deaths";
-            case "ffa_streak" -> "ffa_best_streak";
-            case "playtime" -> "fight_seconds";
-            case "kdr" -> "kdr";
-            case "wlr" -> "wlr";
-            default -> null;
-        };
+    /** ffa_<kills|deaths|kdr|streak|best_streak>_<arena> for the viewer (given without the "ffa_"). */
+    private static String ffa(final Player player, final String rest) {
+        final UUID uuid = player.getUniqueId();
+        final StatsManager stats = SpawnArena.statsManager;
+        for (final String stat : new String[]{"best_streak", "streak", "kills", "deaths", "kdr"}) {
+            if (!rest.startsWith(stat + "_") || rest.length() <= stat.length() + 1)
+                continue;
+            final String arena = rest.substring(stat.length() + 1);
+            return switch (stat) {
+                case "streak" -> {
+                    for (final FfaFight.LiveStreak live : FfaFight.liveStreaks(arena))
+                        if (live.id().equals(uuid))
+                            yield String.valueOf(live.streak());
+                    yield "0";
+                }
+                case "kdr" -> StatsManager.ratio(stats.getField(uuid, arena, "ffa_kills"), stats.getField(uuid, arena, "ffa_deaths"));
+                default -> String.valueOf(stats.getField(uuid, arena, BoardStats.field("ffa_" + stat)));
+            };
+        }
+        return null;
     }
 
     /** How a board's value shows: time for playtime, two decimals for the ratios, else the number. */

@@ -38,7 +38,7 @@ Don't add `shade:shade` to the command: shading already runs during `package`, a
 3. Build the arena, stand in it and run `/arenasetup`: the wizard asks for the type (normal, sumo, crystal PvP...), the spawn points, the region and the options, and saves a copy of the build to paste back after fights.
 4. `/setarenaexit <arena>` where people should be sent if they're in the arena during a fight.
 5. Players join with `/joinarenaqueue <arena>` (an NPC can run it for them). `/togglearenamode <arena>` switches between one fight at a time (SINGLE) and several at once (MULTI; for crystal PvP each match is fought in its own copy of the arena, on Paper/Leaf only), and `/togglearenamode <arena> ffa` makes it a free-for-all.
-6. Leaderboards: `/arenaleaderboard spawn <arena> <stat>` where you're standing.
+6. Leaderboards: `/arenaleaderboard spawn <arena> <stat>` where you're standing. Stats: `wins`, `streak` (current win streak), `best_streak`, `elo`, `wlr` (W/L), `playtime`, and for free-for-alls `ffa_kills`, `ffa_deaths`, `ffa_kdr`, `ffa_streak` (the kill streaks people are on right now, live) and `ffa_best_streak`. Also `reward` (each player's countdown to their next win reward) and `stats` (the arena's totals).
 
 Stats are kept in an H2 file in the plugin folder by default; `database.yml` switches to MySQL/MariaDB (several servers can share one database).
 

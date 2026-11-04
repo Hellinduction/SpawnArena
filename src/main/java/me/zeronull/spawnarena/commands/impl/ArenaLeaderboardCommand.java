@@ -17,8 +17,8 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * /arenaleaderboard [arena] [wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak] [limit]       — show in chat
- * /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak> [limit] — spawn a hologram where you stand
+ * /arenaleaderboard [arena] [type] [limit]       — show in chat (types: see BoardStats)
+ * /arenaleaderboard spawn <arena> <type> [limit] — spawn a hologram where you stand
  * /arenaleaderboard spawn <arena> reward — per-player live countdown to their next win reward
  * /arenaleaderboard remove <hologram>
  * /arenaleaderboard list — one line each; click one to go there
@@ -28,7 +28,8 @@ import java.util.List;
  */
 public final class ArenaLeaderboardCommand implements CommandExecutor, TabCompleter {
 
-    private static final List<String> STATS = List.of("wins", "streak", "best_streak", "elo", "ffa_kills", "ffa_deaths", "ffa_streak", "playtime", "kdr", "wlr");
+    private static final List<String> STATS = me.zeronull.spawnarena.BoardStats.SHOWN;
+    private static final String TYPES = String.join(", ", STATS);
     private static final String SPAWN_PERMISSION = "spawnarena.arenaleaderboard.spawn";
     public static final int MAX_LIMIT = 25;
 
@@ -50,14 +51,27 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
 
     private boolean show(CommandSender sender, String[] args) {
         final String arena = args.length >= 1 ? args[0] : "arena";
-        final String stat = args.length >= 2 ? args[1].toLowerCase() : "wins";
+        final String stat = me.zeronull.spawnarena.BoardStats.canonical(args.length >= 2 ? args[1] : "wins");
         final int limit = args.length >= 3 ? parseLimit(args[2], 10) : 10;
 
-        final String field = statToField(stat);
-        if (field == null) {
-            sender.sendMessage("§cUnknown stat. Use: wins, streak, best_streak, elo, ffa_kills, ffa_deaths, ffa_streak");
+        if (stat == null) {
+            sender.sendMessage("§cUnknown stat. Use: " + TYPES);
             return true;
         }
+
+        // Live: whoever is in the free-for-all right now
+        if (me.zeronull.spawnarena.BoardStats.isLive(stat)) {
+            final List<me.zeronull.spawnarena.FfaFight.LiveStreak> live = me.zeronull.spawnarena.FfaFight.liveStreaks(arena);
+            if (live.isEmpty()) {
+                sender.sendMessage("§7Nobody is in the §e" + arena + "§7 free-for-all right now.");
+                return true;
+            }
+            sender.sendMessage("§6§l--- " + arena + " Leaderboard (" + statLabel(stat) + ", live) ---");
+            for (int i = 0; i < live.size() && i < limit; i++)
+                sender.sendMessage(String.format("§e#%d §f%s §7— §e%d", i + 1, live.get(i).name(), live.get(i).streak()));
+            return true;
+        }
+        final String field = statToField(stat);
 
         final List<StatsManager.LeaderboardEntry> entries = SpawnArena.statsManager.getTopPlayers(arena, field, limit);
         if (entries.isEmpty()) {
@@ -92,15 +106,15 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             return true;
         }
         if (args.length < 3) {
-            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <wins|streak|best_streak|elo|ffa_kills|ffa_deaths|ffa_streak|reward|stats> [limit]");
+            sender.sendMessage("§cUsage: /arenaleaderboard spawn <arena> <type|reward|stats> [limit]   types: " + TYPES);
             sender.sendMessage("§c   or: /arenaleaderboard spawn global  (stats for every arena together)");
             return true;
         }
 
         final String arena = args[1];
-        final String stat = args[2].toLowerCase();
+        final String asked = args[2].toLowerCase();
 
-        if (stat.equals("reward")) {
+        if (asked.equals("reward")) {
             final LeaderboardHolograms.Placement placement =
                     LeaderboardHolograms.correctPlacement(p.getLocation(), LeaderboardHolograms.REWARD_LINES);
             final String name = LeaderboardHolograms.spawnReward(arena, placement.location());
@@ -110,8 +124,9 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             return true;
         }
 
-        if (statToField(stat) == null) {
-            sender.sendMessage("§cUnknown type. Use: wins, streak, best_streak, elo, ffa_kills, ffa_deaths, ffa_streak, reward");
+        final String stat = me.zeronull.spawnarena.BoardStats.canonical(asked);
+        if (stat == null) {
+            sender.sendMessage("§cUnknown type. Use: " + TYPES + ", reward, stats");
             return true;
         }
         final int limit = args.length >= 4 ? parseLimit(args[3], 10) : 10;
@@ -289,33 +304,10 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
     }
 
     private static String statLabel(String stat) {
-        return switch (stat) {
-            case "streak" -> "Win Streak";
-            case "best_streak" -> "Best Win Streak";
-            case "elo" -> "Elo";
-            case "ffa_kills" -> "FFA Kills";
-            case "ffa_deaths" -> "FFA Deaths";
-            case "ffa_streak" -> "Best FFA Kill Streak";
-            case "playtime" -> "Time Fighting";
-            case "kdr" -> "K/D";
-            case "wlr" -> "W/L";
-            default -> "Wins";
-        };
+        return me.zeronull.spawnarena.BoardStats.label(stat);
     }
 
     private static String statToField(String stat) {
-        return switch (stat) {
-            case "wins" -> "wins";
-            case "streak" -> "win_streak";
-            case "best_streak" -> "best_win_streak";
-            case "elo" -> "elo";
-            case "ffa_kills" -> "ffa_kills";
-            case "ffa_deaths" -> "ffa_deaths";
-            case "ffa_streak" -> "ffa_best_streak";
-            case "playtime" -> "fight_seconds";
-            case "kdr" -> "kdr";
-            case "wlr" -> "wlr";
-            default -> null;
-        };
+        return me.zeronull.spawnarena.BoardStats.field(stat);
     }
 }

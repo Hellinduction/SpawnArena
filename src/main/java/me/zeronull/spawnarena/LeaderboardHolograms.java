@@ -80,7 +80,7 @@ public final class LeaderboardHolograms {
 
         final TextHologramData data = new TextHologramData(name, loc);
         data.setText(leaderboardLines(arena, stat, limit));
-        data.setTextUpdateInterval(UPDATE_INTERVAL_MS);
+        data.setTextUpdateInterval(intervalFor(stat));
         data.setTextShadow(true);
         data.setPersistent(true);
         data.setVisibilityDistance(VISIBILITY_DISTANCE);
@@ -110,19 +110,15 @@ public final class LeaderboardHolograms {
     public static final int EXTRA_LINES = 3;
 
     private static String statLabel(final String stat) {
-        return switch (stat) {
-            case "streak" -> "Win Streak";
-            case "best_streak" -> "Best Win Streak";
-            case "elo" -> "Elo";
-            case "ffa_kills" -> "FFA Kills";
-            case "ffa_deaths" -> "FFA Deaths";
-            case "ffa_streak" -> "Best FFA Kill Streak";
-            case "playtime" -> "Time Fighting";
-            case "kdr" -> "K/D";
-            case "wlr" -> "W/L";
-            default -> "Wins";
-        };
+        return BoardStats.label(stat);
     }
+
+    /** How often a board redraws: every second for the live free-for-all kill streak, otherwise every 5. */
+    private static int intervalFor(final String stat) {
+        return BoardStats.isLive(stat) ? LIVE_UPDATE_INTERVAL_MS : UPDATE_INTERVAL_MS;
+    }
+
+    private static final int LIVE_UPDATE_INTERVAL_MS = 1_000;
 
     static String displayName(final String arena) {
         return Arena.displayName(arena);
@@ -316,7 +312,7 @@ public final class LeaderboardHolograms {
                 final int rows = Math.max(1, Math.min((int) text.getText().stream().filter(l -> l.contains("spawnarena_top_player_")).count(),
                         me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT));
                 lines = leaderboardLines(arena, stat, rows);
-                interval = UPDATE_INTERVAL_MS;
+                interval = intervalFor(stat);
             }
 
             text.setText(lines);
@@ -333,7 +329,6 @@ public final class LeaderboardHolograms {
         return new UpdateResult(updated, skipped);
     }
 
-    private static final String[] BOARD_STATS = {"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "playtime", "kdr", "wlr"};
     private static final java.util.regex.Pattern BOARD_ID = java.util.regex.Pattern.compile("_\\d{4}(?=_|$)");
 
     /**
@@ -345,7 +340,7 @@ public final class LeaderboardHolograms {
         final java.util.regex.Matcher id = BOARD_ID.matcher(rest);
         while (id.find()) {
             final String part = rest.substring(0, id.start());
-            if (part.endsWith("_reward") || part.endsWith(STATS_TAG) || part.equals(GLOBAL) || java.util.Arrays.stream(BOARD_STATS).anyMatch(s -> part.endsWith("_" + s)))
+            if (part.endsWith("_reward") || part.endsWith(STATS_TAG) || part.equals(GLOBAL) || BoardStats.split(part, null) != null)
                 return part;
         }
         return rest.replaceFirst("_\\d{4}$", "");
@@ -357,13 +352,9 @@ public final class LeaderboardHolograms {
             return null;
         // spawnarena_lb_<arena>_<stat>_<4 digits>
         final String rest = boardPart(name);
-        for (final String s : BOARD_STATS) {
-            if (rest.endsWith("_" + s)) {
-                final String arena = resolveArena(rest.substring(0, rest.length() - s.length() - 1));
-                return arena == null ? null : new String[]{arena, s};
-            }
-        }
-        return null;
+        final String[] board = BoardStats.split(rest);
+        final String arena = board == null ? null : resolveArena(board[0]);
+        return arena == null ? null : new String[]{arena, board[1]};
     }
 
     /** Hologram names store the arena in lower case; map it back to the arena's real name. */
@@ -399,7 +390,9 @@ public final class LeaderboardHolograms {
             final String[] board = boardOf(h.getData().getName());
             if (board == null || !board[0].equalsIgnoreCase(arena))
                 continue;
-            final String field = boardField(board[1]);
+            final String field = BoardStats.field(board[1]);
+            if (field == null)
+                continue; // the live one reads the free-for-all itself, and redraws every second anyway
             stats.getTopPlayersCached(board[0], field, me.zeronull.spawnarena.commands.impl.ArenaLeaderboardCommand.MAX_LIMIT);
             stats.getStanding(new java.util.UUID(0, 0), board[0], field); // everyone's place on it, for the "You" lines
             boards.add(h);
@@ -450,24 +443,15 @@ public final class LeaderboardHolograms {
         }
     }
 
-    /** The database field a board's stat reads (as the placeholders do). */
-    private static String boardField(final String stat) {
-        return switch (stat) {
-            case "streak" -> "win_streak";
-            case "best_streak" -> "best_win_streak";
-            case "ffa_streak" -> "ffa_best_streak";
-            case "playtime" -> "fight_seconds";
-            default -> stat; // wins, elo, ffa_kills, ffa_deaths, kdr, wlr
-        };
-    }
-
     /** Redraws every leaderboard hologram now (and brings older ones up to the current refresh interval and distance). */
     public static int refreshAll() {
         int count = 0;
         for (final Hologram h : FancyHologramsPlugin.get().getHologramManager().getHolograms()) {
             if (!h.getData().getName().startsWith(NAME_PREFIX))
                 continue;
-            final int interval = h.getData().getName().contains(REWARD_TAG) ? REWARD_UPDATE_INTERVAL_MS : UPDATE_INTERVAL_MS;
+            final String[] board = boardOf(h.getData().getName());
+            final int interval = h.getData().getName().contains(REWARD_TAG) ? REWARD_UPDATE_INTERVAL_MS
+                    : board != null ? intervalFor(board[1]) : UPDATE_INTERVAL_MS;
             if (h.getData() instanceof TextHologramData text && text.getTextUpdateInterval() != interval)
                 text.setTextUpdateInterval(interval);
             if (h.getData().getVisibilityDistance() < VISIBILITY_DISTANCE)
@@ -482,13 +466,13 @@ public final class LeaderboardHolograms {
     public static int removeForArena(final String arena) {
         int removed = 0;
         for (final String name : list()) {
-            // spawnarena_lb_<arena>_<stat|reward>_<4 digits>
+            // spawnarena_lb_<arena>_<stat|reward|stats>_<4 digits>
             final String rest = boardPart(name);
-            for (final String kind : new String[]{"ffa_kills", "ffa_deaths", "ffa_streak", "best_streak", "streak", "wins", "elo", "reward"})
-                if (rest.equalsIgnoreCase(arena + "_" + kind) && remove(name)) {
-                    removed++;
-                    break;
-                }
+            final String[] board = BoardStats.split(rest, a -> a.equalsIgnoreCase(arena));
+            final boolean ours = (board != null && board[0].equalsIgnoreCase(arena))
+                    || rest.equalsIgnoreCase(arena + "_reward") || rest.equalsIgnoreCase(arena + STATS_TAG);
+            if (ours && remove(name))
+                removed++;
         }
         return removed;
     }

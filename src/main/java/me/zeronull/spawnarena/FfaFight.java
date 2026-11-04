@@ -74,6 +74,31 @@ public final class FfaFight extends Fight {
         return arena != null && arena.getFight(player) instanceof FfaFight ffa ? ffa : null;
     }
 
+    /** One player in a free-for-all and the kill streak they're on. */
+    public record LiveStreak(UUID id, String name, int streak) {}
+
+    /**
+     * Everyone fighting in this arena's free-for-all right now with the kill streak they're on, highest first (the
+     * longest-standing first on a tie). Empty when nobody is in it. Safe from any thread.
+     */
+    public static List<LiveStreak> liveStreaks(final String arenaName) {
+        if (SpawnArena.arenas == null)
+            return List.of();
+        Arena arena = SpawnArena.arenas.of(arenaName);
+        if (arena == null)
+            for (final Arena a : SpawnArena.arenas)
+                if (a.getArenaName().equalsIgnoreCase(arenaName))
+                    arena = a;
+        final FfaFight session = arena == null ? null : sessionOf(arena);
+        if (session == null)
+            return List.of();
+        final List<LiveStreak> live = new ArrayList<>();
+        for (final Player p : session.getFighters())
+            live.add(new LiveStreak(p.getUniqueId(), p.getName(), session.streaks.getOrDefault(p.getUniqueId(), 0)));
+        live.sort(Comparator.comparingInt(LiveStreak::streak).reversed()); // stable: ties keep the order they joined in
+        return live;
+    }
+
     public static boolean isJoining(final Player player) {
         return JOINING.contains(player.getUniqueId());
     }
