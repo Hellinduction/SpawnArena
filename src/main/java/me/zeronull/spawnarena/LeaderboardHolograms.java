@@ -176,7 +176,7 @@ public final class LeaderboardHolograms {
                 "<gradient:#FFD700:#FF8C00><bold>✦ " + displayName(arena) + " Rewards ✦</bold></gradient>",
                 "<gray>Kill streak of <white>5, 15, 25...</white>: <#55FF55><bold>" + p + "ffafives_" + arena + "%</bold></#55FF55>"
                         + " <dark_gray>·</dark_gray> <white>10, 20, 30...</white>: <#55FF55><bold>" + p + "ffatens_" + arena + "%</bold></#55FF55>",
-                "<gray>Each streak pays once every <aqua>" + p + "ffaevery_" + arena + "%</aqua>",
+                "<gray>Each streak milestone pays once every <aqua>" + p + "ffaevery_" + arena + "%</aqua>",
                 "<dark_gray><strikethrough>                              </strikethrough>",
                 "<gray>Your paid streak: <white><bold>" + p + "ffastreak_" + arena + "%</bold></white> <dark_gray>·</dark_gray> <gray>Next: <#FFE066><bold>"
                         + p + "ffanext_" + arena + "%</bold></#FFE066>",

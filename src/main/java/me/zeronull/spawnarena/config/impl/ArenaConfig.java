@@ -59,10 +59,10 @@ public final class ArenaConfig {
     public int thirdRewardCooldownMinutes = 20;
 
     @Comment("Free-for-all only (it has no wins): money paid for reaching a kill streak of 5, 15, 25... 0 disables it.")
-    public double ffaStreakReward = 100000;
+    public double ffaStreakReward = 50000;
 
     @Comment("Free-for-all only: money paid for reaching a kill streak of 10, 20, 30... 0 disables it.")
-    public double ffaStreakRewardTens = 250000;
+    public double ffaStreakRewardTens = 100000;
 
     @Comment("Free-for-all only: minutes before a player can be paid for the same kill streak (5, 10, 15...) again. The\n"
             + "others still pay meanwhile, so to keep earning they have to reach streaks they haven't been paid for lately.")
