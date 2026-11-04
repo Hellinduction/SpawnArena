@@ -285,6 +285,14 @@ public class StatsManager {
                 s.execute("CREATE INDEX owed_items_player ON owed_items (server_id, uuid)");
             if (!hasIndex(c, "stat_audit", "stat_audit_actor"))
                 s.execute("CREATE INDEX stat_audit_actor ON stat_audit (server_id, actor, changed_at)");
+            // Sumo bot practice: how many bots of each difficulty each player has beaten in each arena
+            s.execute("CREATE TABLE IF NOT EXISTS bot_wins (" +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "arena VARCHAR(64) NOT NULL, " +
+                    "difficulty VARCHAR(16) NOT NULL, " +
+                    "wins INT NOT NULL DEFAULT 0, " +
+                    "PRIMARY KEY (server_id, uuid, arena, difficulty))");
             // Free-for-all kill streak payouts: when each player was last paid for each streak (5, 10, 15...) there
             s.execute("CREATE TABLE IF NOT EXISTS ffa_streak_rewards (" +
                     "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
@@ -360,7 +368,7 @@ public class StatsManager {
     public int deleteArenaData(final String arena) {
         int removed = 0;
         try (Connection c = dataSource.getConnection()) {
-            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts", "arena_bet_bonuses", "ffa_streak_rewards"}) {
+            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts", "arena_bet_bonuses", "ffa_streak_rewards", "bot_wins"}) {
                 try (PreparedStatement ps = c.prepareStatement("DELETE FROM " + table + " WHERE server_id=" + sid + " AND arena=?")) {
                     ps.setString(1, arena.toLowerCase());
                     removed += ps.executeUpdate();
@@ -372,6 +380,7 @@ public class StatsManager {
         rewardCache.clear();
         lastResults.clear();
         ffaPaidCache.clear();
+        botWinsCache.clear();
         invalidateLeaderboards();
         return removed;
     }
@@ -1037,6 +1046,52 @@ public class StatsManager {
 
     // Stored in arena_rewards.last_result so it survives restarts; this map is just a cache
     private final java.util.Map<String, String> lastResults = new java.util.concurrent.ConcurrentHashMap<>();
+
+    // ── Sumo bot practice ───────────────────────────────────────────────────
+
+    /** "uuid:arena" -> difficulty -> bots beaten (read by the bot menu). */
+    private final java.util.Map<String, java.util.Map<String, Integer>> botWinsCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** One more bot of this difficulty beaten; returns how many now. Off the main thread. */
+    public int addBotWin(UUID uuid, String arena, String difficulty) {
+        final String sql = "INSERT INTO bot_wins (server_id, uuid, arena, difficulty, wins) VALUES (" + sid + ", ?, ?, ?, 1) "
+                + "ON DUPLICATE KEY UPDATE wins = wins + 1";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.setString(3, difficulty);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            warn("addBotWin: " + e.getMessage());
+        }
+        botWinsCache.remove(uuid + ":" + arena.toLowerCase());
+        return botWins(uuid, arena).getOrDefault(difficulty, 0);
+    }
+
+    /** Bots of each difficulty this player has beaten in this arena. */
+    public java.util.Map<String, Integer> botWins(UUID uuid, String arena) {
+        final String key = uuid + ":" + arena.toLowerCase();
+        final java.util.Map<String, Integer> cached = botWinsCache.get(key);
+        if (cached != null)
+            return cached;
+        final java.util.Map<String, Integer> wins = new java.util.HashMap<>();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT difficulty, wins FROM bot_wins WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    wins.put(rs.getString(1), rs.getInt(2));
+            }
+        } catch (SQLException e) {
+            warn("botWins: " + e.getMessage());
+            return java.util.Map.of();
+        }
+        final java.util.Map<String, Integer> result = java.util.Map.copyOf(wins);
+        botWinsCache.put(key, result);
+        return result;
+    }
 
     // ── Free-for-all kill streak payouts ────────────────────────────────────
 

@@ -88,6 +88,8 @@ public class SpawnArena extends JavaPlugin {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaWorldguardPvPEvent(), this);
 
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaCommandEvent(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new SumoBotListener(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new BotMenu.Clicks(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.EgapCooldown(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.FightStatsListener(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new SlapFish(), this);
@@ -198,7 +200,8 @@ public class SpawnArena extends JavaPlugin {
         for (final org.bukkit.entity.Player p : Bukkit.getOnlinePlayers())
             try {
                 if (p.getOpenInventory().getTopInventory().getHolder() instanceof QueueMenu
-                        || p.getOpenInventory().getTopInventory().getHolder() instanceof WatchMenu)
+                        || p.getOpenInventory().getTopInventory().getHolder() instanceof WatchMenu
+                        || p.getOpenInventory().getTopInventory().getHolder() instanceof BotMenu)
                     p.closeInventory();
                 QueueMenu.purge(p);
             } catch (final RuntimeException ignored) {
@@ -217,6 +220,7 @@ public class SpawnArena extends JavaPlugin {
             WatchMenu.sendEveryoneBack();
         CrystalCopies.undecorateAll();
         this.shutdownArenas();
+        SumoBot.removeAll();
         AnticheatExempt.stop();
         me.zeronull.spawnarena.config.ConfigHandler.getInstance().flushPreFights();
         LagOuts.unwatchAll();

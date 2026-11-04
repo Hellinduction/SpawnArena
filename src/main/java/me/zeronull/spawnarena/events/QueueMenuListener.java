@@ -45,6 +45,14 @@ public final class QueueMenuListener implements Listener {
         if (!(e.getWhoClicked() instanceof Player player) || e.getClickedInventory() != e.getView().getTopInventory())
             return;
 
+        // Sumo: the bot menu
+        if (e.getSlot() == QueueMenu.SLOT_BOT) {
+            final Arena arena = SpawnArena.arenas.of(menu.getArenaName());
+            if (me.zeronull.spawnarena.BotFight.available(arena))
+                me.zeronull.spawnarena.Threads.entityLater(player, () -> me.zeronull.spawnarena.BotMenu.open(player, arena), 1L);
+            return;
+        }
+
         final FightMode mode = switch (e.getSlot()) {
             case QueueMenu.SLOT_1V1 -> FightMode.ONE_V_ONE;
             case QueueMenu.SLOT_2V2 -> FightMode.TWO_V_TWO;

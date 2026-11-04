@@ -697,6 +697,11 @@ public class Fight {
         this.performHideLogic();
         this.startTickCounter();
         FightGlow.start(this);
+        this.onLive();
+    }
+
+    /** Just after the fight goes live (everyone in): for kinds of fight that do more then (a bot match's bot comes in). */
+    protected void onLive() {
     }
 
     // ── Totem limit ─────────────────────────────────────────────────────────
@@ -823,14 +828,14 @@ public class Fight {
         this.endFight();
     }
 
-    private void finish(final List<Player> winners, final List<Player> losers) {
+    protected void finish(final List<Player> winners, final List<Player> losers) {
         this.announceResult(new ArrayList<>(winners), new ArrayList<>(losers));
         this.endFight();
         showResultTitles(winners, losers);
     }
 
     /** "Victory!" / "You Lose!" on screen for everyone who was in the match, eliminated teammates included. */
-    private static void showResultTitles(final List<Player> winners, final List<Player> losers) {
+    static void showResultTitles(final List<Player> winners, final List<Player> losers) {
         final net.kyori.adventure.title.Title.Times times = net.kyori.adventure.title.Title.Times.times(
                 java.time.Duration.ofMillis(250), java.time.Duration.ofMillis(2500), java.time.Duration.ofMillis(750));
         for (final Player p : winners)

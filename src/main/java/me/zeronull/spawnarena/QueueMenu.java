@@ -21,6 +21,8 @@ public final class QueueMenu implements InventoryHolder {
     public static final int SLOT_1V1 = 11;
     public static final int SLOT_AUTO = 13;
     public static final int SLOT_2V2 = 15;
+    /** Sumo arenas: practice against a bot. */
+    public static final int SLOT_BOT = 22;
 
     private final String arenaName;
     private final Inventory inventory;
@@ -91,6 +93,9 @@ public final class QueueMenu implements InventoryHolder {
                 action(current == FightMode.TWO_V_TWO)));
         duo.setAmount(2);
         this.inventory.setItem(SLOT_2V2, duo);
+
+        if (BotFight.available(arena))
+            this.inventory.setItem(SLOT_BOT, BotMenu.menuItem());
     }
 
     private static String action(final boolean inThisQueue) {
