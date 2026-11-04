@@ -58,6 +58,20 @@ public final class ArenaConfig {
     @Comment("Minutes between win rewards for the #3 current win streak")
     public int thirdRewardCooldownMinutes = 20;
 
+    @Comment("Free-for-all only (it has no wins): money paid for reaching a kill streak of 5, 15, 25... 0 disables it.")
+    public double ffaStreakReward = 100000;
+
+    @Comment("Free-for-all only: money paid for reaching a kill streak of 10, 20, 30... 0 disables it.")
+    public double ffaStreakRewardTens = 250000;
+
+    @Comment("Free-for-all only: minutes before a player can be paid for the same kill streak (5, 10, 15...) again. The\n"
+            + "others still pay meanwhile, so to keep earning they have to reach streaks they haven't been paid for lately.")
+    public int ffaStreakRewardCooldownMinutes = 30;
+
+    @Comment("Free-for-all only: minutes before killing the same player counts towards a paid streak again (every kill still\n"
+            + "counts in chat and on the boards). Stops a friend dying to someone over and over to pay them.")
+    public int ffaSameVictimMinutes = 5;
+
     @Comment({"Seconds a fighter has to wait after eating an enchanted golden apple before eating another (shown on",
             "the item, like an ender pearl's). Only while fighting in this arena: it's cleared when they're out of the",
             "fight, and never touches golden apples anywhere else. 0 = no cooldown."})
@@ -75,8 +89,8 @@ public final class ArenaConfig {
 
     @Comment({"Free-for-all: /joinarenaqueue sends players straight in (no queue, no countdown) and everyone fights",
             "everyone until they die or /leavearena (only out of combat). Players keep their own things, which are given",
-            "back as they were when they leave or die. Kills, deaths and kill streaks are counted separately; no wins,",
-            "streaks, Elo, rewards or bets. Always runs as SINGLE."})
+            "back as they were when they leave or die. Kills, deaths and kill streaks are counted separately; no wins, win",
+            "streaks, Elo or bets: kill streaks pay instead (ffaStreakReward). Always runs as SINGLE."})
     public boolean ffa = false;
 
     @Comment({"Random sumo (arenas where touching water loses): each match gets a random variant, the same for both sides:",

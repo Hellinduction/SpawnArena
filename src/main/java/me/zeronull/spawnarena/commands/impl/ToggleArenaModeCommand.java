@@ -196,7 +196,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
                         + "Run /joinarenaqueue " + arena.getArenaName() + " to go in.");
             player.sendMessage(ChatColor.GREEN + "Free-for-all is on for " + arena.getArenaName() + ": /joinarenaqueue "
                     + arena.getArenaName() + " now sends players straight in. Kills, deaths and kill streaks are counted apart; "
-                    + "no wins, rewards or bets there.");
+                    + "no wins or bets there, and kill streaks of 5, 10, 15... pay instead of wins (ffaStreakReward in its file).");
         } else {
             player.sendMessage(ChatColor.YELLOW + "Free-for-all is off for " + arena.getArenaName() + ": it's back to normal queued matches.");
         }

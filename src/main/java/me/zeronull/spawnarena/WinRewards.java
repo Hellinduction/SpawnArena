@@ -93,7 +93,7 @@ public final class WinRewards {
     }
 
     /** Tells a player they've hit today's reward limit, the first time it happens each day. */
-    private static void tellDailyLimitOnce(final Player player) {
+    static void tellDailyLimitOnce(final Player player) {
         final String today = StatsManager.today();
         if (today.equals(TOLD_DAILY_LIMIT.put(player.getUniqueId(), today)))
             return;

@@ -93,7 +93,7 @@ public final class LeaderboardHolograms {
 
     private static List<String> leaderboardLines(final String arena, final String stat, final int limit) {
         final List<String> lines = new ArrayList<>();
-        lines.add("<yellow>* <red><bold>" + displayName(arena) + " " + statLabel(stat) + "</bold></red> *</yellow>");
+        lines.add("<yellow>* <red><bold>" + BoardStats.title(displayName(arena), stat) + "</bold></red> *</yellow>");
         for (int rank = 1; rank <= limit; rank++) {
             lines.add(String.format("<light_purple>%d. <yellow>%%spawnarena_top_player_%s_%s_%d%%<gray>: %%spawnarena_top_value_%s_%s_%d%%",
                     rank, arena, stat, rank, arena, stat, rank));
@@ -151,6 +151,9 @@ public final class LeaderboardHolograms {
     }
 
     private static List<String> rewardLines(final String arena) {
+        final Arena found = me.zeronull.spawnarena.SpawnArena.arenas == null ? null : me.zeronull.spawnarena.SpawnArena.arenas.of(arena);
+        if (found != null && found.isFfa())
+            return ffaRewardLines(arena);
         return new ArrayList<>(List.of(
                 "<gradient:#FFD700:#FF8C00><bold>✦ " + displayName(arena) + " Rewards ✦</bold></gradient>",
                 "<gray>Win: <#55FF55><bold>%spawnarena_reward_amount_" + arena + "%</bold></#55FF55> <dark_gray>·</dark_gray> <gray>once every <aqua>%spawnarena_reward_every_" + arena + "%</aqua>",
@@ -163,6 +166,24 @@ public final class LeaderboardHolograms {
                 "<gray>Last win: <white>%spawnarena_reward_last_" + arena + "%</white>",
                 "<gray>Today: <white>%spawnarena_reward_today%</white> <dark_gray>/</dark_gray> <white>%spawnarena_reward_dailycap%</white><gray>%spawnarena_reward_dailyreset%",
                 "<dark_gray>Alts don't pay · max %spawnarena_reward_samelimit% paid wins in a row vs one player"
+        ));
+    }
+
+    /** A free-for-all's: paid for kill streaks (5, 10, 15...), each once in a while, rather than for wins. */
+    private static List<String> ffaRewardLines(final String arena) {
+        final String p = "%spawnarena_reward_";
+        return new ArrayList<>(List.of(
+                "<gradient:#FFD700:#FF8C00><bold>✦ " + displayName(arena) + " Rewards ✦</bold></gradient>",
+                "<gray>Kill streak of <white>5, 15, 25...</white>: <#55FF55><bold>" + p + "ffafives_" + arena + "%</bold></#55FF55>"
+                        + " <dark_gray>·</dark_gray> <white>10, 20, 30...</white>: <#55FF55><bold>" + p + "ffatens_" + arena + "%</bold></#55FF55>",
+                "<gray>Each streak pays once every <aqua>" + p + "ffaevery_" + arena + "%</aqua>",
+                "<dark_gray><strikethrough>                              </strikethrough>",
+                "<gray>Your paid streak: <white><bold>" + p + "ffastreak_" + arena + "%</bold></white> <dark_gray>·</dark_gray> <gray>Next: <#FFE066><bold>"
+                        + p + "ffanext_" + arena + "%</bold></#FFE066>",
+                "<gray>Paid lately (pays again in): <aqua>" + p + "ffawaits_" + arena + "%</aqua>",
+                "<gray>Last payout: <white>" + p + "last_" + arena + "%</white>",
+                "<gray>Today: <white>%spawnarena_reward_today%</white> <dark_gray>/</dark_gray> <white>%spawnarena_reward_dailycap%</white><gray>%spawnarena_reward_dailyreset%",
+                "<dark_gray>Alts don't count · each player counts once per streak, and once every " + p + "ffasame_" + arena + "%"
         ));
     }
 
@@ -203,10 +224,11 @@ public final class LeaderboardHolograms {
         final List<String> lines = new ArrayList<>();
         lines.add("<gradient:#FFD700:#FF8C00><bold>✦ " + (arena == null ? "Global Spawn Arena" : displayName(arena)) + " Stats ✦</bold></gradient>");
         if (arena != null && ffa) {
-            // A free-for-all has no matches or win rewards: its kills instead
+            // A free-for-all has no matches or wins: its kills, and what its kill streaks have paid, instead
             lines.add("<gray>Players who've fought: <yellow>%spawnarena_global_players" + of + "%");
             lines.add("<gray>Time spent fighting: <yellow>%spawnarena_global_time" + of + "%");
             lines.add("<gray>Free-for-all kills: <yellow>%spawnarena_global_ffa_kills" + of + "%");
+            lines.add("<gray>Kill streak rewards paid: <#55FF55>%spawnarena_global_paid" + of + "%");
             lines.add(SEPARATOR);
             lines.add("<gray>Your kills: <light_purple>%spawnarena_ffa_kills" + of + "%");
             return lines;
@@ -252,7 +274,7 @@ public final class LeaderboardHolograms {
             final String arenaName = resolveArena(rest.substring(0, rest.length() - "_reward".length()));
             final Arena arena = arenaName == null ? null : me.zeronull.spawnarena.SpawnArena.arenas.of(arenaName);
             final Location loc = h.getData().getLocation();
-            if (arena == null || arena.getWinReward() <= 0 || loc == null || loc.getWorld() == null)
+            if (arena == null || arena.isFfa() || arena.getWinReward() <= 0 || loc == null || loc.getWorld() == null)
                 continue;
 
             // Each player is checked on their own thread (Folia)

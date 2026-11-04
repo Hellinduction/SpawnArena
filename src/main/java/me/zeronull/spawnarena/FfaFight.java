@@ -40,6 +40,14 @@ public final class FfaFight extends Fight {
     /** When each player last hit, or was hit by, another player. */
     private final Map<UUID, Long> lastCombat = new ConcurrentHashMap<>();
     private final Map<UUID, Integer> streaks = new ConcurrentHashMap<>();
+    /**
+     * Kill streak payouts: the different players each one has killed since they last came in or died, counting only
+     * kills that pay (not alts, nor someone they've had paid for in the last ffaSameVictimMinutes). Its size is their
+     * paid streak, so a friend dying over and over to them counts once.
+     */
+    private final Map<UUID, Set<UUID>> payVictims = new ConcurrentHashMap<>();
+    /** "killer:victim:arena" -> when that victim last counted towards that killer's paid streak, for ffaSameVictimMinutes. */
+    private static final Map<String, Long> PAY_VICTIM_AT = new ConcurrentHashMap<>();
     /** Spawn protection, until it runs out or they attack (the value tells one protection from the next). */
     private final Map<UUID, Object> protectedPlayers = new ConcurrentHashMap<>();
     private volatile ScheduledTask ticker;
@@ -265,6 +273,7 @@ public final class FfaFight extends Fight {
         synchronized (this) {
             admitted = teleported && player.isOnline() && this.getState() == FightState.IN_FIGHT && this.arena.isOpen() && this.joining.remove(player);
             if (admitted) {
+                this.payVictims.remove(player.getUniqueId());
                 this.alive.add(player);
                 this.fightingSince.put(player.getUniqueId(), System.currentTimeMillis());
             }
@@ -518,6 +527,7 @@ public final class FfaFight extends Fight {
         this.lastCombat.remove(id);
         final int lostStreak = this.streaks.getOrDefault(id, 0);
         this.streaks.remove(id);
+        this.payVictims.remove(id);
 
         ArenaProjectileDupeFix.discardProjectiles(player);
         Fight.AWAITING_RESTORE.add(id);
@@ -546,6 +556,78 @@ public final class FfaFight extends Fight {
         return true;
     }
 
+    /**
+     * Off the main thread: this kill (not between alts) counts towards {@code killer}'s paid streak unless they've
+     * already killed {@code victim} since they came in, or had them count in the last ffaSameVictimMinutes. Reaching
+     * 5, 10, 15... pays (FfaRewards).
+     */
+    private void towardsPayout(final Player killer, final UUID victim) {
+        if (!this.alive.contains(killer) || (this.arena.getFfaStreakReward() <= 0 && this.arena.getFfaStreakRewardTens() <= 0))
+            return;
+        final String key = killer.getUniqueId() + ":" + victim + ":" + this.arena.getArenaName().toLowerCase();
+        final long now = System.currentTimeMillis(), wait = this.arena.getFfaSameVictimMinutes() * 60_000L;
+        final Long last = PAY_VICTIM_AT.get(key);
+        if (last != null && now - last < wait)
+            return;
+        final Set<UUID> victims = this.payVictims.computeIfAbsent(killer.getUniqueId(), k -> ConcurrentHashMap.newKeySet());
+        final int streak;
+        synchronized (victims) {
+            if (!victims.add(victim))
+                return;
+            streak = victims.size();
+        }
+        PAY_VICTIM_AT.put(key, now);
+        PAY_VICTIM_AT.values().removeIf(at -> now - at > 24 * 60 * 60_000L); // nobody waits a day: keeps it small
+        if (!this.alive.contains(killer)) {
+            this.payVictims.remove(killer.getUniqueId()); // died meanwhile: that streak's over
+            return;
+        }
+        if (Bukkit.getPluginManager().isPluginEnabled("Vault"))
+            FfaRewards.reachedStreak(killer, this.arena, streak, victim);
+    }
+
+    /** {@code player}'s paid streak in this arena's free-for-all right now (0 when not in it). */
+    public static int paidStreakOf(final Arena arena, final UUID player) {
+        final FfaFight session = arena == null ? null : sessionOf(arena);
+        if (session == null)
+            return 0;
+        final Set<UUID> victims = session.payVictims.get(player);
+        return victims == null ? 0 : victims.size();
+    }
+
+    /** The next streak that would pay this player (above {@code streak}, and not paid lately), or 0 if none in the next 100. */
+    public static int nextPaying(final UUID uuid, final Arena arena, final int streak) {
+        final Map<Integer, Long> paid = SpawnArena.statsManager.ffaStreakPayouts(uuid, arena.getArenaName());
+        final long wait = arena.getFfaStreakRewardCooldownMinutes() * 60_000L, now = System.currentTimeMillis();
+        for (int next = (streak / 5 + 1) * 5; next <= streak + 100; next += 5) {
+            final Long last = paid.get(next);
+            if (arena.ffaRewardFor(next) > 0 && (last == null || now - last >= wait))
+                return next;
+        }
+        return 0;
+    }
+
+    /** "5: 12m 03s · 10: 25m 40s": the streaks this player was paid for lately, and how long until each pays again. */
+    public static String waits(final UUID uuid, final Arena arena) {
+        final Map<Integer, Long> paid = SpawnArena.statsManager.ffaStreakPayouts(uuid, arena.getArenaName());
+        final long wait = arena.getFfaStreakRewardCooldownMinutes() * 60_000L, now = System.currentTimeMillis();
+        final StringBuilder out = new StringBuilder();
+        int shown = 0;
+        for (final Map.Entry<Integer, Long> e : new java.util.TreeMap<>(paid).entrySet()) {
+            final long left = e.getValue() + wait - now;
+            if (left <= 0)
+                continue;
+            if (shown++ == 4) {
+                out.append(" · ...");
+                break;
+            }
+            if (out.length() > 0)
+                out.append(" · ");
+            out.append(e.getKey()).append(": ").append(StatsManager.formatCountdown(left));
+        }
+        return out.length() == 0 ? "none" : out.toString();
+    }
+
     private void death(final Player victim, final Out why, final List<UUID> credit, final int lostStreak) {
         final String arenaName = this.arena.getArenaName();
         final List<Player> killersHere = new ArrayList<>();
@@ -568,7 +650,10 @@ public final class FfaFight extends Fight {
             final boolean checkAlts = SpawnArena.settings != null && SpawnArena.settings.blockSameIpStats;
             for (final Map.Entry<UUID, Integer> e : newStreaks.entrySet()) {
                 final Player killer = Bukkit.getPlayer(e.getKey());
-                if (checkAlts && killer != null && SpawnArena.statsManager.areAlts(killer, victimPlayer))
+                final boolean alts = killer != null && SpawnArena.statsManager.areAlts(killer, victimPlayer);
+                if (killer != null && !(alts && SpawnArena.settings != null && SpawnArena.settings.blockSameIpRewards))
+                    this.towardsPayout(killer, victimPlayer.getUniqueId());
+                if (checkAlts && alts)
                     continue;
                 SpawnArena.statsManager.recordFfaKill(e.getKey(), arenaName, e.getValue());
             }

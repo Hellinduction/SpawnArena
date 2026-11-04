@@ -285,6 +285,14 @@ public class StatsManager {
                 s.execute("CREATE INDEX owed_items_player ON owed_items (server_id, uuid)");
             if (!hasIndex(c, "stat_audit", "stat_audit_actor"))
                 s.execute("CREATE INDEX stat_audit_actor ON stat_audit (server_id, actor, changed_at)");
+            // Free-for-all kill streak payouts: when each player was last paid for each streak (5, 10, 15...) there
+            s.execute("CREATE TABLE IF NOT EXISTS ffa_streak_rewards (" +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "arena VARCHAR(64) NOT NULL, " +
+                    "milestone INT NOT NULL, " +
+                    "paid_at BIGINT NOT NULL, " +
+                    "PRIMARY KEY (server_id, uuid, arena, milestone))");
             s.execute("CREATE TABLE IF NOT EXISTS player_ips (" +
                     "uuid VARCHAR(36) NOT NULL, " +
                     "ip_hash VARCHAR(64) NOT NULL, " +
@@ -352,7 +360,7 @@ public class StatsManager {
     public int deleteArenaData(final String arena) {
         int removed = 0;
         try (Connection c = dataSource.getConnection()) {
-            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts", "arena_bet_bonuses"}) {
+            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts", "arena_bet_bonuses", "ffa_streak_rewards"}) {
                 try (PreparedStatement ps = c.prepareStatement("DELETE FROM " + table + " WHERE server_id=" + sid + " AND arena=?")) {
                     ps.setString(1, arena.toLowerCase());
                     removed += ps.executeUpdate();
@@ -363,6 +371,7 @@ public class StatsManager {
         }
         rewardCache.clear();
         lastResults.clear();
+        ffaPaidCache.clear();
         invalidateLeaderboards();
         return removed;
     }
@@ -1029,6 +1038,53 @@ public class StatsManager {
     // Stored in arena_rewards.last_result so it survives restarts; this map is just a cache
     private final java.util.Map<String, String> lastResults = new java.util.concurrent.ConcurrentHashMap<>();
 
+    // ── Free-for-all kill streak payouts ────────────────────────────────────
+
+    /** "uuid:arena" -> milestone -> when it was last paid (read per viewer by the reward hologram, so kept here). */
+    private final java.util.Map<String, java.util.Map<Integer, Long>> ffaPaidCache = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** When this player was last paid for each kill streak (5, 10, 15...) in this free-for-all arena. */
+    public java.util.Map<Integer, Long> ffaStreakPayouts(UUID uuid, String arena) {
+        final String key = uuid + ":" + arena.toLowerCase();
+        final java.util.Map<Integer, Long> cached = ffaPaidCache.get(key);
+        if (cached != null)
+            return cached;
+        final java.util.Map<Integer, Long> paid = new java.util.TreeMap<>();
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT milestone, paid_at FROM ffa_streak_rewards WHERE server_id=" + sid + " AND uuid=? AND arena=?")) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next())
+                    paid.put(rs.getInt(1), rs.getLong(2));
+            }
+        } catch (SQLException e) {
+            warn("ffaStreakPayouts: " + e.getMessage());
+            return java.util.Map.of(); // not cached: tried again next time
+        }
+        final java.util.Map<Integer, Long> result = java.util.Collections.unmodifiableMap(paid);
+        ffaPaidCache.put(key, result);
+        return result;
+    }
+
+    public void recordFfaStreakPayout(UUID uuid, String arena, int milestone, long at) {
+        final String sql = "INSERT INTO ffa_streak_rewards (server_id, uuid, arena, milestone, paid_at) VALUES (" + sid + ", ?, ?, ?, ?) "
+                + "ON DUPLICATE KEY UPDATE paid_at = VALUES(paid_at)";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.setInt(3, milestone);
+            ps.setLong(4, at);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            warn("recordFfaStreakPayout: " + e.getMessage());
+        }
+        final java.util.Map<Integer, Long> paid = new java.util.TreeMap<>(ffaStreakPayouts(uuid, arena));
+        paid.put(milestone, at);
+        ffaPaidCache.put(uuid + ":" + arena.toLowerCase(), java.util.Collections.unmodifiableMap(paid));
+    }
+
     public void setLastResult(UUID uuid, String arena, String result) {
         lastResults.put(uuid + ":" + arena.toLowerCase(), result);
         // last_reward 0 = "never paid" for a player whose first result here isn't a payout
@@ -1211,7 +1267,20 @@ public class StatsManager {
             warn("clearRewardCooldown: " + e.getMessage());
             return -1;
         } finally {
+            // Free-for-all kill streak payouts' waits go too
+            try (Connection c = dataSource.getConnection();
+                 PreparedStatement ps = c.prepareStatement("DELETE FROM ffa_streak_rewards WHERE server_id=" + sid + " AND uuid=?"
+                         + (arena == null ? "" : " AND arena=?"))) {
+                ps.setString(1, uuid.toString());
+                if (arena != null)
+                    ps.setString(2, arena.toLowerCase());
+                ps.executeUpdate();
+            } catch (SQLException e) {
+                warn("clearRewardCooldown (free-for-all): " + e.getMessage());
+            }
             final String prefix = uuid + ":";
+            ffaPaidCache.keySet().removeIf(key -> key.startsWith(prefix)
+                    && (arena == null || key.equals(prefix + arena.toLowerCase())));
             rewardCache.keySet().removeIf(key -> key.startsWith(prefix)
                     && (arena == null || key.equals(prefix + arena.toLowerCase())));
             lastResults.keySet().removeIf(key -> key.startsWith(prefix)

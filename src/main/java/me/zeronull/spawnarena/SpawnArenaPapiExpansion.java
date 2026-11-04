@@ -260,6 +260,29 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
         final boolean enabled = arena.getWinReward() > 0;
 
+        // A free-for-all's kill streak payouts
+        if (type.startsWith("ffa")) {
+            final boolean paying = arena.getFfaStreakReward() > 0 || arena.getFfaStreakRewardTens() > 0;
+            return switch (type) {
+                case "ffafives" -> arena.getFfaStreakReward() > 0 ? formatAmount(arena.getFfaStreakReward()) : "-";
+                case "ffatens" -> arena.getFfaStreakRewardTens() > 0 ? formatAmount(arena.getFfaStreakRewardTens()) : "-";
+                case "ffaevery" -> StatsManager.formatMinutes(arena.getFfaStreakRewardCooldownMinutes());
+                case "ffasame" -> StatsManager.formatMinutes(arena.getFfaSameVictimMinutes());
+                case "ffastreak" -> player == null ? "" : String.valueOf(me.zeronull.spawnarena.FfaFight.paidStreakOf(arena, player.getUniqueId()));
+                case "ffanext" -> {
+                    if (player == null) yield "";
+                    if (!paying) yield "-";
+                    if (stats.hasReachedDailyCap(player.getUniqueId()))
+                        yield "Daily limit reached · resets in " + StatsManager.formatMinutes(StatsManager.minutesUntilDailyReset());
+                    final int next = me.zeronull.spawnarena.FfaFight.nextPaying(player.getUniqueId(), arena,
+                            me.zeronull.spawnarena.FfaFight.paidStreakOf(arena, player.getUniqueId()));
+                    yield next == 0 ? "-" : next + " kills (" + formatAmount(arena.ffaRewardFor(next)) + ")";
+                }
+                case "ffawaits" -> player == null ? "" : me.zeronull.spawnarena.FfaFight.waits(player.getUniqueId(), arena);
+                default -> null;
+            };
+        }
+
         return switch (type) {
             // amount/every are personal: the #1 win streak holder sees their boosted values
             case "amount" -> !enabled ? "-" : formatAmount(player == null ? arena.getWinReward()

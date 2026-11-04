@@ -77,6 +77,17 @@ public final class BoardStats {
     }
 
     /**
+     * The board's title: the arena's name and the stat, without saying FFA twice when the name already does
+     * ("CrystalFFA Kill Streak", not "CrystalFFA FFA Kill Streak").
+     */
+    public static String title(final String arenaName, final String stat) {
+        String label = label(stat);
+        if (arenaName != null && arenaName.toLowerCase(java.util.Locale.ROOT).contains("ffa"))
+            label = label.replace("FFA ", "");
+        return arenaName + " " + label;
+    }
+
+    /**
      * Splits "&lt;arena&gt;_&lt;type&gt;" into {arena, type} (the type as written, see {@link #canonical}). An arena name
      * can itself end in something like "_ffa", so an ending that leaves the name of an existing arena (per
      * {@code isArena}) wins; failing that, the first that fits. Null if it ends in no type.

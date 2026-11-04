@@ -111,6 +111,40 @@ public abstract class ArenaOptions {
         this.displayName = name == null ? "" : name.trim();
     }
 
+    // Free-for-all kill streak payouts
+    private volatile double ffaStreakReward, ffaStreakRewardTens;
+    private volatile int ffaStreakRewardCooldownMinutes, ffaSameVictimMinutes;
+
+    public void setFfaRewards(final double fives, final double tens, final int cooldownMinutes, final int sameVictimMinutes) {
+        this.ffaStreakReward = Math.max(0, fives);
+        this.ffaStreakRewardTens = Math.max(0, tens);
+        this.ffaStreakRewardCooldownMinutes = Math.max(0, cooldownMinutes);
+        this.ffaSameVictimMinutes = Math.max(0, sameVictimMinutes);
+    }
+
+    /** What reaching this kill streak pays in a free-for-all: 10, 20, 30... pay the tens amount, 5, 15, 25... the other; 0 otherwise. */
+    public double ffaRewardFor(final int streak) {
+        if (streak <= 0 || streak % 5 != 0)
+            return 0;
+        return streak % 10 == 0 ? this.ffaStreakRewardTens : this.ffaStreakReward;
+    }
+
+    public double getFfaStreakReward() {
+        return this.ffaStreakReward;
+    }
+
+    public double getFfaStreakRewardTens() {
+        return this.ffaStreakRewardTens;
+    }
+
+    public int getFfaStreakRewardCooldownMinutes() {
+        return this.ffaStreakRewardCooldownMinutes;
+    }
+
+    public int getFfaSameVictimMinutes() {
+        return this.ffaSameVictimMinutes;
+    }
+
     public void setWinReward(final double amount, final int cooldownMinutes) {
         this.winReward = amount;
         this.winRewardCooldownMinutes = cooldownMinutes;

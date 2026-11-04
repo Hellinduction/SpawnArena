@@ -969,7 +969,7 @@ public final class ArenaWizard {
             case OPTIONS -> m.append("<gray>Click to switch an option:\n")
                     .append(toggle("Free-for-all", s.ffa, "ffa", tag,
                             "Players jump straight in (no queue) and everyone fights everyone; /leavearena out of combat. "
-                                    + "Kills and deaths are counted apart; no wins, rewards or bets")).append("  ")
+                                    + "Kills and deaths are counted apart; no wins or bets, and kill streaks pay instead of wins")).append("  ")
                     .append(toggle("Crystal PvP", s.crystalPvp, "crystal", tag, "Players can build and use end crystals")).append("  ")
                     .append(toggle("Water = out", s.waterDeath, "water", tag, "Touching water loses (sumo)")).append("  ")
                     .append(toggle("Slap Fish", s.knockbackFish, "fish", tag, "Give everyone a knockback fish")).append("  ")
