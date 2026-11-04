@@ -202,6 +202,15 @@ public final class LeaderboardHolograms {
                 : me.zeronull.spawnarena.SpawnArena.arenas.of(arena) != null && me.zeronull.spawnarena.SpawnArena.arenas.of(arena).isFfa());
         final List<String> lines = new ArrayList<>();
         lines.add("<gradient:#FFD700:#FF8C00><bold>✦ " + (arena == null ? "Global Spawn Arena" : displayName(arena)) + " Stats ✦</bold></gradient>");
+        if (arena != null && ffa) {
+            // A free-for-all has no matches or win rewards: its kills instead
+            lines.add("<gray>Players who've fought: <yellow>%spawnarena_global_players" + of + "%");
+            lines.add("<gray>Time spent fighting: <yellow>%spawnarena_global_time" + of + "%");
+            lines.add("<gray>Free-for-all kills: <yellow>%spawnarena_global_ffa_kills" + of + "%");
+            lines.add(SEPARATOR);
+            lines.add("<gray>Your kills: <light_purple>%spawnarena_ffa_kills" + of + "%");
+            return lines;
+        }
         lines.add("<gray>Matches played: <yellow>%spawnarena_global_matches" + of + "%");
         lines.add("<gray>Players who've fought: <yellow>%spawnarena_global_players" + of + "%");
         lines.add("<gray>Time spent fighting: <yellow>%spawnarena_global_time" + of + "%");
