@@ -1247,7 +1247,7 @@ public class Fight {
     }
 
     /** In the arena's world (or the world of one of its copies' matches) and close to it. */
-    private static boolean isNear(final Arena arena, final Player player) {
+    static boolean isNear(final Arena arena, final Player player) {
         final int range = SpawnArena.settings == null ? 64 : SpawnArena.settings.winsNearbyDistance;
         if (arena == null || range <= 0)
             return false;

@@ -682,6 +682,10 @@ public final class FfaFight extends Fight {
         for (final Player k : killersHere)
             if (!told.contains(k))
                 told.add(k);
+        // and anyone watching from near the arena
+        for (final Player p : Bukkit.getOnlinePlayers())
+            if (!told.contains(p) && isNear(this.arena, p))
+                told.add(p);
         for (final Player p : told)
             if (p.isOnline())
                 p.sendMessage(message);
@@ -750,7 +754,8 @@ public final class FfaFight extends Fight {
 
     /**
      * Crystal free-for-all: a session can go on for as long as people keep joining, so every crystalFfaResetMinutes
-     * the arena is put back as it was (after a 10 second warning) with everyone still in it. Anyone the floor comes
+     * the arena is put back as it was (after a 10 second warning, then 5 to 1 on screen, to those in it) with everyone
+     * still in it. Anyone the floor comes
      * back around is moved straight up to the nearest spot they fit.
      */
     private void resetIfDue() {
@@ -761,6 +766,23 @@ public final class FfaFight extends Fight {
             this.resetWarned = true;
             this.tellInside(MiniMessage.miniMessage().deserialize(
                     "<yellow>The arena resets in 10 seconds: everything placed or dug, and dropped items, go back as they were."), null);
+            // Then 5, 4, 3, 2, 1 in the middle of the screen, each right on its second
+            final long resetAt = this.nextReset;
+            for (int s = 5; s >= 1; s--) {
+                final int seconds = s;
+                final long ticks = Math.max(1, (resetAt - seconds * 1000L - now) / 50);
+                Threads.globalLater(() -> {
+                    if (this.getState() != FightState.IN_FIGHT || this.resetting || this.nextReset != resetAt)
+                        return;
+                    final net.kyori.adventure.title.Title title = net.kyori.adventure.title.Title.title(Component.empty(),
+                            MiniMessage.miniMessage().deserialize("<yellow>Arena resets in <white><bold><s></bold></white>",
+                                    Placeholder.unparsed("s", String.valueOf(seconds))),
+                            net.kyori.adventure.title.Title.Times.times(java.time.Duration.ZERO,
+                                    java.time.Duration.ofMillis(1100), java.time.Duration.ofMillis(150)));
+                    for (final Player p : this.getMembers())
+                        Threads.entity(p, () -> p.showTitle(title));
+                }, ticks);
+            }
         }
         if (now < this.nextReset)
             return;
@@ -786,6 +808,7 @@ public final class FfaFight extends Fight {
                     this.tellInside(MiniMessage.miniMessage().deserialize("<yellow>The arena has been reset."), null);
                 });
     }
+
 
     /**
      * On the player's thread: if the arena came back around them, up to the nearest spot above where they fit, or (no
