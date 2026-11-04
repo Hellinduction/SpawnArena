@@ -51,7 +51,10 @@ public final class SumoBot {
     private boolean sprinting = true;
     private long sprintAgainAt, nextSwingAt, strafeUntil, jumpCooldownUntil, startAt;
     private int strafeDir = 1;
-    private volatile boolean jumpResetNext;
+    private volatile boolean jumpResetNext, hitNext;
+    /** Crouching (after being knocked near the edge) until this tick. */
+    private long sneakUntil;
+    private boolean sneaking;
     /** Where its opponent was, the last few ticks: it acts on where they were reactionTicks ago. */
     private final Deque<Vector> seen = new ArrayDeque<>();
 
@@ -107,6 +110,10 @@ public final class SumoBot {
                 health.setBaseValue(1024);
             m.setHealth(1024);
             m.getEquipment().setItemInMainHand(this.level.combo ? null : SlapFish.create());
+            // Someone from the server's skin (never their opponent's own), under the bot's own name
+            final com.destroystokyo.paper.profile.PlayerProfile skin = BotSkins.pick(this.target.getUniqueId());
+            if (skin != null)
+                m.setProfile(io.papermc.paper.datacomponent.item.ResolvableProfile.resolvableProfile(skin));
         });
         BOTS.put(this.body.getUniqueId(), this);
         Threads.entity(this.target, () -> {
@@ -155,6 +162,7 @@ public final class SumoBot {
         b.setHealth(b.getMaxHealth());
         if (ThreadLocalRandom.current().nextDouble() < this.level.jumpResetChance)
             this.jumpResetNext = true;
+        this.hitNext = true;
         if (this.level.combo)
             Threads.entityLater(b, () -> b.setNoDamageTicks(0), 1L);
     }
@@ -250,18 +258,32 @@ public final class SumoBot {
         if (input.lengthSquared() > 1)
             input.normalize();
 
-        // Sprint: on unless it let go after a hit (w-tap) and hasn't started again yet
+        // Knocked near the edge: it may crouch for a moment, like players do (slower, and it can't walk off)
+        final boolean hit = this.hitNext;
+        this.hitNext = false;
+        if (hit && this.level.sneakChance > 0 && this.nearEdge(at) && random.nextDouble() < this.level.sneakChance)
+            this.sneakUntil = this.tick + 6 + random.nextInt(8);
+        final boolean sneak = this.tick < this.sneakUntil;
+        if (sneak != this.sneaking) {
+            this.sneaking = sneak;
+            b.setPose(sneak ? org.bukkit.entity.Pose.SNEAKING : org.bukkit.entity.Pose.STANDING, sneak);
+        }
+        if (sneak && !floorUnder(at.clone().add(input.clone().multiply(0.6))))
+            input = new Vector(); // sneaking stops at the edge
+
+        // Sprint: on unless it let go after a hit (w-tap) and hasn't started again yet (never while crouching)
         if (!this.sprinting && this.tick >= this.sprintAgainAt)
             this.sprinting = true;
-        final boolean sprint = this.sprinting && ahead > 0.5;
+        final boolean sprint = this.sprinting && ahead > 0.5 && !sneak;
         final boolean ground = b.isOnGround();
-        final double accel = ground ? (sprint ? SPRINT : WALK) : (sprint ? AIR_SPRINT : AIR_WALK);
+        final double accel = (ground ? (sprint ? SPRINT : WALK) : (sprint ? AIR_SPRINT : AIR_WALK)) * (sneak ? 0.3 : 1);
         final Vector velocity = b.getVelocity().add(input.multiply(accel));
 
-        // Jumping: a jump-reset just after it's hit, or a sprint-jump in from a distance
+        // Jumping: a jump-reset just after it's hit, or a sprint-jump in to close the gap
         final boolean jumpReset = this.jumpResetNext;
         this.jumpResetNext = false;
-        final boolean wantJump = jumpReset || (sprint && distance > 4.5 && this.level.strafe > 0 && random.nextDouble() < 0.08);
+        final boolean wantJump = !sneak && (jumpReset
+                || (sprint && distance > 3 && distance < 6 && random.nextDouble() < this.level.sprintJumpChance * 0.15));
         if (wantJump && ground && this.tick >= this.jumpCooldownUntil) {
             velocity.setY(JUMP);
             if (sprint || jumpReset)
@@ -269,6 +291,16 @@ public final class SumoBot {
             this.jumpCooldownUntil = this.tick + 10;
         }
         b.setVelocity(velocity);
+    }
+
+    /** No floor within a couple of blocks in some direction. */
+    private boolean nearEdge(final Location at) {
+        for (int i = 0; i < 8; i++) {
+            final double a = Math.PI / 4 * i;
+            if (!floorUnder(at.clone().add(Math.cos(a) * 1.8, 0, Math.sin(a) * 1.8)))
+                return true;
+        }
+        return false;
     }
 
     /** 0 (floor everywhere ahead) to 1 (none right in front), looking along {@code dir}. */
