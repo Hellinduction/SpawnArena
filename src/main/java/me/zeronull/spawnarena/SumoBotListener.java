@@ -11,7 +11,7 @@ import org.bukkit.event.entity.EntityDamageEvent;
 
 /**
  * Sumo bots: only their opponent can hit them (whatever WorldGuard says about hitting a non-player in the arena),
- * nothing else hurts them, a Cheater bot takes less knockback, and a body left over from before (a crash) is removed
+ * nothing else hurts them, a Superior Gaming Chair bot takes less knockback, and a body left over from before (a crash) is removed
  * as soon as it's loaded.
  */
 public final class SumoBotListener implements Listener {
@@ -63,6 +63,29 @@ public final class SumoBotListener implements Listener {
     public void onInteract(final org.bukkit.event.player.PlayerInteractEntityEvent e) {
         if (SumoBot.isBot(e.getRightClicked()))
             e.setCancelled(true);
+    }
+
+    /** A hit on the player its opponent sees ({@link BotPuppet}, an entity only their game has) lands on the bot itself. */
+    @EventHandler
+    public void onHitPuppet(final com.destroystokyo.paper.event.player.PlayerUseUnknownEntityEvent e) {
+        if (!e.isAttack())
+            return;
+        final SumoBot bot = BotPuppet.botOf(e.getEntityId());
+        final Player player = e.getPlayer();
+        if (bot == null || !player.equals(bot.getTarget()))
+            return;
+        final org.bukkit.entity.Mannequin body = bot.getBody();
+        if (body == null || !body.isValid() || body.getWorld() != player.getWorld())
+            return;
+        // As far as the game itself lets a hit reach
+        final org.bukkit.attribute.AttributeInstance range = player.getAttribute(org.bukkit.attribute.Attribute.ENTITY_INTERACTION_RANGE);
+        final double reach = (range == null ? 3 : range.getValue()) + 1;
+        final org.bukkit.util.BoundingBox box = body.getBoundingBox();
+        final org.bukkit.util.Vector eye = player.getEyeLocation().toVector();
+        final org.bukkit.util.Vector near = new org.bukkit.util.Vector(Math.max(box.getMinX(), Math.min(eye.getX(), box.getMaxX())),
+                Math.max(box.getMinY(), Math.min(eye.getY(), box.getMaxY())), Math.max(box.getMinZ(), Math.min(eye.getZ(), box.getMaxZ())));
+        if (eye.distance(near) <= reach && player.hasLineOfSight(body))
+            player.attack(body);
     }
 
     @EventHandler

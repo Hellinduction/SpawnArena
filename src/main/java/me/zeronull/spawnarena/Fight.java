@@ -344,6 +344,11 @@ public class Fight {
         return SpawnArena.settings == null ? 3 : Math.max(0, SpawnArena.settings.countdownSeconds);
     }
 
+    /** Seconds of "Starting in..." for this match. */
+    protected int countdown() {
+        return countdownSeconds();
+    }
+
     public void initiateFight(final Player fighter1, final Player fighter2, final Arena arena) {
         initiateTeamFight(List.of(fighter1), List.of(fighter2), arena);
     }
@@ -372,7 +377,7 @@ public class Fight {
         for (final Player p : this.getMembers())
             Threads.entity(p, () -> p.playSound(p.getLocation(), Sound.BLOCK_NOTE_BLOCK_PLING, 1f, 2f));
 
-        final int[] counter = {countdownSeconds()};
+        final int[] counter = {this.countdown()};
         this.starting = Threads.globalTimer(task -> {
             if (this.fightState != FightState.COUNTDOWN) {
                 task.cancel();
@@ -388,7 +393,7 @@ public class Fight {
                 sendFightersMessage("&6Starting in " + counter[0] + "...");
                 counter[0]--;
             }
-        }, 20L, 20L);
+        }, counter[0] == 0 ? 1L : 20L, 20L);
     }
 
     private void announceTeams() {

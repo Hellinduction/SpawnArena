@@ -53,6 +53,12 @@ public final class BotFight extends Fight {
         return null;
     }
 
+    /** No countdown: it starts as soon as it's picked. */
+    @Override
+    protected int countdown() {
+        return 0;
+    }
+
     @Override
     protected void pickVariant() {
         // Combo: fists and no hit delay; otherwise the arena's own kit (the Slap Fish), whatever random sumo would pick

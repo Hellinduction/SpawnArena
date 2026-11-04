@@ -31,8 +31,8 @@ public final class BotMenu implements InventoryHolder {
             BotDifficulty.EASY, List.of("<gray>Slow to aim and react,", "<gray>misses a lot. A warm-up."),
             BotDifficulty.MEDIUM, List.of("<gray>Like a decent player:", "<gray>some w-taps and strafing."),
             BotDifficulty.HARD, List.of("<gray>W-taps, strafes, jump-resets", "<gray>and stays off the edge."),
-            BotDifficulty.CHEATER, List.of("<gray>Hard, with extra reach", "<gray>and less knockback taken."),
-            BotDifficulty.COMBO, List.of("<gray>Hard, with fists and", "<gray>no hit delay: combos!"));
+            BotDifficulty.CHEATER, List.of("<gray>Hard, with extra reach", "<gray>and less knockback taken.", "<gray>If it starts losing... it", "<gray>might stop hiding it."),
+            BotDifficulty.COMBO, List.of("<gray>Medium, with fists and", "<gray>no hit delay: combos!"));
 
     private final String arenaName;
     private final Inventory inventory;
@@ -71,7 +71,7 @@ public final class BotMenu implements InventoryHolder {
     /** The bot item on the sumo queue menu. */
     public static ItemStack menuItem() {
         return item(Material.ZOMBIE_HEAD, "<light_purple><bold>Practice vs Bot", List.of(
-                "<gray>Fight a bot: Easy, Medium,", "<gray>Hard, Cheater or Combo.", "<dark_gray>Doesn't count for stats", "", "<green>Click to pick a difficulty"));
+                "<gray>Fight a bot: Easy, Medium,", "<gray>Hard, Superior Gaming Chair", "<gray>or Combo.", "<dark_gray>Doesn't count for stats", "", "<green>Click to pick a difficulty"));
     }
 
     private static ItemStack item(final Material material, final String name, final List<String> lore) {
