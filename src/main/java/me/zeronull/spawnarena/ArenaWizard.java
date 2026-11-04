@@ -489,12 +489,20 @@ public final class ArenaWizard {
 
     /** Rays cast to find the walls: enough that the outline follows round arenas closely. */
     private static final int RAYS = 32;
+    /** How far the floor may rise above where the wizard was started before it counts as the arena's edge. */
+    private static final int MAX_RISE = 10;
 
     /**
-     * Works out the fighting area from {@code from} (the floor where you stand): eight rays go out until they
-     * hit a wall, making an octagon, and the height goes up to the first ceiling. Sumo rings (no walls) get
-     * the pasted box instead.
+     * The top of the floor in column x, z with room to stand on it, from 2 above {@code near} (a step) down to 8
+     * below it (a slope or terrace down); {@link Integer#MIN_VALUE} when there's none.
      */
+    private static int floorNear(final World w, final int x, final int z, final int near) {
+        for (int y = near + 2; y >= near - 8; y--)
+            if (!w.getBlockAt(x, y, z).isPassable() && w.getBlockAt(x, y + 1, z).isPassable() && w.getBlockAt(x, y + 2, z).isPassable())
+                return y;
+        return Integer.MIN_VALUE;
+    }
+
     /** Ground a fighter can dig through (or the bedrock under it), for finding how deep the arena's floor goes. */
     private static boolean isGround(final Material type) {
         if (CrystalPvp.isDiggableType(type)) // whatever crystalDiggableBlocks lists
@@ -506,6 +514,11 @@ public final class ArenaWizard {
         };
     }
 
+    /**
+     * Works out the fighting area from {@code from} (over the floor, anywhere on it): rays go out along the floor
+     * until they hit a wall, and the height goes from under the lowest floor's diggable ground up to the first
+     * ceiling. Sumo rings (no walls) get the pasted box instead.
+     */
     private static void detectRegion(final Player player, final Session s, final Location from, final Step then) {
         s.busy = true;
         final Location at = from.getBlock().getLocation();
@@ -527,43 +540,60 @@ public final class ArenaWizard {
                 s.minY = Math.min(cy - 3, s.paste != null ? min.y() : cy - 3);
                 s.maxY = cy + 12;
             } else {
+                // The floor under where they stand (or fly): the first solid block down
+                int start = cy - 1;
+                for (int y = cy - 1; y >= Math.max(w.getMinHeight(), cy - 64); y--)
+                    if (!w.getBlockAt(cx, y, cz).isPassable()) { start = y; break; }
+                int lowest = start, lowestX = cx, lowestZ = cz, highest = start;
                 for (int i = 0; i < RAYS; i++) {
                     final double angle = Math.PI * 2 * i / RAYS, dx = Math.cos(angle), dz = Math.sin(angle);
-                    // March out half a block at a time until a wall; the corner goes one block into the wall,
-                    // so the straight edges between corners never cut off floor next to it
-                    int lastX = cx, lastZ = cz;
+                    // March out half a block at a time, following the floor up steps and down slopes (a terraced
+                    // or sunken floor), until a wall; the corner goes one block into the wall, so the straight edges
+                    // between corners never cut off floor next to it
+                    int lastX = cx, lastZ = cz, floor = start;
                     for (double t = 0.5; ; t += 0.5) {
                         final int nx = (int) Math.floor(cx + 0.5 + dx * t), nz = (int) Math.floor(cz + 0.5 + dz * t);
                         if (nx < min.x() || nx > max.x() || nz < min.z() || nz > max.z())
                             break;
                         lastX = nx;
                         lastZ = nz;
-                        // A wall is something at least 3 high: bumps in the floor (like the crystal pit's
-                        // bedrock) and low fences don't stop the ray
-                        if (!w.getBlockAt(nx, cy + 2, nz).isPassable())
+                        final int next = floorNear(w, nx, nz, floor);
+                        if (next == Integer.MIN_VALUE) {
+                            // No room to stand: a wall is something at least 3 high (bumps in the floor, like the
+                            // crystal pit's bedrock, and low fences are stood on); otherwise a hole, crossed level
+                            if (!w.getBlockAt(nx, floor + 3, nz).isPassable())
+                                break;
+                            continue;
+                        }
+                        if (next > start + MAX_RISE) // stands or steps climbing out of the arena
                             break;
+                        floor = next;
+                        highest = Math.max(highest, floor);
+                        if (floor < lowest) { lowest = floor; lowestX = nx; lowestZ = nz; }
                     }
                     final BlockVector2 corner = BlockVector2.at(lastX, lastZ);
                     if (points.isEmpty() || !points.get(points.size() - 1).equals(corner))
                         points.add(corner);
                 }
-                // Up to the first ceiling (barriers count), or a dozen blocks
-                int ceiling = Math.min(cy + 12, max.y());
-                for (int y = cy + 2; y <= Math.min(cy + 64, max.y()); y++) {
+                // Up to the first ceiling (barriers count), or a dozen blocks over the highest floor
+                int ceiling = Math.min(highest + 13, max.y());
+                for (int y = start + 3; y <= Math.min(start + 65, max.y()); y++) {
                     final Block b = w.getBlockAt(cx, y, cz);
                     if (!b.isPassable() || b.getType() == Material.BARRIER) {
-                        ceiling = y;
+                        ceiling = Math.max(y, Math.min(highest + 3, max.y()));
                         break;
                     }
                 }
-                // Down through all the ground fighters can dig (a crystal pit's dirt and obsidian, and the bedrock under
-                // it), so it's theirs to break and is put back after each fight; at least 4 down either way
-                int bottom = cy - 4;
-                for (int y = cy - 1; y >= Math.max(w.getMinHeight(), cy - 64); y--) {
-                    if (!isGround(w.getBlockAt(cx, y, cz).getType()))
-                        break;
-                    bottom = Math.min(bottom, y);
-                }
+                // Down through all the ground fighters can dig under the lowest floor (a crystal pit's dirt and
+                // obsidian, and the bedrock under it), so it's theirs to break and is put back after each fight;
+                // at least 3 under it either way
+                int bottom = Math.min(lowest, start) - 3;
+                for (final int[] column : new int[][]{{cx, cz, start}, {lowestX, lowestZ, lowest}})
+                    for (int y = column[2]; y >= Math.max(w.getMinHeight(), column[2] - 64); y--) {
+                        if (!isGround(w.getBlockAt(column[0], y, column[1]).getType()))
+                            break;
+                        bottom = Math.min(bottom, y);
+                    }
                 s.minY = bottom;
                 s.maxY = ceiling;
             }
