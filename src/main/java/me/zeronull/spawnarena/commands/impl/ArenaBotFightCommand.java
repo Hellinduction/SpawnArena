@@ -24,11 +24,11 @@ import java.util.Map;
 public final class ArenaBotFightCommand implements CommandExecutor, TabCompleter {
 
     private static final String USAGE = "§cUsage: /arenabotfight [arena] <bot1> <bot2>  §7or (2v2)  §c/arenabotfight [arena] <bot1> <bot2> <bot3> <bot4>"
-            + "  §7or  §c/arenabotfight stop [arena]  §7(bots: easy, medium, hard, chair, combo)";
-    private static final List<String> LEVELS = List.of("easy", "medium", "hard", "chair", "combo");
+            + "  §7or  §c/arenabotfight stop [arena]  §7(bots: easy, medium, hard, master, chair, combo)";
+    private static final List<String> LEVELS = List.of("easy", "medium", "hard", "master", "chair", "combo");
     /** Short names for the levels, as well as their own */
     private static final Map<String, BotDifficulty> ALIASES = Map.of(
-            "chair", BotDifficulty.CHEATER, "sgc", BotDifficulty.CHEATER, "superior", BotDifficulty.CHEATER);
+            "chair", BotDifficulty.CHEATER, "sgc", BotDifficulty.CHEATER, "superior", BotDifficulty.CHEATER, "god", BotDifficulty.MASTER);
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String label, String[] args) {

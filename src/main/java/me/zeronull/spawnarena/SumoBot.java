@@ -710,8 +710,14 @@ public final class SumoBot {
             // sprint so the next hit has a sprint hit's knockback again: what keeps someone in a combo
             final double kind = random.nextDouble();
             if (this.comboing) {
-                // The pattern: a sneak-tap, then a W-tap, then a sneak-tap...
-                if (this.comboStep++ % 2 == 0)
+                // The pattern: a sneak-tap, then a W-tap, then a sneak-tap...; Master: an S-tap, a sneak-tap, a W-tap...
+                final int step = this.comboStep++;
+                if (this.level == BotDifficulty.MASTER) {
+                    if (step % 3 == 0)
+                        this.sTapUntil = this.tick + 2 + random.nextInt(2);
+                    else if (step % 3 == 1)
+                        this.sneakUntil = Math.max(this.sneakUntil, this.tick + 4 + random.nextInt(3));
+                } else if (step % 2 == 0)
                     this.sneakUntil = Math.max(this.sneakUntil, this.tick + 4 + random.nextInt(3));
             } else if (tap && kind < this.level.sTapChance)
                 this.sTapUntil = this.tick + 2 + random.nextInt(3);
@@ -724,7 +730,8 @@ public final class SumoBot {
     private void landed() {
         this.hitsLanded++;
         this.circling = 0;
-        if (++this.hitsInARow >= 2 && this.level.sneakTapChance > 0 && !this.comboing) {
+        // (Master starts on its first clean hit; the others once they've landed two in a row)
+        if (++this.hitsInARow >= (this.level == BotDifficulty.MASTER ? 1 : 2) && this.level.sneakTapChance > 0 && !this.comboing) {
             this.comboing = true;
             this.comboMisses = 0;
         }

@@ -25,14 +25,15 @@ import java.util.Map;
 
 /** The sumo menu's bot sub-menu: pick a difficulty to play a practice match against a bot. */
 public final class BotMenu implements InventoryHolder {
-    private static final int[] SLOTS = {11, 12, 13, 14, 15};
+    private static final int[] SLOTS = {10, 11, 12, 14, 15, 16};
     private static final int SLOT_BACK = 22;
-    private static final Map<BotDifficulty, List<String>> ABOUT = Map.of(
-            BotDifficulty.EASY, List.of("<gray>A casual player: a bit", "<gray>slow, misses now and then."),
-            BotDifficulty.MEDIUM, List.of("<gray>A decent player: w-taps,", "<gray>strafes and jump-resets."),
-            BotDifficulty.HARD, List.of("<gray>W-taps, strafes, jump-resets", "<gray>and stays off the edge."),
-            BotDifficulty.CHEATER, List.of("<gray>Hard, with extra reach", "<gray>and less knockback taken.", "<gray>If it starts losing... it", "<gray>might stop hiding it."),
-            BotDifficulty.COMBO, List.of("<gray>Between Medium and Hard,", "<gray>with fists and no hit", "<gray>delay: combos!"));
+    private static final Map<BotDifficulty, List<String>> ABOUT = Map.ofEntries(
+            Map.entry(BotDifficulty.EASY, List.of("<gray>A casual player: a bit", "<gray>slow, misses now and then.")),
+            Map.entry(BotDifficulty.MEDIUM, List.of("<gray>A decent player: w-taps,", "<gray>strafes and jump-resets.")),
+            Map.entry(BotDifficulty.HARD, List.of("<gray>W-taps, strafes, jump-resets", "<gray>and stays off the edge.")),
+            Map.entry(BotDifficulty.MASTER, List.of("<gray>A master player, no cheats:", "<gray>S-taps and sneak-taps you", "<gray>into combos from one hit.")),
+            Map.entry(BotDifficulty.CHEATER, List.of("<gray>Hard, with extra reach", "<gray>and less knockback taken.", "<gray>If it starts losing... it", "<gray>might stop hiding it.")),
+            Map.entry(BotDifficulty.COMBO, List.of("<gray>Between Medium and Hard,", "<gray>with fists and no hit", "<gray>delay: combos!")));
 
     private final String arenaName;
     private final Inventory inventory;
@@ -71,7 +72,7 @@ public final class BotMenu implements InventoryHolder {
     /** The bot item on the sumo queue menu. */
     public static ItemStack menuItem() {
         return item(Material.ZOMBIE_HEAD, "<light_purple><bold>Practice vs Bot", List.of(
-                "<gray>Fight a bot: Easy, Medium,", "<gray>Hard, Superior Gaming Chair", "<gray>or Combo.", "<dark_gray>Doesn't count for stats", "", "<green>Click to pick a difficulty"));
+                "<gray>Fight a bot: Easy, Medium,", "<gray>Hard, Master, Superior Gaming", "<gray>Chair or Combo.", "<dark_gray>Doesn't count for stats", "", "<green>Click to pick a difficulty"));
     }
 
     private static ItemStack item(final Material material, final String name, final List<String> lore) {
