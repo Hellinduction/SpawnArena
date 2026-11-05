@@ -78,6 +78,10 @@ public final class SumoBot {
     private boolean sprinting = true;
     private long sprintAgainAt, nextSwingAt, strafeUntil, jumpCooldownUntil, startAt;
     private int strafeDir = 1;
+    /** Ticks it's been strafing with no hit either way (circling), how long it'll keep that up, and walking straight in until */
+    private volatile int circling;
+    private int circleLimit = 15 + ThreadLocalRandom.current().nextInt(25);
+    private long straightUntil;
     private volatile boolean jumpResetNext, hitNext;
     /** Crouching (after being knocked near the edge) until this tick. */
     private long sneakUntil;
@@ -144,6 +148,11 @@ public final class SumoBot {
 
         /** Something everyone it concerns hears (a rage message) */
         void tell(net.kyori.adventure.text.Component message);
+
+        /** The skins its bots have borrowed (no two bots in one match look the same); null with only one bot */
+        default java.util.Set<String> skinsTaken() {
+            return null;
+        }
 
         /** Its team's outline colour, in a show match (null: none, or as a fight has it) */
         default net.kyori.adventure.text.format.NamedTextColor teamColour(final SumoBot bot) {
@@ -260,7 +269,7 @@ public final class SumoBot {
         spot.setPitch(0);
         this.yaw = spot.getYaw();
         // Someone from the server's skin (never their opponent's own), under the bot's own name
-        final com.destroystokyo.paper.profile.PlayerProfile skin = BotSkins.pick(this.foe.skinOf());
+        final com.destroystokyo.paper.profile.PlayerProfile skin = BotSkins.pick(this.foe.skinOf(), this.match.skinsTaken());
         this.body = world.spawn(spot, Mannequin.class, m -> {
             m.setPersistent(false);
             m.setVisibleByDefault(false);
@@ -363,6 +372,7 @@ public final class SumoBot {
             this.nextSwingAt = Math.max(this.nextSwingAt, this.tick + this.level.reactionTicks + random.nextInt(3));
         this.hitNext = true;
         this.hitsTaken++;
+        this.circling = 0;
         final boolean closeCall = this.nearEdge(b.getLocation());
         if (closeCall)
             this.closeCalls++;
@@ -498,12 +508,28 @@ public final class SumoBot {
         double across = 0;
         if (this.comboing && distance > this.level.reach + 1.5)
             this.comboing = false; // knocked out of reach: the combo's dropped
-        if (this.level.strafe > 0 && distance < 5 && !this.comboing) {
+        if (this.level.strafe > 0 && distance < 5 && !this.comboing && this.tick >= this.straightUntil) {
             if (this.tick >= this.strafeUntil) {
                 this.strafeDir = random.nextBoolean() ? 1 : -1;
                 this.strafeUntil = this.tick + 8 + random.nextInt(25);
             }
             across = this.strafeDir * this.level.strafe;
+            // Circling round each other with nothing landing: a player doesn't keep that up, they break it, switching
+            // way or cutting straight in for a moment
+            if (++this.circling > this.circleLimit) {
+                this.circling = 0;
+                this.circleLimit = 15 + random.nextInt(25);
+                if (random.nextBoolean()) {
+                    this.strafeDir = -this.strafeDir;
+                    this.strafeUntil = this.tick + 8 + random.nextInt(15);
+                    across = -across;
+                } else {
+                    this.straightUntil = this.tick + 8 + random.nextInt(10);
+                    across = 0;
+                }
+            }
+        } else {
+            this.circling = 0;
         }
         Vector input = forward.clone().multiply(ahead).add(side.clone().multiply(across));
 
@@ -697,6 +723,7 @@ public final class SumoBot {
     /** It landed a hit: a run of them starts a combo (bots that sneak-tap). */
     private void landed() {
         this.hitsLanded++;
+        this.circling = 0;
         if (++this.hitsInARow >= 2 && this.level.sneakTapChance > 0 && !this.comboing) {
             this.comboing = true;
             this.comboMisses = 0;

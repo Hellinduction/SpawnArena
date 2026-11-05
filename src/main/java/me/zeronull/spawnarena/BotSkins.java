@@ -46,6 +46,14 @@ public final class BotSkins implements Listener {
 
     /** A random player's skin (not {@code except}'s), as a profile of the bot's own; null if there's none to borrow. */
     static PlayerProfile pick(final UUID except) {
+        return pick(except, null);
+    }
+
+    /**
+     * As {@link #pick(UUID)}, and none already in {@code taken} (the skins of the other bots in the same match), which
+     * the one picked is added to; null if there's none left to borrow.
+     */
+    static PlayerProfile pick(final UUID except, final java.util.Set<String> taken) {
         for (final Player p : Bukkit.getOnlinePlayers())
             remember(p);
         final List<ProfileProperty> skins = new ArrayList<>();
@@ -54,10 +62,13 @@ public final class BotSkins implements Listener {
                 if (!e.getKey().equals(except))
                     skins.add(e.getValue());
         }
-        if (skins.isEmpty())
-            return null;
-        final PlayerProfile profile = Bukkit.createProfile(UUID.randomUUID(), "Bot");
-        profile.setProperty(skins.get(ThreadLocalRandom.current().nextInt(skins.size())));
-        return profile;
+        Collections.shuffle(skins, ThreadLocalRandom.current());
+        for (final ProfileProperty skin : skins)
+            if (taken == null || taken.add(skin.getValue())) { // (add: two bots spawning at once can't both take it)
+                final PlayerProfile profile = Bukkit.createProfile(UUID.randomUUID(), "Bot");
+                profile.setProperty(skin);
+                return profile;
+            }
+        return null;
     }
 }

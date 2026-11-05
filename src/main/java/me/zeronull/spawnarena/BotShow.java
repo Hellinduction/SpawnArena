@@ -28,7 +28,6 @@ public final class BotShow implements SumoBot.BotMatch {
     private static final double TELL_DISTANCE = 64;
     /** How far apart teammates come in, either side of the spawn point */
     private static final double TEAMMATE_GAP = 0.9;
-    private static final NamedTextColor[] TEAM_COLOURS = {NamedTextColor.BLUE, NamedTextColor.RED};
 
     private final Arena arena;
     private final Location centre;
@@ -39,6 +38,10 @@ public final class BotShow implements SumoBot.BotMatch {
     private final java.util.Set<SumoBot> in = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile FightState state = FightState.IN_FIGHT;
     private volatile ScheduledTask targeting;
+    /** Its outline colours, picked as a fight's are (one, or one per team in a 2v2); null when fights don't glow */
+    private volatile java.util.List<NamedTextColor> colours;
+    /** The skins its bots have borrowed: never two the same */
+    private final java.util.Set<String> skins = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private BotShow(final Arena arena, final Location centre) {
         this.arena = arena;
@@ -63,6 +66,7 @@ public final class BotShow implements SumoBot.BotMatch {
             return "That arena has no spawn points.";
         final BotShow show = new BotShow(arena, p1.clone().add(p2).multiply(0.5));
         final int perTeam = levels.size() / 2;
+        show.colours = FightGlow.showColours(show, perTeam > 1);
         // Teammates side by side, across the line between the spawn points
         final Vector across = p2.toVector().subtract(p1.toVector()).setY(0);
         final Vector side = across.lengthSquared() < 1.0E-4 ? new Vector(1, 0, 0) : new Vector(-across.getZ(), 0, across.getX()).normalize();
@@ -186,6 +190,7 @@ public final class BotShow implements SumoBot.BotMatch {
         for (final SumoBot bot : this.spawns.keySet())
             bot.remove();
         this.in.clear();
+        FightGlow.endShow(this);
         // The arena's free again: anyone who queued meanwhile gets their match
         if (this.arena.queue != null)
             Threads.global(() -> this.arena.queue.tryStartFight());
@@ -227,8 +232,16 @@ public final class BotShow implements SumoBot.BotMatch {
     }
 
     @Override
+    public java.util.Set<String> skinsTaken() {
+        return this.skins;
+    }
+
+    @Override
     public NamedTextColor teamColour(final SumoBot bot) {
-        return TEAM_COLOURS[this.teamA.contains(bot) ? 0 : 1];
+        final java.util.List<NamedTextColor> c = this.colours;
+        if (c == null || c.isEmpty())
+            return null;
+        return c.size() > 1 && !this.teamA.contains(bot) ? c.get(1) : c.get(0);
     }
 
     @Override
@@ -241,12 +254,13 @@ public final class BotShow implements SumoBot.BotMatch {
         return null;
     }
 
-    /** To everyone near enough to be watching. */
+    /** To everyone near enough to be watching, who hasn't turned win messages off (/arenawins). */
     @Override
     public void tell(final Component message) {
         for (final Player p : this.centre.getWorld().getPlayers())
             Threads.entity(p, () -> {
-                if (p.isOnline() && p.getWorld().equals(this.centre.getWorld()) && p.getLocation().distance(this.centre) <= TELL_DISTANCE) {
+                if (p.isOnline() && p.getWorld().equals(this.centre.getWorld()) && p.getLocation().distance(this.centre) <= TELL_DISTANCE
+                        && WinMessagePrefs.wantsWinMessages(p)) {
                     p.sendMessage(message);
                     p.playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING, 0.6f, 1.4f);
                 }

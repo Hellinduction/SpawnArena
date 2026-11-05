@@ -51,7 +51,7 @@ public final class FightGlow implements Listener {
             NamedTextColor.GRAY, NamedTextColor.DARK_BLUE, NamedTextColor.DARK_GRAY, NamedTextColor.BLACK};
 
     /** Running fight -> its colours (indexes into COLOURS): one for a 1v1, one per team in a 2v2 */
-    private static final Map<Fight, java.util.List<Integer>> COLOUR_OF = new ConcurrentHashMap<>();
+    private static final Map<Object, java.util.List<Integer>> COLOUR_OF = new ConcurrentHashMap<>(); // (a bot show match's too)
     /** Fighter -> the colour they're outlined in right now */
     private static final Map<UUID, Integer> GLOWING = new ConcurrentHashMap<>();
 
@@ -75,23 +75,7 @@ public final class FightGlow implements Listener {
             return;
         final java.util.List<Player> firstTeam = fight.getTeamOf(fighters.get(0));
         final boolean teams = fight.getMode() == FightMode.TWO_V_TWO;
-        final java.util.List<Integer> colours = new java.util.ArrayList<>();
-        synchronized (COLOUR_OF) {
-            final java.util.Set<Integer> taken = new java.util.HashSet<>();
-            COLOUR_OF.values().forEach(taken::addAll);
-            for (int n = 0; n < (teams ? 2 : 1); n++) {
-                int free = -1;
-                for (int i = 0; i < COLOURS.length && free < 0; i++)
-                    if (!taken.contains(i))
-                        free = i;
-                // More fights than colours: share one, but never the other team's in the same fight
-                if (free < 0)
-                    free = (COLOUR_OF.size() + n) % COLOURS.length;
-                taken.add(free);
-                colours.add(free);
-            }
-            COLOUR_OF.put(fight, colours);
-        }
+        final java.util.List<Integer> colours = pick(fight, teams ? 2 : 1);
 
         for (final Player fighter : fighters) {
             final int colour = colours.size() > 1 && !firstTeam.contains(fighter) ? colours.get(1) : colours.get(0);
@@ -105,6 +89,45 @@ public final class FightGlow implements Listener {
                 colour(fighter, colour, fight);
             });
         }
+    }
+
+    /** Picks {@code count} colours no running fight (or bot show match) has, and keeps them for {@code owner}. */
+    private static java.util.List<Integer> pick(final Object owner, final int count) {
+        final java.util.List<Integer> colours = new java.util.ArrayList<>();
+        synchronized (COLOUR_OF) {
+            final java.util.Set<Integer> taken = new java.util.HashSet<>();
+            COLOUR_OF.values().forEach(taken::addAll);
+            for (int n = 0; n < count; n++) {
+                int free = -1;
+                for (int i = 0; i < COLOURS.length && free < 0; i++)
+                    if (!taken.contains(i))
+                        free = i;
+                // More fights than colours: share one, but never the other team's in the same fight
+                if (free < 0)
+                    free = (COLOUR_OF.size() + n) % COLOURS.length;
+                taken.add(free);
+                colours.add(free);
+            }
+            COLOUR_OF.put(owner, colours);
+        }
+        return colours;
+    }
+
+    /**
+     * A bot show match's outline colours, picked as a fight's are (none another running fight or show has): one for a
+     * 1v1, one per team for a 2v2; given back with {@link #endShow}. Null when fights don't glow.
+     */
+    public static java.util.List<NamedTextColor> showColours(final Object show, final boolean teams) {
+        if (!enabled())
+            return null;
+        final java.util.List<NamedTextColor> out = new java.util.ArrayList<>();
+        for (final int i : pick(show, teams ? 2 : 1))
+            out.add(COLOURS[i]);
+        return out;
+    }
+
+    public static void endShow(final Object show) {
+        COLOUR_OF.remove(show);
     }
 
     /** When the fight is over: frees its colour. Each member's outline is taken off by {@link #remove}. */
