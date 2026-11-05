@@ -15,7 +15,7 @@ public enum BotDifficulty {
     MEDIUM("Medium", "<yellow>", Material.YELLOW_DYE, 2.95, 22, 3, 4, 6, 9, 0.14, 0.65, 0.5, 0.3, 0.85, 1.0, false, 0.2, 0.4, 1.3, 0.0, 0.3, 0.0),
     HARD("Hard", "<red>", Material.RED_DYE, 3.0, 36, 1.3, 3, 5, 7, 0.12, 0.95, 0.75, 0.45, 1.0, 1.0, false, 0.35, 0.7, 1.4, 0.4, 0.55, 0.35),
     CHEATER("Superior Gaming Chair", "<dark_purple>", Material.PURPLE_DYE, 3.4, 48, 0.8, 2, 5, 6, 0.06, 1.0, 0.9, 0.55, 1.0, 0.85, false, 0.45, 0.85, 1.55, 0.5, 0.75, 0.35),
-    COMBO("Combo", "<gold>", Material.BLAZE_POWDER, 3.0, 29, 2.2, 3, 3, 4, 0.13, 0.8, 0.62, 0.38, 0.92, 1.0, true, 0.28, 0.55, 1.35, 0.0, 0.42, 0.0);
+    COMBO("Combo", "<gold>", Material.BLAZE_POWDER, 2.97, 24, 2.7, 4, 3, 5, 0.17, 0.7, 0.55, 0.32, 0.88, 1.0, true, 0.22, 0.45, 1.3, 0.0, 0.35, 0.0);
 
     public final String label, colour;
     public final Material icon;
