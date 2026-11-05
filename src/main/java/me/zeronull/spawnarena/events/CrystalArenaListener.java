@@ -4,6 +4,7 @@ import me.zeronull.spawnarena.*;
 import me.zeronull.spawnarena.CrystalPvp.BlockKey;
 import org.bukkit.*;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
 import org.bukkit.entity.EnderCrystal;
 import org.bukkit.entity.Entity;
@@ -361,6 +362,41 @@ public final class CrystalArenaListener implements Listener {
             if (CrystalPvp.canBreak(originArena, block)) // what was placed in the fight, and the floor below the spawns
                 blocks.add(block);
         return true;
+    }
+
+    // ── Crystal free-for-all: down to the bedrock ──────────────────────────
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void bedrockDug(final BlockBreakEvent e) {
+        bedrockCheck(List.of(e.getBlock()));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void bedrockBlownEntity(final EntityExplodeEvent e) {
+        bedrockCheck(e.blockList());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void bedrockBlownBlock(final BlockExplodeEvent e) {
+        bedrockCheck(e.blockList());
+    }
+
+    private static final BlockFace[] SIDES = {BlockFace.DOWN, BlockFace.UP, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST};
+
+    /** A block next to bedrock gone in a crystal free-for-all's arena (the bedrock's out in the open): it resets soon. */
+    private static void bedrockCheck(final List<Block> gone) {
+        for (final Block block : gone) {
+            final Arena arena = CrystalPvp.arenaAt(block);
+            if (arena == null || block.getType() == Material.BEDROCK)
+                continue;
+            if (!(CrystalPvp.activeFight(arena) instanceof FfaFight ffa))
+                continue;
+            for (final BlockFace side : SIDES)
+                if (block.getRelative(side).getType() == Material.BEDROCK) {
+                    ffa.bedrockReached();
+                    return;
+                }
+        }
     }
 
     // ── Damage ──────────────────────────────────────────────────────────────

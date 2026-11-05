@@ -69,6 +69,8 @@ final class BotPuppet {
     private final java.util.Set<Player> viewers = ConcurrentHashMap.newKeySet();
     /** Viewer -> when to send it to them again: {first, second} (the first is 0 once done) */
     private final Map<UUID, long[]> redrawAt = new ConcurrentHashMap<>();
+    /** Everyone it's ever been sent to: all told it's gone when it goes, viewers now or not */
+    private final java.util.Set<UUID> sentTo = ConcurrentHashMap.newKeySet();
     /** Where each viewer was at the last look (see refreshViewers) */
     private final Map<UUID, org.bukkit.Location> lastAt = new ConcurrentHashMap<>();
     private double x, y, z;
@@ -227,8 +229,11 @@ final class BotPuppet {
             if (now < at[next])
                 continue;
             final Player p = Bukkit.getPlayer(e.getKey());
-            if (p != null && this.viewers.contains(p))
+            if (p != null && this.viewers.contains(p)) {
+                // Taken off first: their game never ends up with two of it (one left standing when it goes)
+                send(p, removePacket.newInstance((Object) new int[]{this.id, this.labelId}));
                 this.spawnFor(p, body);
+            }
             if (next == 0)
                 at[0] = 0;
             else
@@ -299,6 +304,7 @@ final class BotPuppet {
 
     private void spawnFor(final Player viewer, final Mannequin body) throws ReflectiveOperationException {
         final boolean opp = viewer.equals(this.opponent);
+        this.sentTo.add(viewer.getUniqueId());
         send(viewer, infoPacket.newInstance(EnumSet.of((Enum) addPlayer), infoEntry.newInstance(this.uuid, this.gameProfile, false, 0, survival,
                 null, true, 0, null)));
         send(viewer, teamPacket.invoke(null, opp ? this.opponentTeam : this.othersTeam, true));
@@ -401,6 +407,22 @@ final class BotPuppet {
         for (final Player viewer : this.viewers)
             this.despawnFor(viewer);
         this.viewers.clear();
+        // Anyone else it was ever sent to (a watcher who walked off, changed world or relogged meanwhile), and everyone
+        // once more a second on, in case anything of it was still on its way to them
+        final java.util.Set<UUID> all = new java.util.HashSet<>(this.sentTo);
+        this.goneFor(all);
+        Threads.globalLater(() -> this.goneFor(all), 20L);
+    }
+
+    private void goneFor(final java.util.Set<UUID> ids) {
+        for (final UUID id : ids) {
+            final Player p = Bukkit.getPlayer(id);
+            if (p != null)
+                Threads.entity(p, () -> {
+                    if (p.isOnline())
+                        this.despawnFor(p);
+                });
+        }
     }
 
     private Object data(final Mannequin body) throws ReflectiveOperationException {

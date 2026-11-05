@@ -553,14 +553,15 @@ public final class SumoBot {
         if (b == null || !b.isValid())
             return;
         this.tick++;
-        final BotPuppet puppet = this.puppet;
-        if (puppet != null)
-            puppet.update(b);
+        // Over: gone, without being drawn (or sent again to anyone) first
         final FightState state = this.match.state();
         if (state == FightState.ENDING || state == FightState.OVER) {
             this.remove();
             return;
         }
+        final BotPuppet puppet = this.puppet;
+        if (puppet != null)
+            puppet.update(b);
         if (state != FightState.IN_FIGHT || this.foe == null || !this.match.inPlay())
             return;
 

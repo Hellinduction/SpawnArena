@@ -884,6 +884,24 @@ public final class FfaFight extends Fight {
         return minutes <= 0 ? Long.MAX_VALUE / 2 : minutes * 60_000L;
     }
 
+    /** Once bedrock's reached in a crystal free-for-all (dug or blown down to), how soon the arena resets */
+    private static final long BEDROCK_RESET_MILLIS = 30_000;
+
+    /**
+     * Crystal free-for-all: someone's dug or blown down to the bedrock, so the arena resets in 30 seconds (with the
+     * usual warning 10 seconds before), unless it's already due sooner.
+     */
+    public void bedrockReached() {
+        if (!this.arena.isCrystalPvp() || this.resetting || this.getState() != FightState.IN_FIGHT)
+            return;
+        final long at = System.currentTimeMillis() + BEDROCK_RESET_MILLIS;
+        if (this.nextReset <= at)
+            return;
+        this.nextReset = at;
+        this.resetWarned = false;
+        this.tellInside(MiniMessage.miniMessage().deserialize("<yellow>Bedrock's been reached: the arena resets in 30 seconds."), null);
+    }
+
     /**
      * Crystal free-for-all: a session can go on for as long as people keep joining, so every crystalFfaResetMinutes
      * the arena is put back as it was (after a 10 second warning, then 5 to 1 on screen, to those in it) with everyone
