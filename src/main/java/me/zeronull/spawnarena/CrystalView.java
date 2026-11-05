@@ -463,6 +463,28 @@ public final class CrystalView implements Listener {
         }
 
         /** This viewer's game shows the real blocks again. */
+        /**
+         * Their game was just sent this chunk (they teleported here, walked up, or it was reloaded): block changes sent
+         * before it had it were thrown away, so the shown blocks in it go again, a tick on (after the chunk itself).
+         */
+        void chunkSent(final Player player, final org.bukkit.Chunk chunk) {
+            final World world = this.world();
+            if (world == null || this.shown.isEmpty() || !chunk.getWorld().equals(world))
+                return;
+            final int range = SpawnArena.settings == null ? 96 : SpawnArena.settings.crystalViewDistance;
+            if (this.real.distanceFrom(player.getLocation()) > range)
+                return; // not watching (they get everything when they come close enough)
+            final Map<Long, BlockData> in = new HashMap<>();
+            for (final Map.Entry<Long, BlockData> e : this.shown.entrySet())
+                if (unpackX(e.getKey()) >> 4 == chunk.getX() && unpackZ(e.getKey()) >> 4 == chunk.getZ())
+                    in.put(e.getKey(), e.getValue());
+            if (!in.isEmpty())
+                Threads.globalLater(() -> {
+                    if (player.isOnline() && player.getWorld().equals(world))
+                        send(player, world, in);
+                }, 1L);
+        }
+
         private void revert(final Player player, final World world) {
             final Map<Long, BlockData> back = new HashMap<>();
             for (final long p : this.shown.keySet())
@@ -809,6 +831,13 @@ public final class CrystalView implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuit(final org.bukkit.event.player.PlayerQuitEvent e) {
         forget(e.getPlayer());
+    }
+
+    /** A chunk sent to someone's game: the matches' blocks in it go to them again (see View#chunkSent). */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onChunkSent(final io.papermc.paper.event.packet.PlayerChunkLoadEvent e) {
+        for (final View view : VIEWS.values())
+            view.chunkSent(e.getPlayer(), e.getChunk());
     }
 
     private static void forget(final Player player) {
