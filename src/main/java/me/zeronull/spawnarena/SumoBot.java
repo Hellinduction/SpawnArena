@@ -39,8 +39,8 @@ public final class SumoBot {
     private static final double EYE = 1.62;
     /** Chance a losing Superior Gaming Chair bot starts rage cheating, and how far it reaches then. */
     private static final double RAGE_CHANCE = 0.5, RAGE_REACH = 4.0;
-    /** A match it's still in after this long, it rage cheats anyway (a minute) */
-    private static final long RAGE_AFTER_TICKS = 20 * 60;
+    /** A match it's still in after this long, it rage cheats anyway: 35 to 60 seconds, picked for each match */
+    private final long rageAfterTicks = 20L * (35 + ThreadLocalRandom.current().nextInt(26));
     /** A speed hack's bhop speed (blocks a tick): a sprint-jump peaks at about 0.36. */
     private static final double BHOP_SPEED = 0.5;
 
@@ -168,6 +168,15 @@ public final class SumoBot {
         if (b == null)
             return;
         BOTS.remove(b.getUniqueId());
+        // The plugin is stopping: nothing can be scheduled any more, so it goes now (it isn't saved anyway)
+        if (!SpawnArena.INSTANCE.isEnabled()) {
+            try {
+                b.remove();
+            } catch (final RuntimeException ignored) {
+                // Folia: not its thread
+            }
+            return;
+        }
         b.getScheduler().run(SpawnArena.INSTANCE, x -> b.remove(), null);
     }
 
@@ -254,11 +263,11 @@ public final class SumoBot {
             return;
 
         final Location at = b.getLocation();
-        // Out the way a player is: touching the water or lava (where its feet are, not just above it), or out of the
-        // arena (only looked up once it's below the floor, as that's a region lookup)
+        // Out once it touches the water or lava (where its feet are, not just above it), however far it falls first;
+        // or if it somehow falls well below the arena without touching any
         final Block feet = at.getBlock();
         if (me.zeronull.spawnarena.events.LiquidListener.inLiquid(feet) || b.isInWater() || b.isInLava()
-                || (at.getY() < this.centre.getY() - 1 && !this.inArena(at))) {
+                || at.getY() < this.centre.getY() - 30) {
             this.fight.botOut();
             return;
         }
@@ -271,7 +280,7 @@ public final class SumoBot {
         final Vector known = this.seen.peekFirst();
 
         this.aim(at, known);
-        if (this.level.rageCheats && !this.rage && this.tick > RAGE_AFTER_TICKS)
+        if (this.level.rageCheats && !this.rage && this.tick > this.rageAfterTicks)
             this.startRage("has had enough of this...");
         if (this.tick < this.startAt) {
             b.setRotation(this.yaw, this.pitch);
@@ -431,11 +440,6 @@ public final class SumoBot {
         b.setVelocity(dir.multiply(this.bhopSpeed).setY(y));
     }
 
-    private boolean inArena(final Location at) {
-        final Arena here = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(at);
-        return here != null && here.getArenaName().equals(this.fight.getArena().getArenaName());
-    }
-
     /** No floor within a couple of blocks in some direction. */
     private boolean nearEdge(final Location at) {
         for (int i = 0; i < 8; i++) {
@@ -508,8 +512,13 @@ public final class SumoBot {
             this.sprinting = false;
             final boolean tap = random.nextDouble() < this.level.wTapChance;
             this.sprintAgainAt = this.tick + (tap ? 2 + random.nextInt(3) : 15 + random.nextInt(20));
-            if (tap && random.nextDouble() < this.level.sTapChance)
+            // The tap: letting go of forward (W-tap), a step back (S-tap) or a quick crouch (sneak-tap), each ending its
+            // sprint so the next hit has a sprint hit's knockback again: what keeps someone in a combo
+            final double kind = random.nextDouble();
+            if (tap && kind < this.level.sTapChance)
                 this.sTapUntil = this.tick + 2 + random.nextInt(3);
+            else if (tap && kind < this.level.sTapChance + this.level.sneakTapChance)
+                this.sneakUntil = Math.max(this.sneakUntil, this.tick + 2 + random.nextInt(2));
         }
     }
 

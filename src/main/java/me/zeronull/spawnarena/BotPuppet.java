@@ -49,7 +49,7 @@ final class BotPuppet {
     private static final String[] NMS_SLOTS = {"MAINHAND", "OFFHAND", "FEET", "LEGS", "CHEST", "HEAD"};
     /** Fake entity id -> its bot, so a hit on it reaches the bot. */
     private static final Map<Integer, SumoBot> BY_ID = new ConcurrentHashMap<>();
-    /** For team names, one per puppet. */
+    /** For names and team names, one per puppet. */
     private static final java.util.concurrent.atomic.AtomicInteger TEAMS = new java.util.concurrent.atomic.AtomicInteger();
 
     final int id = Bukkit.getUnsafe().nextEntityId();
@@ -96,7 +96,10 @@ final class BotPuppet {
         if (!ready())
             return null;
         try {
-            final String name = "Bot";
+            // A name of its own (never shown: its name is the text display), as one name can only be on one team: two
+            // bots both named Bot would take each other's team, and the name tag hidden by it, when either one ends
+            final int n = TEAMS.incrementAndGet();
+            final String name = "Bot_" + Integer.toString(n, 36);
             final UUID uuid = UUID.randomUUID();
             final com.destroystokyo.paper.profile.PlayerProfile profile = Bukkit.createProfile(uuid, name);
             if (skin != null)
@@ -107,7 +110,7 @@ final class BotPuppet {
             final net.kyori.adventure.text.format.NamedTextColor toOthers = FightGlow.fightOutline(bot.getFight());
             if (toOpponent != null)
                 body.setGlowing(true); // passed on with the rest of its entity data
-            final String teamName = "sa_bot_" + Integer.toHexString(TEAMS.incrementAndGet());
+            final String teamName = "sa_bot_" + Integer.toString(n, 36);
             final BotPuppet puppet = new BotPuppet(uuid, opponent, bot, authlibCopy.invoke(null, profile),
                     team(teamName, name, toOpponent, level), team(teamName, name, toOthers, level), label(toOpponent, level), label(toOthers, level));
             final org.bukkit.Location at = body.getLocation();
