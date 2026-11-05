@@ -140,10 +140,10 @@ final class BotPuppet {
                 profile.setProperties(skin.getProperties());
             // Outlined as a player in the fight is: the other side's colour to its opponent, the fight's to anyone else
             // (the name takes the outline's colour); with no outlines, named in its level's colour
-            // (a show match between bots isn't a fight: no outline)
+            // (a show match between bots isn't a fight: each team in its own colour)
             final Fight fight = bot.getMatch().fight();
-            final net.kyori.adventure.text.format.NamedTextColor toOpponent = fight == null ? null : FightGlow.botOutline(fight);
-            final net.kyori.adventure.text.format.NamedTextColor toOthers = fight == null ? null : FightGlow.fightOutline(fight);
+            final net.kyori.adventure.text.format.NamedTextColor toOpponent = fight == null ? bot.getMatch().teamColour(bot) : FightGlow.botOutline(fight);
+            final net.kyori.adventure.text.format.NamedTextColor toOthers = fight == null ? bot.getMatch().teamColour(bot) : FightGlow.fightOutline(fight);
             if (toOpponent != null)
                 body.setGlowing(true); // passed on with the rest of its entity data
             final String teamName = "sa_bot_" + Integer.toString(n, 36);

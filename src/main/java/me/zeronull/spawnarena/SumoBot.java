@@ -112,17 +112,17 @@ public final class SumoBot {
         this.centre = centre;
     }
 
-    /** For a show match: its foe, another bot, is given once both are made ({@link #fights}). */
+    /** For a show match: its foe, another bot, is given once they're all made ({@link #fight}). */
     SumoBot(final BotMatch match, final BotDifficulty level, final Location centre) {
         this.match = match;
         this.level = level;
         this.centre = centre;
     }
 
-    /** A show match: these two fight each other; {@code otherSpawn} is where the other comes in (until it's there). */
-    static void fights(final SumoBot a, final SumoBot b, final Location aSpawn, final Location bSpawn) {
-        a.foe = new BotFoe(b, bSpawn);
-        b.foe = new BotFoe(a, aSpawn);
+    /** A show match: it goes for {@code other} (which comes in at {@code otherSpawn}, until its body's there). */
+    void fight(final SumoBot other, final Location otherSpawn) {
+        if (!(this.foe instanceof BotFoe f) || f.bot != other)
+            this.foe = new BotFoe(other, otherSpawn);
     }
 
     // ── Who it fights ───────────────────────────────────────────────────────
@@ -144,6 +144,11 @@ public final class SumoBot {
 
         /** Something everyone it concerns hears (a rage message) */
         void tell(net.kyori.adventure.text.Component message);
+
+        /** Its team's outline colour, in a show match (null: none, or as a fight has it) */
+        default net.kyori.adventure.text.format.NamedTextColor teamColour(final SumoBot bot) {
+            return null;
+        }
     }
 
     /** Who a bot fights. */

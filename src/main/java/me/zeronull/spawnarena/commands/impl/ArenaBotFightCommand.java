@@ -17,13 +17,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * /arenabotfight <level> <level> [arena] — two sumo bots fight each other, to watch (see {@link BotShow}).
- * /arenabotfight stop [arena] — ends it. With no arena, the nearest sumo arena.
+ * Like /setupfight, with bots: /arenabotfight [arena] <bot1> <bot2> for a 1v1, or [arena] <bot1> <bot2> <bot3> <bot4>
+ * for a 2v2 (1 and 2 against 3 and 4); each bot is a level. With no arena, the nearest sumo arena.
+ * /arenabotfight stop [arena] ends it. See {@link BotShow}.
  */
 public final class ArenaBotFightCommand implements CommandExecutor, TabCompleter {
 
-    private static final String USAGE = "§cUsage: /arenabotfight <level> <level> [arena]  §7or  §c/arenabotfight stop [arena]"
-            + "  §7(levels: easy, medium, hard, chair, combo)";
+    private static final String USAGE = "§cUsage: /arenabotfight [arena] <bot1> <bot2>  §7or (2v2)  §c/arenabotfight [arena] <bot1> <bot2> <bot3> <bot4>"
+            + "  §7or  §c/arenabotfight stop [arena]  §7(bots: easy, medium, hard, chair, combo)";
+    private static final List<String> LEVELS = List.of("easy", "medium", "hard", "chair", "combo");
     /** Short names for the levels, as well as their own */
     private static final Map<String, BotDifficulty> ALIASES = Map.of(
             "chair", BotDifficulty.CHEATER, "sgc", BotDifficulty.CHEATER, "superior", BotDifficulty.CHEATER);
@@ -40,22 +42,33 @@ public final class ArenaBotFightCommand implements CommandExecutor, TabCompleter
             sender.sendMessage(n == 0 ? "§eNo bot fight is on there." : "§aStopped " + me.zeronull.spawnarena.Grammar.count(n, "bot fight") + ".");
             return true;
         }
-        if (args.length < 2 || args.length > 3) {
+        if (args.length == 0) {
             sender.sendMessage(USAGE);
             return true;
         }
-        final BotDifficulty one = level(args[0]), two = level(args[1]);
-        if (one == null || two == null) {
-            sender.sendMessage("§cUnknown level: " + (one == null ? args[0] : args[1]) + ".");
-            sender.sendMessage(USAGE);
-            return true;
-        }
-        final Arena arena = args.length == 3 ? SpawnArena.arenas.of(args[2]) : nearest(sender);
+        // The arena first, as /setupfight has it (or none: the nearest)
+        final boolean arenaGiven = level(args[0]) == null;
+        final Arena arena = arenaGiven ? SpawnArena.arenas.of(args[0]) : nearest(sender);
         if (arena == null) {
-            sender.sendMessage(args.length == 3 ? "§cThat arena was not found." : "§cNo sumo arena to use: give one, /arenabotfight <level> <level> <arena>.");
+            sender.sendMessage(arenaGiven ? "§c" + args[0] + " isn't an arena or a bot level." : "§cNo sumo arena to use: give one, /arenabotfight <arena> <bot1> <bot2>.");
             return true;
         }
-        final String problem = BotShow.start(arena, one, two);
+        final List<BotDifficulty> levels = new ArrayList<>();
+        for (int i = arenaGiven ? 1 : 0; i < args.length; i++) {
+            final BotDifficulty level = level(args[i]);
+            if (level == null) {
+                sender.sendMessage("§cUnknown bot level: " + args[i] + ".");
+                sender.sendMessage(USAGE);
+                return true;
+            }
+            levels.add(level);
+        }
+        if (levels.size() != 2 && levels.size() != 4) {
+            sender.sendMessage("§cBot fights are 1v1 (2 bots) or 2v2 (4 bots).");
+            sender.sendMessage(USAGE);
+            return true;
+        }
+        final String problem = BotShow.start(arena, levels);
         if (problem != null)
             sender.sendMessage("§c" + problem);
         else if (!(sender instanceof Player p) || p.getWorld() != BotShow.worldOf(arena) || arena.distanceFrom(p.getLocation()) > 64)
@@ -89,12 +102,16 @@ public final class ArenaBotFightCommand implements CommandExecutor, TabCompleter
     @Override
     public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command cmd, @NotNull String label, String[] args) {
         final List<String> options = new ArrayList<>();
-        if (args.length == 1)
+        if (args.length == 1) {
             options.add("stop");
-        if (args.length <= 2 && !(args.length == 2 && args[0].equalsIgnoreCase("stop")))
-            options.addAll(List.of("easy", "medium", "hard", "chair", "combo"));
-        else if (args.length == 3 || (args.length == 2 && args[0].equalsIgnoreCase("stop")))
             SpawnArena.arenas.toList().stream().filter(BotFight::available).forEach(a -> options.add(a.getArenaName()));
+            options.addAll(LEVELS);
+        } else if (args[0].equalsIgnoreCase("stop")) {
+            if (args.length == 2)
+                SpawnArena.arenas.toList().stream().filter(BotFight::available).forEach(a -> options.add(a.getArenaName()));
+        } else if (args.length <= 5) {
+            options.addAll(LEVELS);
+        }
         final String typed = args[args.length - 1].toLowerCase();
         return options.stream().filter(s -> s.toLowerCase().startsWith(typed)).toList();
     }
