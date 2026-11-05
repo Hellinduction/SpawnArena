@@ -66,7 +66,7 @@ public final class MatchSounds implements Listener {
             // Whose is it: the nearest fighter in this arena, if any is right by it
             Fight nearest = null;
             double best = NEAR * NEAR;
-            for (final Fight fight : arena.getFights())
+            for (final Fight fight : arena.getFights()) {
                 for (final Player p : fight.getMembers()) {
                     if (p.getWorld() != at.getWorld())
                         continue;
@@ -76,6 +76,13 @@ public final class MatchSounds implements Listener {
                         nearest = fight;
                     }
                 }
+                // A bot match's bot is its too (its steps, landing, being hit)
+                final Location bot = fight instanceof BotFight botFight ? botFight.botLocation() : null;
+                if (bot != null && bot.getWorld() == at.getWorld() && bot.distanceSquared(at) <= best) {
+                    best = bot.distanceSquared(at);
+                    nearest = fight;
+                }
+            }
             return nearest != null && nearest != own;
         } catch (final Throwable t) {
             return false; // never let a sound check break someone's connection

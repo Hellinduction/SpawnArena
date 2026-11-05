@@ -27,6 +27,13 @@ public final class BotFight extends Fight {
         return this.level;
     }
 
+    /** Where its bot is now, or null if it isn't in yet (or any more). */
+    public Location botLocation() {
+        final SumoBot b = this.bot;
+        final org.bukkit.entity.Mannequin body = b == null ? null : b.getBody();
+        return body == null ? null : body.getLocation();
+    }
+
     /** Whether bot matches can be played in this arena: a sumo arena (touching water loses) that isn't a free-for-all. */
     public static boolean available(final Arena arena) {
         return arena != null && arena.isDeathOnTouchLiquid() && !arena.isFfa() && arena.isSetUp();
@@ -130,7 +137,7 @@ public final class BotFight extends Fight {
         final SumoBot b = this.bot;
         this.bot = null;
         if (b != null)
-            b.finish();
+            b.remove();
         super.endFight();
     }
 

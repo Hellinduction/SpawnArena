@@ -41,10 +41,14 @@ public final class SumoBot {
     private static final double RAGE_CHANCE = 0.5, RAGE_REACH = 4.0;
     /** A match it's still in after this long, it rage cheats anyway: 12 to 25 seconds, picked for each match */
     private final long rageAfterTicks = 20L * (12 + ThreadLocalRandom.current().nextInt(14));
+    /**
+     * Times it's been hit near the edge (close calls), and how many it takes this match (2 to 4) before it'll rage cheat
+     * at all: only once it's really been in trouble, whether it's losing or the timer's up.
+     */
+    private volatile int closeCalls;
+    private final int closeCallsToRage = 2 + ThreadLocalRandom.current().nextInt(3);
     /** A speed hack's bhop speed (blocks a tick), steady: a sprint-jump peaks at about 0.36. */
     private static final double BHOP_SPEED = 0.42;
-    /** How long it's seen falling into the lava or water once it's out (a second) */
-    private static final long SINK_TICKS = 20;
 
     private final BotFight fight;
     private final Player target;
@@ -85,8 +89,6 @@ public final class SumoBot {
      * is a fresh sprint hit; until it's hit back, misses twice, or they're knocked out of reach.
      */
     private volatile boolean comboing;
-    /** Out (in the lava or water): it's left to fall and sink in, with no more thinking, until this tick, then goes. */
-    private volatile long sinkUntil = -1;
     private volatile int hitsInARow;
     private int comboMisses, comboStep;
     /** Where its opponent was, the last few ticks: it acts on where they were reactionTicks ago. */
@@ -193,12 +195,6 @@ public final class SumoBot {
         b.getScheduler().run(SpawnArena.INSTANCE, x -> b.remove(), null);
     }
 
-    /** The match is over: it goes, unless it's out and still falling in (it goes by itself once it's sunk). */
-    void finish() {
-        if (this.sinkUntil < 0)
-            this.remove();
-    }
-
     /** Every bot goes (the plugin is stopping). */
     public static void removeAll() {
         for (final SumoBot bot : BOTS.values())
@@ -241,11 +237,14 @@ public final class SumoBot {
             this.nextSwingAt = Math.max(this.nextSwingAt, this.tick + this.level.reactionTicks + random.nextInt(3));
         this.hitNext = true;
         this.hitsTaken++;
+        final boolean closeCall = this.nearEdge(b.getLocation());
+        if (closeCall)
+            this.closeCalls++;
         this.hitsInARow = 0;
         this.comboing = false;
         this.knockedUntil = this.tick + 6;
-        if (this.level.rageCheats && !this.rageRolled && this.hitsTaken >= 3
-                && (this.hitsTaken - this.hitsLanded >= 4 || this.nearEdge(b.getLocation()))) {
+        if (this.level.rageCheats && !this.rageRolled && this.closeCalls >= this.closeCallsToRage
+                && (this.hitsTaken - this.hitsLanded >= 4 || closeCall)) {
             this.rageRolled = true;
             if (random.nextDouble() < RAGE_CHANCE)
                 this.startRage("is losing...");
@@ -279,11 +278,6 @@ public final class SumoBot {
         final BotPuppet puppet = this.puppet;
         if (puppet != null)
             puppet.update(b);
-        if (this.sinkUntil >= 0) {
-            if (this.tick >= this.sinkUntil)
-                this.remove();
-            return;
-        }
         final FightState state = this.fight.getState();
         if (state == FightState.ENDING || state == FightState.OVER) {
             this.remove();
@@ -293,12 +287,9 @@ public final class SumoBot {
             return;
 
         final Location at = b.getLocation();
-        // Out once it touches the water or lava (where its feet are, not just above it), however far it falls first;
-        // or if it somehow falls well below the arena without touching any
-        final Block feet = at.getBlock();
-        if (me.zeronull.spawnarena.events.LiquidListener.inLiquid(feet) || b.isInWater() || b.isInLava()
-                || at.getY() < this.centre.getY() - 30) {
-            this.sinkUntil = this.tick + SINK_TICKS; // seen going in, not just vanishing at the edge
+        // Out exactly when a player would be: once the block at its feet is water or lava (not just touching some at its
+        // side, or above it), however far it falls first; or if it somehow falls well below the arena without any
+        if (me.zeronull.spawnarena.events.LiquidListener.inLiquid(at.getBlock()) || at.getY() < this.centre.getY() - 30) {
             this.fight.botOut();
             return;
         }
@@ -311,7 +302,7 @@ public final class SumoBot {
         final Vector known = this.seen.peekFirst();
 
         this.aim(at, known);
-        if (this.level.rageCheats && !this.rage && this.tick > this.rageAfterTicks)
+        if (this.level.rageCheats && !this.rage && this.tick > this.rageAfterTicks && this.closeCalls >= this.closeCallsToRage)
             this.startRage("has had enough of this...");
         if (this.tick < this.startAt) {
             b.setRotation(this.yaw, this.pitch);
