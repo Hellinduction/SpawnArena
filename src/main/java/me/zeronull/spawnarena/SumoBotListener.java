@@ -124,4 +124,10 @@ public final class SumoBotListener implements Listener {
             if (SumoBot.isLeftover(entity))
                 entity.getScheduler().run(SpawnArena.INSTANCE, t -> entity.remove(), null);
     }
+
+    /** Gone: what bots remember of them is already kept with them (it's loaded again at their next bot match). */
+    @EventHandler
+    public void onQuit(final org.bukkit.event.player.PlayerQuitEvent e) {
+        BotMemory.forget(e.getPlayer().getUniqueId());
+    }
 }

@@ -27,6 +27,10 @@ import java.util.Map;
 public final class BotMenu implements InventoryHolder {
     private static final int[] SLOTS = {10, 11, 12, 14, 15, 16};
     private static final int SLOT_BACK = 22;
+    /** In the middle: fight the bot you fought last again */
+    private static final int SLOT_AGAIN = 13;
+    /** The last bot level a player fought (kept with the player, so it's still there after a restart) */
+    private static final org.bukkit.NamespacedKey LAST_KEY = new org.bukkit.NamespacedKey(SpawnArena.INSTANCE, "last_bot_level");
     private static final Map<BotDifficulty, List<String>> ABOUT = Map.ofEntries(
             Map.entry(BotDifficulty.EASY, List.of("<gray>A casual player: a bit", "<gray>slow, misses now and then.")),
             Map.entry(BotDifficulty.MEDIUM, List.of("<gray>A decent player: w-taps,", "<gray>strafes and jump-resets.")),
@@ -57,7 +61,25 @@ public final class BotMenu implements InventoryHolder {
             lore.add("<green>Click to fight");
             this.inventory.setItem(SLOTS[i], item(level.icon, level.colour + "<bold>" + level.label + " Bot", lore));
         }
+        final BotDifficulty last = last(viewer);
+        this.inventory.setItem(SLOT_AGAIN, last == null
+                ? item(Material.NETHER_STAR, "<white><bold>Play Again", List.of("<gray>Fights the bot you fought", "<gray>last again.", "", "<dark_gray>You haven't fought one yet:", "<dark_gray>pick one either side."))
+                : glow(item(Material.NETHER_STAR, "<white><bold>Play Again", List.of("<gray>Fights the bot you fought", "<gray>last again:", "<gray>the " + last.coloured() + " <gray>bot.",
+                "", "<gray>Bots beaten: <white>" + beaten.getOrDefault(last.name(), 0), "", "<green>Click to fight it again"))));
         this.inventory.setItem(SLOT_BACK, item(Material.ARROW, "<gray>Back", List.of("<gray>To the queue menu")));
+    }
+
+    /** The bot level this player fought last, or null. */
+    private static BotDifficulty last(final Player player) {
+        final String name = player.getPersistentDataContainer().get(LAST_KEY, org.bukkit.persistence.PersistentDataType.STRING);
+        return name == null ? null : BotDifficulty.of(name);
+    }
+
+    private static ItemStack glow(final ItemStack item) {
+        final ItemMeta meta = item.getItemMeta();
+        meta.setEnchantmentGlintOverride(true);
+        item.setItemMeta(meta);
+        return item;
     }
 
     public static void open(final Player player, final Arena arena) {
@@ -113,7 +135,7 @@ public final class BotMenu implements InventoryHolder {
                 }, 1L);
                 return;
             }
-            BotDifficulty level = null;
+            BotDifficulty level = e.getSlot() == SLOT_AGAIN ? last(player) : null;
             for (int i = 0; i < SLOTS.length && i < BotDifficulty.values().length; i++)
                 if (SLOTS[i] == e.getSlot())
                     level = BotDifficulty.values()[i];
@@ -131,6 +153,8 @@ public final class BotMenu implements InventoryHolder {
                 final String problem = BotFight.start(player, arena, chosen);
                 if (problem != null)
                     player.sendMessage(ChatColor.RED + problem);
+                else
+                    player.getPersistentDataContainer().set(LAST_KEY, org.bukkit.persistence.PersistentDataType.STRING, chosen.name());
             }, 1L);
         }
 

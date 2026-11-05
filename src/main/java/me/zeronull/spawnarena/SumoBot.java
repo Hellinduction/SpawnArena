@@ -106,6 +106,22 @@ public final class SumoBot {
     private volatile boolean comboing;
     private volatile int hitsInARow;
     private int comboMisses, comboStep;
+    /** Master: the tap it did last (0 an S-tap, 1 a sneak-tap, 2 a W-tap), so a shuffled run doesn't repeat one too much */
+    private int lastTap = -1;
+    /** How it plays this match (Master: one picked each match, so it can't be learnt; the others: the usual) */
+    private final Style style;
+    /** What it remembers of the player it's fighting (null in a show match): see {@link BotMemory} */
+    private final BotMemory memory;
+    /**
+     * What it's seen of them this match, to remember after: ticks strafing its right and left, the strafe run going
+     * now and the finished ones (ticks in all, how many), times they came in from range and how many by sprint-jumping
+     */
+    private int seenRight, seenLeft, runNow, runTicksSeen, runsSeen, approachesSeen, jumpInsSeen;
+    /** Coming in from range (they were over 4.5 away), whether they jumped on the way, where their feet were last tick */
+    private boolean comingIn, jumpedComingIn;
+    private double foeYBefore = Double.NaN;
+    /** The tick it last landed a hit (its knockback lifts them: not a jump) */
+    private long landedAt = -100;
     /** Where its opponent was, the last few ticks: it acts on where they were reactionTicks ago. */
     private final Deque<Vector> seen = new ArrayDeque<>();
 
@@ -114,6 +130,8 @@ public final class SumoBot {
         this.foe = new PlayerFoe(target);
         this.level = level;
         this.centre = centre;
+        this.memory = BotMemory.of(target.getUniqueId());
+        this.style = Style.of(level, this.memory);
     }
 
     /** For a show match: its foe, another bot, is given once they're all made ({@link #fight}). */
@@ -121,6 +139,55 @@ public final class SumoBot {
         this.match = match;
         this.level = level;
         this.centre = centre;
+        this.memory = null;
+        this.style = Style.of(level, null);
+    }
+
+    /**
+     * A way of playing, on top of its level: how close it lets them get before backing off, how much it strafes and how
+     * often it switches way, how often it sprint-jumps in and jump-resets, and how much it S-taps rather than W-taps.
+     * A Master bot plays a different one each match, so the next match it isn't the same player to read: against a
+     * player it's fought before, more often the ones that have beaten them ({@link BotMemory}).
+     */
+    private enum Style {
+        //            backOff strafe switch jumpIn jumpReset sTap
+        USUAL(1.3, 1.0, 25, 1.0, 1.0, 1.0),
+        /** Rushes in: sprint-jumps in more, stays close, W-taps more */
+        AGGRESSIVE(1.0, 0.7, 25, 1.7, 0.9, 0.6),
+        /** Keeps its distance: backs off sooner, S-taps a lot, jump-resets more, rarely jumps in */
+        DEFENSIVE(1.8, 1.15, 22, 0.5, 1.2, 1.3),
+        /** Strafes hard and switches way often, hard to hit */
+        STRAFER(1.3, 1.35, 12, 0.9, 1.0, 1.0),
+        /** A bit of all of it */
+        BALANCED(1.4, 1.1, 18, 1.2, 1.1, 1.1);
+
+        final double backOff, strafe, jumpIn, jumpReset, sTap;
+        final int strafeSwitch;
+
+        Style(final double backOff, final double strafe, final int strafeSwitch, final double jumpIn, final double jumpReset, final double sTap) {
+            this.backOff = backOff;
+            this.strafe = strafe;
+            this.strafeSwitch = strafeSwitch;
+            this.jumpIn = jumpIn;
+            this.jumpReset = jumpReset;
+            this.sTap = sTap;
+        }
+
+        /** Master's, in {@link BotMemory}'s order */
+        static final Style[] MASTER_STYLES = {AGGRESSIVE, DEFENSIVE, STRAFER, BALANCED};
+
+        static Style of(final BotDifficulty level, final BotMemory memory) {
+            if (level != BotDifficulty.MASTER)
+                return USUAL;
+            return MASTER_STYLES[memory != null ? memory.pickStyle() : ThreadLocalRandom.current().nextInt(MASTER_STYLES.length)];
+        }
+
+        int index() {
+            for (int i = 0; i < MASTER_STYLES.length; i++)
+                if (MASTER_STYLES[i] == this)
+                    return i;
+            return -1;
+        }
     }
 
     /** A show match: it goes for {@code other} (which comes in at {@code otherSpawn}, until its body's there). */
@@ -301,7 +368,34 @@ public final class SumoBot {
             });
         // A moment to react to the start, like anyone
         this.startAt = this.level.reactionTicks + 4;
+        // Master remembers which way they like to strafe: it's half read before they've moved
+        if (this.plays()) {
+            final double side = this.memory.strafeSide();
+            if (Math.abs(side) > 0.1) {
+                this.strafeWay = side > 0 ? 1 : -1;
+                this.strafeRead = 0.5 * Math.abs(side);
+            }
+        }
         this.task = this.body.getScheduler().runAtFixedRate(SpawnArena.INSTANCE, t -> this.tick(), null, 1L, 1L);
+    }
+
+    /** Plays on what it remembers of them (Master, against a player). */
+    private boolean plays() {
+        return this.memory != null && this.level == BotDifficulty.MASTER;
+    }
+
+    /**
+     * Its practice match is over: what it saw of them is remembered (and, for Master, whether its style worked), and
+     * kept with them. From any thread.
+     */
+    void remember(final boolean botWon) {
+        final BotMemory m = this.memory;
+        final Player p = this.getTarget();
+        if (m == null || p == null)
+            return;
+        m.learn(this.level == BotDifficulty.MASTER ? this.style.index() : -1, botWon, this.seenRight, this.seenLeft,
+                this.runTicksSeen, this.runsSeen, this.approachesSeen, this.jumpInsSeen);
+        Threads.entity(p, () -> BotMemory.save(p));
     }
 
     /** Gone (the fight's over): from any thread. */
@@ -359,7 +453,7 @@ public final class SumoBot {
             final Location at = b.getLocation(), from = this.foe.location();
             p.hurt((float) (Math.toDegrees(Math.atan2(from.getZ() - at.getZ(), from.getX() - at.getX())) - at.getYaw()));
         }
-        if (ThreadLocalRandom.current().nextDouble() < this.level.jumpResetChance)
+        if (ThreadLocalRandom.current().nextDouble() < this.level.jumpResetChance * this.style.jumpReset)
             this.jumpResetNext = true;
         // Thrown off by the hit, as a player is: its aim jolts (less the better it is) and it takes a moment to swing
         // back, so a run of good hits can keep it in a combo
@@ -431,6 +525,7 @@ public final class SumoBot {
         while (this.seen.size() > this.level.reactionTicks + 1)
             this.seen.removeFirst();
         this.readStrafe(at);
+        this.watchComingIn(at, now);
         final Vector known = this.seen.peekFirst();
 
         this.aim(at, known);
@@ -462,7 +557,7 @@ public final class SumoBot {
         if (sideLength > 1.0E-4) {
             final double sideX = -dz / sideLength, sideZ = dx / sideLength; // sideways to it
             // (and, once it's read their strafe, a little ahead of them that way)
-            final double ahead = this.driftSide + this.strafeWay * this.strafeRead * 0.5;
+            final double ahead = this.driftSide + this.strafeWay * this.strafeRead * 0.5 * this.switchDue();
             dx += sideX * ahead;
             dz += sideZ * ahead;
         }
@@ -487,6 +582,17 @@ public final class SumoBot {
         this.pitch = (float) Math.max(-90, Math.min(90, this.pitch + this.pitchSpeed));
     }
 
+    /**
+     * Master knows about how long they keep strafing one way before switching: once this strafe has gone on about that
+     * long it leads them much less, expecting the switch (1: leads as usual).
+     */
+    private double switchDue() {
+        if (!this.plays())
+            return 1;
+        final double usual = this.memory.averageRun(this.runTicksSeen, this.runsSeen);
+        return usual > 0 && this.runNow > usual * 0.85 ? 0.3 : 1;
+    }
+
     private static double clamp(final double value, final double limit) {
         return Math.max(-limit, Math.min(limit, value));
     }
@@ -502,7 +608,7 @@ public final class SumoBot {
 
         // Like a player: keeps pushing in, sprinting (each hit's knockback makes the gap), backing off only when right
         // on top of them; strafing when close
-        double ahead = distance < 1.3 ? -0.6 : 1;
+        double ahead = distance < this.style.backOff ? -0.6 : 1;
         if (this.tick < this.sTapUntil)
             ahead = -1; // S-tap: a quick step back
         double across = 0;
@@ -511,9 +617,9 @@ public final class SumoBot {
         if (this.level.strafe > 0 && distance < 5 && !this.comboing && this.tick >= this.straightUntil) {
             if (this.tick >= this.strafeUntil) {
                 this.strafeDir = random.nextBoolean() ? 1 : -1;
-                this.strafeUntil = this.tick + 8 + random.nextInt(25);
+                this.strafeUntil = this.tick + 8 + random.nextInt(this.style.strafeSwitch);
             }
-            across = this.strafeDir * this.level.strafe;
+            across = this.strafeDir * Math.min(1, this.level.strafe * this.style.strafe);
             // Circling round each other with nothing landing: a player doesn't keep that up, they break it, switching
             // way or cutting straight in for a moment
             if (++this.circling > this.circleLimit) {
@@ -585,7 +691,7 @@ public final class SumoBot {
         final boolean jumpReset = this.jumpResetNext;
         this.jumpResetNext = false;
         final boolean wantJump = !sneak && (jumpReset
-                || (sprint && distance > 3 && distance < 6 && random.nextDouble() < this.level.sprintJumpChance * 0.15));
+                || (sprint && distance > 3 && distance < 6 && random.nextDouble() < this.level.sprintJumpChance * this.style.jumpIn * 0.15));
         if (wantJump && ground && this.tick >= this.jumpCooldownUntil) {
             velocity.setY(JUMP);
             if (sprint || jumpReset)
@@ -709,19 +815,24 @@ public final class SumoBot {
             // The tap: letting go of forward (W-tap), a step back (S-tap) or a quick crouch (sneak-tap), each ending its
             // sprint so the next hit has a sprint hit's knockback again: what keeps someone in a combo
             final double kind = random.nextDouble();
-            if (this.comboing) {
-                // The pattern: a sneak-tap, then a W-tap, then a sneak-tap...; Master: an S-tap, a sneak-tap, a W-tap...
-                final int step = this.comboStep++;
-                if (this.level == BotDifficulty.MASTER) {
-                    if (step % 3 == 0)
-                        this.sTapUntil = this.tick + 2 + random.nextInt(2);
-                    else if (step % 3 == 1)
-                        this.sneakUntil = Math.max(this.sneakUntil, this.tick + 4 + random.nextInt(3));
-                } else if (step % 2 == 0)
+            if (this.comboing && this.level == BotDifficulty.MASTER) {
+                // Master: an S-tap, sneak-tap or W-tap in no set order (never the same one twice running), so there's
+                // no pattern to read
+                int pick = random.nextInt(3);
+                if (pick == this.lastTap)
+                    pick = (pick + 1 + random.nextInt(2)) % 3;
+                this.lastTap = pick;
+                if (pick == 0)
+                    this.sTapUntil = this.tick + 2 + random.nextInt(2);
+                else if (pick == 1)
                     this.sneakUntil = Math.max(this.sneakUntil, this.tick + 4 + random.nextInt(3));
-            } else if (tap && kind < this.level.sTapChance)
+            } else if (this.comboing) {
+                // The pattern: a sneak-tap, then a W-tap, then a sneak-tap...
+                if (this.comboStep++ % 2 == 0)
+                    this.sneakUntil = Math.max(this.sneakUntil, this.tick + 4 + random.nextInt(3));
+            } else if (tap && kind < this.level.sTapChance * this.style.sTap)
                 this.sTapUntil = this.tick + 2 + random.nextInt(3);
-            else if (tap && kind < this.level.sTapChance + this.level.sneakTapChance)
+            else if (tap && kind < this.level.sTapChance * this.style.sTap + this.level.sneakTapChance)
                 this.sneakUntil = Math.max(this.sneakUntil, this.tick + 4 + random.nextInt(3));
         }
     }
@@ -729,6 +840,7 @@ public final class SumoBot {
     /** It landed a hit: a run of them starts a combo (bots that sneak-tap). */
     private void landed() {
         this.hitsLanded++;
+        this.landedAt = this.tick;
         this.circling = 0;
         // (Master starts on its first clean hit; the others once they've landed two in a row)
         if (++this.hitsInARow >= (this.level == BotDifficulty.MASTER ? 1 : 2) && this.level.sneakTapChance > 0 && !this.comboing) {
@@ -823,6 +935,40 @@ public final class SumoBot {
         return Math.min(0.6, across / 0.25 * 0.5 * (1 - this.level.strafeResist)) * (1 - 0.6 * this.strafeRead);
     }
 
+    /**
+     * Each tick: whether they're coming in from range, and if they sprint-jump in. Master, knowing they usually do,
+     * steps back as they jump, so they come down short (or over-reach), and it gets the first hit.
+     */
+    private void watchComingIn(final Location at, final Location them) {
+        if (!(this.foe instanceof PlayerFoe))
+            return;
+        final double distance = Math.hypot(them.getX() - at.getX(), them.getZ() - at.getZ());
+        final double rise = Double.isNaN(this.foeYBefore) ? 0 : them.getY() - this.foeYBefore;
+        this.foeYBefore = them.getY();
+        if (distance > 4.5) {
+            this.comingIn = true;
+            this.jumpedComingIn = false;
+            return;
+        }
+        if (!this.comingIn)
+            return;
+        // A jump (not the hop of its own hit's knockback) while closing in
+        if (rise > 0.3 && distance > 2.8 && this.tick - this.landedAt > 10 && !this.jumpedComingIn) {
+            this.jumpedComingIn = true;
+            if (this.plays()) {
+                final double rate = this.memory.jumpInRate(this.approachesSeen, this.jumpInsSeen);
+                if (rate > 0.3 && ThreadLocalRandom.current().nextDouble() < rate)
+                    this.sTapUntil = this.tick + 3 + ThreadLocalRandom.current().nextInt(2);
+            }
+        }
+        if (distance < 3.5) {
+            this.comingIn = false;
+            this.approachesSeen++;
+            if (this.jumpedComingIn)
+                this.jumpInsSeen++;
+        }
+    }
+
     /** Each tick: which way they're strafing, and whether it's the same way as before (see strafeRead). */
     private void readStrafe(final Location at) {
         if (this.seen.size() < 3)
@@ -839,10 +985,22 @@ public final class SumoBot {
             return;
         }
         final int way = sideways > 0 ? 1 : -1;
+        if (way > 0)
+            this.seenRight++;
+        else
+            this.seenLeft++;
         if (way != this.strafeWay) {
+            if (this.runNow >= 4) {
+                this.runTicksSeen += this.runNow;
+                this.runsSeen++;
+            }
+            this.runNow = 0;
             this.strafeWay = way;
-            this.strafeRead = 0;
+            // (Master, knowing their usual way, reads a switch to it straight away, a bit)
+            final double side = this.plays() ? this.memory.strafeSide() : 0;
+            this.strafeRead = side * way > 0.1 ? 0.5 * Math.abs(side) : 0;
         }
+        this.runNow++;
         // About 3 seconds of the same strafe to read it fully for Easy, about 1.2 for the best
         this.strafeRead = Math.min(1, this.strafeRead + (1 + 1.5 * this.level.strafeResist) / 60);
     }

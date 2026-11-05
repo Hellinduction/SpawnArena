@@ -89,6 +89,7 @@ public final class BotFight extends Fight implements SumoBot.BotMatch {
         final Arena where = arena.arenaForNewFight();
         if (where == null)
             return "That arena is busy right now. Try again in a moment.";
+        BotMemory.load(player); // (what bots remember of them: on their thread, before the bot's made)
         final BotFight fight = new BotFight(player, level);
         fight.asDuel(); // nothing at stake: no requeue, no bets, no lag-out used up
         fight.initiateTeamFight(List.of(player), List.of(), where);
@@ -147,6 +148,9 @@ public final class BotFight extends Fight implements SumoBot.BotMatch {
 
     private void result(final boolean won) {
         final Player p = this.player;
+        final SumoBot bot = this.bot;
+        if (bot != null)
+            bot.remember(!won);
         final String level = this.level.coloured();
         final net.kyori.adventure.title.Title.Times times = net.kyori.adventure.title.Title.Times.times(
                 java.time.Duration.ofMillis(250), java.time.Duration.ofMillis(2500), java.time.Duration.ofMillis(750));
