@@ -32,7 +32,7 @@ public final class BotMenu implements InventoryHolder {
             BotDifficulty.MEDIUM, List.of("<gray>A decent player: w-taps,", "<gray>strafes and jump-resets."),
             BotDifficulty.HARD, List.of("<gray>W-taps, strafes, jump-resets", "<gray>and stays off the edge."),
             BotDifficulty.CHEATER, List.of("<gray>Hard, with extra reach", "<gray>and less knockback taken.", "<gray>If it starts losing... it", "<gray>might stop hiding it."),
-            BotDifficulty.COMBO, List.of("<gray>Medium, with fists and", "<gray>no hit delay: combos!"));
+            BotDifficulty.COMBO, List.of("<gray>Between Medium and Hard,", "<gray>with fists and no hit", "<gray>delay: combos!"));
 
     private final String arenaName;
     private final Inventory inventory;

@@ -102,6 +102,22 @@ public final class SumoBotListener implements Listener {
             player.attack(body);
     }
 
+    // Their game may have dropped the bots it was shown (they're packets only): sent to them again once they've settled
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(final org.bukkit.event.player.PlayerTeleportEvent e) {
+        BotPuppet.redraw(e.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onWorldChange(final org.bukkit.event.player.PlayerChangedWorldEvent e) {
+        BotPuppet.redraw(e.getPlayer());
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onRespawn(final org.bukkit.event.player.PlayerRespawnEvent e) {
+        BotPuppet.redraw(e.getPlayer());
+    }
+
     @EventHandler
     public void onLoad(final org.bukkit.event.world.EntitiesLoadEvent e) {
         for (final Entity entity : e.getEntities())

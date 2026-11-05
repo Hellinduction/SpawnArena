@@ -67,6 +67,10 @@ final class BotPuppet {
     private final Object opponentLabel, othersLabel;
     /** Everyone it's drawn for now: its opponent, and anyone watching who isn't in another fight in this arena */
     private final java.util.Set<Player> viewers = ConcurrentHashMap.newKeySet();
+    /** Viewer -> when to send it to them again: {first, second} (the first is 0 once done) */
+    private final Map<UUID, long[]> redrawAt = new ConcurrentHashMap<>();
+    /** Where each viewer was at the last look (see refreshViewers) */
+    private final Map<UUID, org.bukkit.Location> lastAt = new ConcurrentHashMap<>();
     private double x, y, z;
     private float yaw, pitch;
     private final ItemStack[] gear = new ItemStack[GEAR.length];
@@ -87,6 +91,18 @@ final class BotPuppet {
 
     static SumoBot botOf(final int entityId) {
         return BY_ID.get(entityId);
+    }
+
+    /**
+     * {@code player} was just teleported, respawned or moved world: their game may have thrown away every entity it had
+     * (a world change does, and so can a plugin's loading screen on a teleport), bots included, which the server doesn't
+     * send again by itself. So the bots they see are sent to them again, a second and three seconds on (once their game
+     * has settled); if it kept them, that changes nothing.
+     */
+    static void redraw(final Player player) {
+        final long now = System.currentTimeMillis();
+        for (final BotPuppet puppet : SHOWN)
+            puppet.redrawAt.put(player.getUniqueId(), new long[]{now + 1000, now + 3000});
     }
 
     /**
@@ -176,8 +192,9 @@ final class BotPuppet {
         final java.util.Set<Player> should = new java.util.HashSet<>();
         if (this.opponent.isOnline() && this.opponent.getWorld().equals(body.getWorld()))
             should.add(this.opponent);
-        for (final Player p : body.getWorld().getNearbyPlayers(body.getLocation(), VIEW_DISTANCE))
-            if (!p.equals(this.opponent) && !this.inOtherMatchHere(p))
+        final org.bukkit.Location bodyAt = body.getLocation();
+        for (final Player p : body.getWorld().getNearbyPlayers(bodyAt, VIEW_DISTANCE))
+            if (!p.equals(this.opponent) && !this.inOtherMatchHere(p) && withinView(p, bodyAt))
                 should.add(p);
         for (final java.util.Iterator<Player> it = this.viewers.iterator(); it.hasNext(); ) {
             final Player p = it.next();
@@ -190,6 +207,39 @@ final class BotPuppet {
         for (final Player p : should)
             if ((p.equals(this.opponent) || !this.inOtherMatchHere(p)) && this.viewers.add(p)) // (asked again: one may just have started)
                 this.spawnFor(p, body);
+        // Sent again to anyone whose game may have dropped it (see redraw): after a teleport event, or a jump in where
+        // they are or which world (some teleports, e.g. Folia's, come with no event)
+        final long now = System.currentTimeMillis();
+        for (final Player p : this.viewers) {
+            final org.bukkit.Location here = p.getLocation(), was = this.lastAt.put(p.getUniqueId(), here);
+            if (was != null && (was.getWorld() != here.getWorld() || was.distanceSquared(here) > 64))
+                this.redrawAt.put(p.getUniqueId(), new long[]{now + 1000, now + 3000});
+        }
+        for (final java.util.Iterator<Map.Entry<UUID, long[]>> it = this.redrawAt.entrySet().iterator(); it.hasNext(); ) {
+            final Map.Entry<UUID, long[]> e = it.next();
+            final long[] at = e.getValue();
+            final int next = at[0] > 0 ? 0 : 1;
+            if (now < at[next])
+                continue;
+            final Player p = Bukkit.getPlayer(e.getKey());
+            if (p != null && this.viewers.contains(p))
+                this.spawnFor(p, body);
+            if (next == 0)
+                at[0] = 0;
+            else
+                it.remove();
+        }
+    }
+
+    /**
+     * Close enough that their game keeps the chunk it's in loaded: past their view distance, their game throws away the
+     * entities in chunks it unloads, this one included, and the server wouldn't send it again; taken off before then,
+     * it's drawn again when they come back.
+     */
+    private static boolean withinView(final Player p, final org.bukkit.Location at) {
+        final int chunks = Math.min(p.getViewDistance(), p.getClientViewDistance());
+        final double blocks = Math.max(16, (chunks - 1) * 16);
+        return p.getLocation().distanceSquared(at) <= blocks * blocks;
     }
 
     /** In another match in this bot's arena: fighters of different matches there don't see each other. */

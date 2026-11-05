@@ -114,7 +114,9 @@ public class ArenaPlayerLeaveAreaEvent implements Listener {
 
     /**
      * Where a fighter's pearl puts them: where it landed if they fit there and it's in their arena (head under a
-     * crystal arena's ceiling too), else the nearest such spot within {@link #PEARL_SEARCH} blocks, or null.
+     * crystal arena's ceiling too), else the nearest such spot within {@link #PEARL_SEARCH} blocks; else (it landed
+     * further out) the furthest such spot back along its way from them, even in the air, so a pearl thrown out of the
+     * arena still takes them as far as it can inside it; null only if there's none.
      */
     private static org.bukkit.Location nearestFreeSpot(final Player player, final Arena arena, final org.bukkit.Location landed) {
         if (fits(player, arena, landed))
@@ -132,12 +134,27 @@ public class ArenaPlayerLeaveAreaEvent implements Listener {
         for (final org.bukkit.Location spot : spots)
             if (fits(player, arena, spot))
                 return spot;
+        // Back from where it landed towards where they are (inside the arena), half a block at a time
+        final org.bukkit.Location from = player.getLocation();
+        if (from.getWorld() != landed.getWorld())
+            return null;
+        final org.bukkit.util.Vector back = from.toVector().subtract(landed.toVector());
+        final int steps = (int) Math.ceil(back.length() / 0.5);
+        for (int i = 1; i <= steps; i++) {
+            final org.bukkit.Location spot = landed.clone().add(back.clone().multiply((double) i / steps));
+            if (fits(player, arena, spot))
+                return spot;
+        }
         return null;
     }
 
     private static boolean fits(final Player player, final Arena arena, final org.bukkit.Location loc) {
         if (player.collidesAt(loc) || !arena.equals(SpawnArena.arenas.of(loc)))
             return false;
+        // Not into lava (or fire), feet or head
+        for (final org.bukkit.block.Block b : new org.bukkit.block.Block[]{loc.getBlock(), loc.clone().add(0, 1, 0).getBlock()})
+            if (b.getType() == Material.LAVA || b.getType() == Material.FIRE || b.getType() == Material.SOUL_FIRE)
+                return false;
         final Integer top = arena.isCrystalPvp() ? arena.regionTopY() : null;
         return top == null || loc.getY() + player.getHeight() <= top + 1;
     }

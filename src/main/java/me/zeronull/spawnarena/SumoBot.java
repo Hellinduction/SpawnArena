@@ -233,7 +233,8 @@ public final class SumoBot {
         // Thrown off by the hit, as a player is: its aim jolts (less the better it is) and it takes a moment to swing
         // back, so a run of good hits can keep it in a combo
         final ThreadLocalRandom random = ThreadLocalRandom.current();
-        final double jolt = 4 + this.level.aimNoise * 3;
+        // (with no hit delay hits come all the time, so each one throws it off much less, or it'd never aim again)
+        final double jolt = (4 + this.level.aimNoise * 3) * (this.level.combo ? 0.25 : 1);
         this.noiseYaw += random.nextGaussian() * jolt;
         this.noisePitch += random.nextGaussian() * jolt * 0.5;
         if (!this.level.combo) // with no hit delay, it's all about clicking straight back
@@ -559,11 +560,11 @@ public final class SumoBot {
             if (this.comboing) {
                 // The pattern: a sneak-tap, then a W-tap, then a sneak-tap...
                 if (this.comboStep++ % 2 == 0)
-                    this.sneakUntil = Math.max(this.sneakUntil, this.tick + 2);
+                    this.sneakUntil = Math.max(this.sneakUntil, this.tick + 4 + random.nextInt(3));
             } else if (tap && kind < this.level.sTapChance)
                 this.sTapUntil = this.tick + 2 + random.nextInt(3);
             else if (tap && kind < this.level.sTapChance + this.level.sneakTapChance)
-                this.sneakUntil = Math.max(this.sneakUntil, this.tick + 2 + random.nextInt(2));
+                this.sneakUntil = Math.max(this.sneakUntil, this.tick + 4 + random.nextInt(3));
         }
     }
 
