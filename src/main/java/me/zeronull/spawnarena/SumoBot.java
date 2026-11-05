@@ -41,8 +41,10 @@ public final class SumoBot {
     private static final double RAGE_CHANCE = 0.5, RAGE_REACH = 4.0;
     /** A match it's still in after this long, it rage cheats anyway: 35 to 60 seconds, picked for each match */
     private final long rageAfterTicks = 20L * (35 + ThreadLocalRandom.current().nextInt(26));
-    /** A speed hack's bhop speed (blocks a tick): a sprint-jump peaks at about 0.36. */
-    private static final double BHOP_SPEED = 0.5;
+    /** A speed hack's bhop speed (blocks a tick), steady: a sprint-jump peaks at about 0.36. */
+    private static final double BHOP_SPEED = 0.42;
+    /** How long it's seen falling into the lava or water once it's out (a second) */
+    private static final long SINK_TICKS = 20;
 
     private final BotFight fight;
     private final Player target;
@@ -73,9 +75,20 @@ public final class SumoBot {
     /** Rage bhop: its speed in the air (a speed hack's, set every tick); after a hit it's knocked about for a moment first. */
     private double bhopSpeed;
     private long rageStrafeFlipAt;
+    private Vector bhopDir;
     private volatile long knockedUntil;
     /** Moving backwards until this tick (an S-tap after a hit). */
     private long sTapUntil;
+    /**
+     * Comboing (bots that sneak-tap): it's landed hits in a row without being hit back, so it presses on in a pattern,
+     * straight at them, each swing timed for when they can next be hit, alternating a sneak-tap and a W-tap so each hit
+     * is a fresh sprint hit; until it's hit back, misses twice, or they're knocked out of reach.
+     */
+    private volatile boolean comboing;
+    /** Out (in the lava or water): it's left to fall and sink in, with no more thinking, until this tick, then goes. */
+    private volatile long sinkUntil = -1;
+    private volatile int hitsInARow;
+    private int comboMisses, comboStep;
     /** Where its opponent was, the last few ticks: it acts on where they were reactionTicks ago. */
     private final Deque<Vector> seen = new ArrayDeque<>();
 
@@ -180,10 +193,19 @@ public final class SumoBot {
         b.getScheduler().run(SpawnArena.INSTANCE, x -> b.remove(), null);
     }
 
+    /** The match is over: it goes, unless it's out and still falling in (it goes by itself once it's sunk). */
+    void finish() {
+        if (this.sinkUntil < 0)
+            this.remove();
+    }
+
     /** Every bot goes (the plugin is stopping). */
     public static void removeAll() {
         for (final SumoBot bot : BOTS.values())
             try {
+                final BotPuppet p = bot.puppet;
+                if (p != null)
+                    p.remove();
                 final Mannequin b = bot.body;
                 if (b != null)
                     b.remove();
@@ -218,6 +240,8 @@ public final class SumoBot {
             this.nextSwingAt = Math.max(this.nextSwingAt, this.tick + this.level.reactionTicks + random.nextInt(3));
         this.hitNext = true;
         this.hitsTaken++;
+        this.hitsInARow = 0;
+        this.comboing = false;
         this.knockedUntil = this.tick + 6;
         if (this.level.rageCheats && !this.rageRolled && this.hitsTaken >= 3
                 && (this.hitsTaken - this.hitsLanded >= 4 || this.nearEdge(b.getLocation()))) {
@@ -254,6 +278,11 @@ public final class SumoBot {
         final BotPuppet puppet = this.puppet;
         if (puppet != null)
             puppet.update(b);
+        if (this.sinkUntil >= 0) {
+            if (this.tick >= this.sinkUntil)
+                this.remove();
+            return;
+        }
         final FightState state = this.fight.getState();
         if (state == FightState.ENDING || state == FightState.OVER) {
             this.remove();
@@ -268,6 +297,7 @@ public final class SumoBot {
         final Block feet = at.getBlock();
         if (me.zeronull.spawnarena.events.LiquidListener.inLiquid(feet) || b.isInWater() || b.isInLava()
                 || at.getY() < this.centre.getY() - 30) {
+            this.sinkUntil = this.tick + SINK_TICKS; // seen going in, not just vanishing at the edge
             this.fight.botOut();
             return;
         }
@@ -340,7 +370,9 @@ public final class SumoBot {
         if (this.tick < this.sTapUntil)
             ahead = -1; // S-tap: a quick step back
         double across = 0;
-        if (this.level.strafe > 0 && distance < 5) {
+        if (this.comboing && distance > this.level.reach + 1.5)
+            this.comboing = false; // knocked out of reach: the combo's dropped
+        if (this.level.strafe > 0 && distance < 5 && !this.comboing) {
             if (this.tick >= this.strafeUntil) {
                 this.strafeDir = random.nextBoolean() ? 1 : -1;
                 this.strafeUntil = this.tick + 8 + random.nextInt(25);
@@ -393,6 +425,7 @@ public final class SumoBot {
             return;
         }
         this.bhopSpeed = 0;
+        this.bhopDir = null;
         final double accel = (ground ? (sprint ? SPRINT : WALK) : (sprint ? AIR_SPRINT : AIR_WALK)) * (sneak ? 0.3 : 1);
         final Vector velocity = b.getVelocity().add(input.multiply(accel));
 
@@ -412,31 +445,34 @@ public final class SumoBot {
     }
 
     /**
-     * Rage cheating, the way a hacked client's speed bhop moves: a hop the moment it lands (now and then a low one),
-     * its speed set well above a sprint-jump's on each hop and only bleeding off slowly in the air (no air friction),
-     * and it steers instantly in the air (strafe), circling its opponent, or away from the edge.
+     * Rage cheating, the way a hacked client's speed bhop moves: a hop the moment it lands, every one the same, at one
+     * steady speed above a sprint-jump's that never bleeds off in the air (no air friction), steering smoothly in the
+     * air wherever it likes (strafe): circling its opponent, or away from the edge.
      */
     private void bhop(final Mannequin b, final Location at, final Vector input, final boolean ground, final ThreadLocalRandom random) {
         final Vector dir = input.clone().setY(0);
         if (dir.lengthSquared() < 1.0E-4)
             dir.copy(facing(this.yaw));
         dir.normalize();
-        // Circling them as it hops (a strafe module), switching way every half second or so; never strafing off the edge
+        // Circling them as it hops (a strafe module), switching way on a steady beat (every hop and a half); never
+        // strafing off the edge
         if (this.tick >= this.rageStrafeFlipAt) {
             this.strafeDir = -this.strafeDir;
-            this.rageStrafeFlipAt = this.tick + 6 + random.nextInt(14);
+            this.rageStrafeFlipAt = this.tick + 16;
         }
-        final Vector circling = dir.clone().add(new Vector(-dir.getZ(), 0, dir.getX()).multiply(this.strafeDir * 0.9)).normalize();
+        final Vector circling = dir.clone().add(new Vector(-dir.getZ(), 0, dir.getX()).multiply(this.strafeDir * 0.8)).normalize();
         if (this.edgeDanger(at, circling) == 0)
             dir.copy(circling);
+        // In full control: it turns smoothly towards where it wants to go (no snapping), at one steady speed, hop after
+        // hop the same height, the moment it lands
+        final Vector was = this.bhopDir;
+        if (was != null)
+            dir.copy(was.clone().multiply(0.6).add(dir.multiply(0.4)).normalize());
+        this.bhopDir = dir.clone();
         double y = b.getVelocity().getY();
-        if (ground) {
-            y = random.nextDouble() < 0.3 ? 0.31 : JUMP;
-            this.bhopSpeed = Math.max(this.bhopSpeed * 1.08, BHOP_SPEED) * (0.96 + random.nextDouble() * 0.08);
-            this.bhopSpeed = Math.min(this.bhopSpeed, BHOP_SPEED * 1.25);
-        } else {
-            this.bhopSpeed *= 0.985;
-        }
+        if (ground)
+            y = JUMP;
+        this.bhopSpeed = BHOP_SPEED;
         b.setVelocity(dir.multiply(this.bhopSpeed).setY(y));
     }
 
@@ -493,14 +529,19 @@ public final class SumoBot {
         if (!canBeHit(this.target) || !b.hasLineOfSight(this.target))
             return;
         final ThreadLocalRandom random = ThreadLocalRandom.current();
+        // Comboing: the swing waits until they can be hit again (half their hit delay), so none is wasted
         this.nextSwingAt = this.tick + (this.rage ? 3 + random.nextInt(2)
+                : this.comboing ? this.target.getMaximumNoDamageTicks() / 2 + random.nextInt(2)
                 : this.level.minSwingTicks + random.nextInt(this.level.maxSwingTicks - this.level.minSwingTicks + 1));
         b.swingMainHand();
         final BotPuppet puppet = this.puppet;
         if (puppet != null)
             puppet.swing(b);
-        if (reachTo > reach || off > 18 || (!this.rage && random.nextDouble() < this.level.missChance + this.strafeMiss(at)))
+        if (reachTo > reach || off > 18 || (!this.rage && random.nextDouble() < this.level.missChance + this.strafeMiss(at))) {
+            if (this.comboing && ++this.comboMisses >= 2)
+                this.comboing = false;
             return;
+        }
         final boolean sprintHit = this.sprinting;
         final float hitYaw = this.yaw;
         final Location from = at.clone();
@@ -510,12 +551,16 @@ public final class SumoBot {
             // A sprint hit slows the hitter and ends their sprint; w-tapping gets it back sooner
             b.setVelocity(b.getVelocity().multiply(new Vector(0.6, 1, 0.6)));
             this.sprinting = false;
-            final boolean tap = random.nextDouble() < this.level.wTapChance;
+            final boolean tap = this.comboing || random.nextDouble() < this.level.wTapChance;
             this.sprintAgainAt = this.tick + (tap ? 2 + random.nextInt(3) : 15 + random.nextInt(20));
             // The tap: letting go of forward (W-tap), a step back (S-tap) or a quick crouch (sneak-tap), each ending its
             // sprint so the next hit has a sprint hit's knockback again: what keeps someone in a combo
             final double kind = random.nextDouble();
-            if (tap && kind < this.level.sTapChance)
+            if (this.comboing) {
+                // The pattern: a sneak-tap, then a W-tap, then a sneak-tap...
+                if (this.comboStep++ % 2 == 0)
+                    this.sneakUntil = Math.max(this.sneakUntil, this.tick + 2);
+            } else if (tap && kind < this.level.sTapChance)
                 this.sTapUntil = this.tick + 2 + random.nextInt(3);
             else if (tap && kind < this.level.sTapChance + this.level.sneakTapChance)
                 this.sneakUntil = Math.max(this.sneakUntil, this.tick + 2 + random.nextInt(2));
@@ -531,6 +576,10 @@ public final class SumoBot {
             return;
         p.setNoDamageTicks(this.level.combo ? 0 : p.getMaximumNoDamageTicks());
         this.hitsLanded++;
+        if (++this.hitsInARow >= 2 && this.level.sneakTapChance > 0 && !this.comboing) {
+            this.comboing = true;
+            this.comboMisses = 0;
+        }
 
         // The game's own knockback (LivingEntity.knockback), as a player's hit gives it: 0.4 away from the hitter, then
         // (sprinting, or a Knockback enchantment) half a block per level in the direction they're facing

@@ -361,6 +361,7 @@ public class Fight {
         this.alive.addAll(teamA);
         this.alive.addAll(teamB);
         arena.addFight(this);
+        BotPuppet.hideFrom(this); // other matches' bots in this arena, from now on
         // Crystal arenas: the snapshot is taken while everyone waits for the countdown (nobody can be in the
         // arena then: it's empty, and a new match only starts once the last one's reset is done)
         if (arena.isCrystalPvp())

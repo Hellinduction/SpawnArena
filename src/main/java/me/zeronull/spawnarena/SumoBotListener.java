@@ -45,11 +45,20 @@ public final class SumoBotListener implements Listener {
             e.setCancelled(true);
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    /**
+     * Its opponent's hit knocks it back, whatever else says (WorldGuard cancels knockback on non-players in the arena as
+     * it would the hit itself, and the hit's already let through above); then a Superior Gaming Chair bot takes less.
+     */
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onKnockback(final io.papermc.paper.event.entity.EntityKnockbackEvent e) {
         final SumoBot bot = SumoBot.of(e.getEntity());
         if (bot == null)
             return;
+        if (e.isCancelled()) {
+            if (!(e instanceof io.papermc.paper.event.entity.EntityPushedByEntityAttackEvent pushed) || !byOpponent(bot, pushed.getPushedBy()))
+                return;
+            e.setCancelled(false);
+        }
         double scale = bot.getLevel().knockbackTaken;
         if (bot.getLevel().combo)
             scale /= 1.2000000476837158; // combo sumo's softer knockback, as players get
@@ -57,6 +66,11 @@ public final class SumoBotListener implements Listener {
             final org.bukkit.util.Vector k = e.getKnockback().clone();
             e.setKnockback(k.setX(k.getX() * scale).setZ(k.getZ() * scale));
         }
+    }
+
+    private static boolean byOpponent(final SumoBot bot, final Entity by) {
+        return by instanceof Player player && player.equals(bot.getTarget())
+                && bot.getFight().getState() == FightState.IN_FIGHT && bot.getFight().isFighter(player);
     }
 
     @EventHandler

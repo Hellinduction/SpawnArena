@@ -130,7 +130,7 @@ public final class BotFight extends Fight {
         final SumoBot b = this.bot;
         this.bot = null;
         if (b != null)
-            b.remove();
+            b.finish();
         super.endFight();
     }
 

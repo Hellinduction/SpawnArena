@@ -49,6 +49,8 @@ final class BotPuppet {
     private static final String[] NMS_SLOTS = {"MAINHAND", "OFFHAND", "FEET", "LEGS", "CHEST", "HEAD"};
     /** Fake entity id -> its bot, so a hit on it reaches the bot. */
     private static final Map<Integer, SumoBot> BY_ID = new ConcurrentHashMap<>();
+    /** Every puppet drawn now */
+    private static final java.util.Set<BotPuppet> SHOWN = ConcurrentHashMap.newKeySet();
     /** For names and team names, one per puppet. */
     private static final java.util.concurrent.atomic.AtomicInteger TEAMS = new java.util.concurrent.atomic.AtomicInteger();
 
@@ -88,6 +90,22 @@ final class BotPuppet {
     }
 
     /**
+     * {@code fight} has just been set up: its fighters stop seeing the bots of other matches in its arena straight away
+     * (who sees a bot is otherwise only looked at twice a second, and a bot match starts the moment it's picked).
+     */
+    static void hideFrom(final Fight fight) {
+        for (final BotPuppet puppet : SHOWN) {
+            final Fight theirs = puppet.bot.getFight();
+            if (theirs == fight || theirs.getArena() == null || fight.getArena() == null
+                    || !theirs.getArena().getArenaName().equals(fight.getArena().getArenaName()))
+                continue;
+            for (final Player p : fight.getMembers())
+                if (puppet.viewers.remove(p))
+                    puppet.despawnFor(p);
+        }
+    }
+
+    /**
      * A puppet of {@code body}, drawn for its opponent and whoever's watching; null if it can't be drawn (its opponent
      * is then shown the Mannequin itself). On the bot's thread.
      */
@@ -122,6 +140,7 @@ final class BotPuppet {
             puppet.gearChanged(body);
             puppet.shown = true;
             BY_ID.put(puppet.id, bot);
+            SHOWN.add(puppet);
             puppet.refreshViewers(body);
             return puppet;
         } catch (final ReflectiveOperationException | RuntimeException e) {
@@ -157,17 +176,9 @@ final class BotPuppet {
         final java.util.Set<Player> should = new java.util.HashSet<>();
         if (this.opponent.isOnline() && this.opponent.getWorld().equals(body.getWorld()))
             should.add(this.opponent);
-        final Fight fight = this.bot.getFight();
-        final Arena arena = fight.getArena();
-        for (final Player p : body.getWorld().getNearbyPlayers(body.getLocation(), VIEW_DISTANCE)) {
-            if (p.equals(this.opponent))
-                continue;
-            final Arena theirs = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(p);
-            final Fight theirFight = theirs == null ? null : theirs.getFight(p);
-            if (theirFight != null && theirFight != fight && theirs.getArenaName().equals(arena.getArenaName()))
-                continue;
-            should.add(p);
-        }
+        for (final Player p : body.getWorld().getNearbyPlayers(body.getLocation(), VIEW_DISTANCE))
+            if (!p.equals(this.opponent) && !this.inOtherMatchHere(p))
+                should.add(p);
         for (final java.util.Iterator<Player> it = this.viewers.iterator(); it.hasNext(); ) {
             final Player p = it.next();
             if (!should.contains(p)) {
@@ -177,8 +188,17 @@ final class BotPuppet {
             }
         }
         for (final Player p : should)
-            if (this.viewers.add(p))
+            if ((p.equals(this.opponent) || !this.inOtherMatchHere(p)) && this.viewers.add(p)) // (asked again: one may just have started)
                 this.spawnFor(p, body);
+    }
+
+    /** In another match in this bot's arena: fighters of different matches there don't see each other. */
+    private boolean inOtherMatchHere(final Player p) {
+        final Fight fight = this.bot.getFight();
+        final Arena theirs = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(p);
+        final Fight theirFight = theirs == null ? null : theirs.getFight(p);
+        return theirFight != null && theirFight != fight && fight.getArena() != null
+                && theirs.getArenaName().equals(fight.getArena().getArenaName());
     }
 
     private void spawnFor(final Player viewer, final Mannequin body) throws ReflectiveOperationException {
@@ -281,6 +301,7 @@ final class BotPuppet {
             return;
         this.shown = false;
         BY_ID.remove(this.id);
+        SHOWN.remove(this);
         for (final Player viewer : this.viewers)
             this.despawnFor(viewer);
         this.viewers.clear();
