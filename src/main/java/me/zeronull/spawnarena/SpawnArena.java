@@ -89,6 +89,7 @@ public class SpawnArena extends JavaPlugin {
 
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaCommandEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new SumoBotListener(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new MatchRecorder(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new BotMenu.Clicks(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new BotSkins(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.EgapCooldown(), this);

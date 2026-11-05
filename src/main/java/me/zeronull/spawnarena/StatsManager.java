@@ -1570,6 +1570,11 @@ public class StatsManager {
         return 1 / (1 + Math.pow(10, (opponent - rating) / 400));
     }
 
+    /** Seconds they've spent fighting in this arena, in all. */
+    public int getFightSeconds(UUID uuid, String arena) {
+        return getField(uuid, arena, "fight_seconds");
+    }
+
     public int getBestWinStreak(UUID uuid, String arena) {
         return getField(uuid, arena, "best_win_streak");
     }

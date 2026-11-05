@@ -704,6 +704,7 @@ public class Fight {
         this.startTickCounter();
         FightGlow.start(this);
         this.onLive();
+        MatchRecorder.start(this);
     }
 
     /** Just after the fight goes live (everyone in): for kinds of fight that do more then (a bot match's bot comes in). */
@@ -835,6 +836,7 @@ public class Fight {
     }
 
     protected void finish(final List<Player> winners, final List<Player> losers) {
+        MatchRecorder.result(this, winners);
         this.announceResult(new ArrayList<>(winners), new ArrayList<>(losers));
         this.endFight();
         showResultTitles(winners, losers);
@@ -894,6 +896,7 @@ public class Fight {
 
         this.fightState = FightState.OVER;
         this.arena.removeFight(this);
+        MatchRecorder.stop(this);
 
         this.tryCancel(this.starting);
         this.tryCancel(this.tickCounter);
