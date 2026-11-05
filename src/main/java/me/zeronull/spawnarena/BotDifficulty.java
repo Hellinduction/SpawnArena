@@ -14,7 +14,7 @@ public enum BotDifficulty {
     EASY("Easy", "<green>", Material.LIME_DYE, 2.8, 14, 4.5, 6, 7, 11, 0.2, 0.15, 0.15, 0.05, 0.7, 1.0, false, 0.03, 0.1, 1.0, 0.0, 0.0, 0.0),
     MEDIUM("Medium", "<yellow>", Material.YELLOW_DYE, 2.95, 22, 3, 4, 6, 9, 0.14, 0.65, 0.5, 0.3, 0.85, 1.0, false, 0.2, 0.4, 1.3, 0.0, 0.3, 0.0),
     HARD("Hard", "<red>", Material.RED_DYE, 3.0, 36, 1.3, 3, 5, 7, 0.12, 0.95, 0.75, 0.45, 1.0, 1.0, false, 0.35, 0.7, 1.4, 0.4, 0.55, 0.35),
-    MASTER("Master", "<aqua>", Material.LIGHT_BLUE_DYE, 3.0, 40, 1.2, 3, 5, 6, 0.09, 0.95, 0.8, 0.5, 1.0, 1.0, false, 0.4, 0.8, 1.5, 0.6, 0.62, 0.3),
+    MASTER("Master", "<aqua>", Material.LIGHT_BLUE_DYE, 3.0, 46, 0.9, 2, 4, 5, 0.06, 1.0, 0.85, 0.6, 1.0, 1.0, false, 0.45, 0.85, 1.55, 0.65, 0.75, 0.3),
     CHEATER("Superior Gaming Chair", "<dark_purple>", Material.PURPLE_DYE, 3.4, 48, 0.8, 2, 5, 6, 0.06, 1.0, 0.9, 0.55, 1.0, 0.85, false, 0.45, 0.85, 1.55, 0.5, 0.75, 0.35),
     COMBO("Combo", "<gold>", Material.BLAZE_POWDER, 2.97, 24, 2.7, 4, 3, 5, 0.17, 0.7, 0.55, 0.32, 0.88, 1.0, true, 0.22, 0.45, 1.3, 0.0, 0.35, 0.0);
 
