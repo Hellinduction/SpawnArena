@@ -39,8 +39,8 @@ public final class SumoBot {
     private static final double EYE = 1.62;
     /** Chance a losing Superior Gaming Chair bot starts rage cheating, and how far it reaches then. */
     private static final double RAGE_CHANCE = 0.5, RAGE_REACH = 4.0;
-    /** A match it's still in after this long, it rage cheats anyway: 35 to 60 seconds, picked for each match */
-    private final long rageAfterTicks = 20L * (35 + ThreadLocalRandom.current().nextInt(26));
+    /** A match it's still in after this long, it rage cheats anyway: 12 to 25 seconds, picked for each match */
+    private final long rageAfterTicks = 20L * (12 + ThreadLocalRandom.current().nextInt(14));
     /** A speed hack's bhop speed (blocks a tick), steady: a sprint-jump peaks at about 0.36. */
     private static final double BHOP_SPEED = 0.42;
     /** How long it's seen falling into the lava or water once it's out (a second) */
