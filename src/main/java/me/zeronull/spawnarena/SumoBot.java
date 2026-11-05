@@ -39,6 +39,8 @@ public final class SumoBot {
     private static final double EYE = 1.62;
     /** Chance a losing Superior Gaming Chair bot starts rage cheating, and how far it reaches then. */
     private static final double RAGE_CHANCE = 0.5, RAGE_REACH = 4.0;
+    /** A match it's still in after this long, it rage cheats anyway (a minute) */
+    private static final long RAGE_AFTER_TICKS = 20 * 60;
     /** A speed hack's bhop speed (blocks a tick): a sprint-jump peaks at about 0.36. */
     private static final double BHOP_SPEED = 0.5;
 
@@ -70,6 +72,7 @@ public final class SumoBot {
     private volatile boolean rageRolled, rage;
     /** Rage bhop: its speed in the air (a speed hack's, set every tick); after a hit it's knocked about for a moment first. */
     private double bhopSpeed;
+    private long rageStrafeFlipAt;
     private volatile long knockedUntil;
     /** Moving backwards until this tick (an S-tap after a hit). */
     private long sTapUntil;
@@ -211,20 +214,23 @@ public final class SumoBot {
                 && (this.hitsTaken - this.hitsLanded >= 4 || this.nearEdge(b.getLocation()))) {
             this.rageRolled = true;
             if (random.nextDouble() < RAGE_CHANCE)
-                this.startRage();
+                this.startRage("is losing...");
         }
         if (this.level.combo)
             Threads.entityLater(b, () -> b.setNoDamageTicks(0), 1L);
     }
 
-    /** It's losing, so it stops hiding it: bhops at them, reaches further and clicks faster for the rest of the match. */
-    private void startRage() {
+    /**
+     * It's losing (or the match has gone on too long), so it stops hiding it: bhops at them, reaches further and clicks
+     * faster for the rest of the match.
+     */
+    private void startRage(final String why) {
         this.rage = true;
         Threads.entity(this.target, () -> {
             if (!this.target.isOnline())
                 return;
             this.target.sendMessage(MiniMessage.miniMessage().deserialize(this.level.colour
-                    + "<bold>" + this.level.label + "</bold> <gray>bot is losing... so it's started <red><bold>rage cheating</bold><gray>!"));
+                    + "<bold>" + this.level.label + "</bold> <gray>bot " + why + " so it's started <red><bold>rage cheating</bold><gray>!"));
             this.target.playSound(this.target, Sound.ENTITY_WITHER_SPAWN, 0.4f, 1.6f);
         });
     }
@@ -248,10 +254,11 @@ public final class SumoBot {
             return;
 
         final Location at = b.getLocation();
-        // In the water, or fallen off: it's lost
+        // Out the way a player is: touching the water or lava (where its feet are, not just above it), or out of the
+        // arena (only looked up once it's below the floor, as that's a region lookup)
         final Block feet = at.getBlock();
-        if (b.isInWater() || feet.isLiquid() || feet.getRelative(org.bukkit.block.BlockFace.DOWN).isLiquid()
-                || at.getY() < this.centre.getY() - 4) {
+        if (me.zeronull.spawnarena.events.LiquidListener.inLiquid(feet) || b.isInWater() || b.isInLava()
+                || (at.getY() < this.centre.getY() - 1 && !this.inArena(at))) {
             this.fight.botOut();
             return;
         }
@@ -264,6 +271,8 @@ public final class SumoBot {
         final Vector known = this.seen.peekFirst();
 
         this.aim(at, known);
+        if (this.level.rageCheats && !this.rage && this.tick > RAGE_AFTER_TICKS)
+            this.startRage("has had enough of this...");
         if (this.tick < this.startAt) {
             b.setRotation(this.yaw, this.pitch);
             return;
@@ -371,7 +380,7 @@ public final class SumoBot {
         final boolean sprint = this.sprinting && ahead > 0.5 && !sneak;
         final boolean ground = b.isOnGround();
         if (this.rage && !sneak && this.tick >= this.knockedUntil) {
-            this.bhop(b, input, ground, random);
+            this.bhop(b, at, input, ground, random);
             return;
         }
         this.bhopSpeed = 0;
@@ -396,13 +405,21 @@ public final class SumoBot {
     /**
      * Rage cheating, the way a hacked client's speed bhop moves: a hop the moment it lands (now and then a low one),
      * its speed set well above a sprint-jump's on each hop and only bleeding off slowly in the air (no air friction),
-     * and it steers instantly in the air (strafe), straight at its opponent or away from the edge.
+     * and it steers instantly in the air (strafe), circling its opponent, or away from the edge.
      */
-    private void bhop(final Mannequin b, final Vector input, final boolean ground, final ThreadLocalRandom random) {
+    private void bhop(final Mannequin b, final Location at, final Vector input, final boolean ground, final ThreadLocalRandom random) {
         final Vector dir = input.clone().setY(0);
         if (dir.lengthSquared() < 1.0E-4)
             dir.copy(facing(this.yaw));
         dir.normalize();
+        // Circling them as it hops (a strafe module), switching way every half second or so; never strafing off the edge
+        if (this.tick >= this.rageStrafeFlipAt) {
+            this.strafeDir = -this.strafeDir;
+            this.rageStrafeFlipAt = this.tick + 6 + random.nextInt(14);
+        }
+        final Vector circling = dir.clone().add(new Vector(-dir.getZ(), 0, dir.getX()).multiply(this.strafeDir * 0.9)).normalize();
+        if (this.edgeDanger(at, circling) == 0)
+            dir.copy(circling);
         double y = b.getVelocity().getY();
         if (ground) {
             y = random.nextDouble() < 0.3 ? 0.31 : JUMP;
@@ -412,6 +429,11 @@ public final class SumoBot {
             this.bhopSpeed *= 0.985;
         }
         b.setVelocity(dir.multiply(this.bhopSpeed).setY(y));
+    }
+
+    private boolean inArena(final Location at) {
+        final Arena here = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(at);
+        return here != null && here.getArenaName().equals(this.fight.getArena().getArenaName());
     }
 
     /** No floor within a couple of blocks in some direction. */
@@ -473,7 +495,7 @@ public final class SumoBot {
         final BotPuppet puppet = this.puppet;
         if (puppet != null)
             puppet.swing(b);
-        if (reachTo > reach || off > 18 || (!this.rage && random.nextDouble() < this.level.missChance))
+        if (reachTo > reach || off > 18 || (!this.rage && random.nextDouble() < this.level.missChance + this.strafeMiss(at)))
             return;
         final boolean sprintHit = this.sprinting;
         final float hitYaw = this.yaw;
@@ -521,6 +543,23 @@ public final class SumoBot {
 
     private static boolean canBeHit(final Player p) {
         return p.getGameMode() != org.bukkit.GameMode.CREATIVE && p.getGameMode() != org.bukkit.GameMode.SPECTATOR && !p.isInvulnerable();
+    }
+
+    /**
+     * The extra chance a swing misses because its opponent is strafing: how fast they move across its view (sideways
+     * to it), as a human's aim lags behind that; better bots keep up better, but never fully.
+     */
+    private double strafeMiss(final Location at) {
+        if (this.seen.size() < 3)
+            return 0;
+        final Vector now = this.seen.peekLast(), before = this.seen.stream().skip(this.seen.size() - 3).findFirst().orElse(now);
+        final Vector moved = now.clone().subtract(before).setY(0).multiply(0.5); // blocks a tick, over the last 2 ticks
+        final Vector to = now.clone().subtract(at.toVector()).setY(0);
+        if (to.lengthSquared() < 1.0E-4)
+            return 0;
+        to.normalize();
+        final double across = Math.abs(moved.getX() * to.getZ() - moved.getZ() * to.getX()); // sideways speed
+        return Math.min(0.6, across / 0.25 * 0.5 * (1 - this.level.strafeResist));
     }
 
     /** Degrees between where it's looking and where on its opponent it aims. */

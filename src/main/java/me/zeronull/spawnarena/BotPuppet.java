@@ -18,8 +18,9 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * What a sumo bot's opponent sees of it: a player, as packets only, that follows the bot's (hidden) Mannequin every
- * tick. A Mannequin's arm never moves on the client (only a player's swing animates), so the bot is drawn as a player:
+ * What a sumo bot looks like to its opponent and anyone watching: a player, as packets only, that follows the bot's
+ * (hidden) Mannequin every tick. A Mannequin's arm never moves on the client (only a player's swing animates), so the
+ * bot is drawn as a player:
  * its borrowed skin, what it holds, its crouch, its swings and its hurt flash. Hits on it are passed on to the
  * Mannequin by {@link SumoBotListener}. Its own name tag is hidden (with it, the line a below-name scoreboard puts
  * under every player, which a bot has no score for, so it would be blank): "Bot (Medium)" is a text display above it.
@@ -41,6 +42,8 @@ final class BotPuppet {
 
     /** How far above its feet its name is shown */
     private static final double LABEL_Y = 2.1;
+    /** How far away people watching are drawn it (about as far as players are drawn) */
+    private static final double VIEW_DISTANCE = 64;
     private static final EquipmentSlot[] GEAR = {EquipmentSlot.HAND, EquipmentSlot.OFF_HAND, EquipmentSlot.FEET,
             EquipmentSlot.LEGS, EquipmentSlot.CHEST, EquipmentSlot.HEAD};
     private static final String[] NMS_SLOTS = {"MAINHAND", "OFFHAND", "FEET", "LEGS", "CHEST", "HEAD"};
@@ -53,73 +56,70 @@ final class BotPuppet {
     /** Its name, a text display above its head */
     private final int labelId = Bukkit.getUnsafe().nextEntityId();
     private boolean labelLow;
-    private final UUID uuid = UUID.randomUUID();
-    private final Player viewer;
+    private final UUID uuid;
+    private final Player opponent;
     private final SumoBot bot;
-    private final Object team;
+    private final Object gameProfile;
+    /** Its name tag team and name, as its opponent sees them (outlined as the other side) and as anyone else does */
+    private final Object opponentTeam, othersTeam;
+    private final Object opponentLabel, othersLabel;
+    /** Everyone it's drawn for now: its opponent, and anyone watching who isn't in another fight in this arena */
+    private final java.util.Set<Player> viewers = ConcurrentHashMap.newKeySet();
     private double x, y, z;
     private float yaw, pitch;
     private final ItemStack[] gear = new ItemStack[GEAR.length];
     private long ticks;
     private volatile boolean shown;
 
-    private BotPuppet(final Player viewer, final SumoBot bot, final Object team) {
-        this.viewer = viewer;
+    private BotPuppet(final UUID uuid, final Player opponent, final SumoBot bot, final Object gameProfile, final Object opponentTeam, final Object othersTeam,
+                      final Object opponentLabel, final Object othersLabel) {
+        this.uuid = uuid;
+        this.opponent = opponent;
         this.bot = bot;
-        this.team = team;
+        this.gameProfile = gameProfile;
+        this.opponentTeam = opponentTeam;
+        this.othersTeam = othersTeam;
+        this.opponentLabel = opponentLabel;
+        this.othersLabel = othersLabel;
     }
 
     static SumoBot botOf(final int entityId) {
         return BY_ID.get(entityId);
     }
 
-    /** A puppet of {@code body} for {@code viewer}, or null if it can't be drawn (they're then shown the Mannequin itself). */
-    static BotPuppet show(final Player viewer, final SumoBot bot, final Mannequin body, final com.destroystokyo.paper.profile.PlayerProfile skin,
+    /**
+     * A puppet of {@code body}, drawn for its opponent and whoever's watching; null if it can't be drawn (its opponent
+     * is then shown the Mannequin itself). On the bot's thread.
+     */
+    static BotPuppet show(final Player opponent, final SumoBot bot, final Mannequin body, final com.destroystokyo.paper.profile.PlayerProfile skin,
                           final BotDifficulty level) {
         if (!ready())
             return null;
         try {
             final String name = "Bot";
-            final Object team = teamCtor.newInstance(scoreboardCtor.newInstance(), "sa_bot_" + Integer.toHexString(TEAMS.incrementAndGet()));
-            final BotPuppet puppet = new BotPuppet(viewer, bot, team);
-            final com.destroystokyo.paper.profile.PlayerProfile profile = Bukkit.createProfile(puppet.uuid, name);
+            final UUID uuid = UUID.randomUUID();
+            final com.destroystokyo.paper.profile.PlayerProfile profile = Bukkit.createProfile(uuid, name);
             if (skin != null)
                 profile.setProperties(skin.getProperties());
-            final Object gameProfile = authlibCopy.invoke(null, profile);
-            // Outlined like an opponent player (the name takes the outline's colour); otherwise named in its level's
-            final net.kyori.adventure.text.format.NamedTextColor outline = FightGlow.botOutline(bot.getFight());
-            if (outline != null)
+            // Outlined as a player in the fight is: the other side's colour to its opponent, the fight's to anyone else
+            // (the name takes the outline's colour); with no outlines, named in its level's colour
+            final net.kyori.adventure.text.format.NamedTextColor toOpponent = FightGlow.botOutline(bot.getFight());
+            final net.kyori.adventure.text.format.NamedTextColor toOthers = FightGlow.fightOutline(bot.getFight());
+            if (toOpponent != null)
                 body.setGlowing(true); // passed on with the rest of its entity data
-            final Object colour = formattingByName.invoke(null, outline != null ? outline.toString() : level.colour.replaceAll("[<>]", ""));
-            if (colour != null)
-                setColour.invoke(team, colour);
-            setNameTagVisibility.invoke(team, hiddenTag);
-            final net.kyori.adventure.text.Component label = net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(
-                    (outline != null ? "<" + outline + ">" : level.colour) + "Bot <gray>(" + level.coloured() + "<gray>)");
-            @SuppressWarnings("unchecked") final java.util.Collection<String> players = (java.util.Collection<String>) teamPlayers.invoke(team);
-            players.add(name);
-
+            final String teamName = "sa_bot_" + Integer.toHexString(TEAMS.incrementAndGet());
+            final BotPuppet puppet = new BotPuppet(uuid, opponent, bot, authlibCopy.invoke(null, profile),
+                    team(teamName, name, toOpponent, level), team(teamName, name, toOthers, level), label(toOpponent, level), label(toOthers, level));
             final org.bukkit.Location at = body.getLocation();
-            send(viewer, infoPacket.newInstance(EnumSet.of((Enum) addPlayer), infoEntry.newInstance(puppet.uuid, gameProfile, false, 0, survival,
-                    null, true, 0, null)));
-            send(viewer, teamPacket.invoke(null, team, true));
-            send(viewer, addPacket.newInstance(puppet.id, puppet.uuid, at.getX(), at.getY(), at.getZ(), at.getPitch(), at.getYaw(),
-                    playerType, 0, zero, (double) at.getYaw()));
             puppet.x = at.getX();
             puppet.y = at.getY();
             puppet.z = at.getZ();
             puppet.yaw = at.getYaw();
             puppet.pitch = at.getPitch();
-            send(viewer, puppet.data(body));
             puppet.gearChanged(body);
-            send(viewer, puppet.equipment());
-            send(viewer, puppet.head(body));
-            send(viewer, addPacket.newInstance(puppet.labelId, UUID.randomUUID(), at.getX(), at.getY() + LABEL_Y, at.getZ(), 0f, 0f,
-                    textDisplayType, 0, zero, 0d));
-            send(viewer, dataPacket.newInstance(puppet.labelId, List.of(dataValue.invoke(null, textData, asVanilla.invoke(null, label)),
-                    dataValue.invoke(null, billboardData, (byte) 3), dataValue.invoke(null, interpolationData, 2))));
             puppet.shown = true;
             BY_ID.put(puppet.id, bot);
+            puppet.refreshViewers(body);
             return puppet;
         } catch (final ReflectiveOperationException | RuntimeException e) {
             broken = true;
@@ -128,12 +128,94 @@ final class BotPuppet {
         }
     }
 
-    /** Every tick, on the bot's thread: where it is, how it's standing, what it holds. */
+    private static Object team(final String teamName, final String member, final net.kyori.adventure.text.format.NamedTextColor outline,
+                               final BotDifficulty level) throws ReflectiveOperationException {
+        final Object team = teamCtor.newInstance(scoreboardCtor.newInstance(), teamName);
+        final Object colour = formattingByName.invoke(null, outline != null ? outline.toString() : level.colour.replaceAll("[<>]", ""));
+        if (colour != null)
+            setColour.invoke(team, colour);
+        setNameTagVisibility.invoke(team, hiddenTag);
+        @SuppressWarnings("unchecked") final java.util.Collection<String> players = (java.util.Collection<String>) teamPlayers.invoke(team);
+        players.add(member);
+        return team;
+    }
+
+    private static Object label(final net.kyori.adventure.text.format.NamedTextColor outline, final BotDifficulty level) throws ReflectiveOperationException {
+        return asVanilla.invoke(null, net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(
+                (outline != null ? "<" + outline + ">" : level.colour) + "Bot <gray>(" + level.coloured() + "<gray>)"));
+    }
+
+    /**
+     * Who should see it: its opponent, and anyone near enough to watch, except those in another fight in the same
+     * arena (fighters of different fights there are hidden from each other, and so is this). Drawn for anyone new,
+     * taken away from anyone who no longer should.
+     */
+    private void refreshViewers(final Mannequin body) throws ReflectiveOperationException {
+        final java.util.Set<Player> should = new java.util.HashSet<>();
+        if (this.opponent.isOnline() && this.opponent.getWorld().equals(body.getWorld()))
+            should.add(this.opponent);
+        final Fight fight = this.bot.getFight();
+        final Arena arena = fight.getArena();
+        for (final Player p : body.getWorld().getNearbyPlayers(body.getLocation(), VIEW_DISTANCE)) {
+            if (p.equals(this.opponent))
+                continue;
+            final Arena theirs = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(p);
+            final Fight theirFight = theirs == null ? null : theirs.getFight(p);
+            if (theirFight != null && theirFight != fight && theirs.getArenaName().equals(arena.getArenaName()))
+                continue;
+            should.add(p);
+        }
+        for (final java.util.Iterator<Player> it = this.viewers.iterator(); it.hasNext(); ) {
+            final Player p = it.next();
+            if (!should.contains(p)) {
+                it.remove();
+                if (p.isOnline() && p.getWorld().equals(body.getWorld()))
+                    this.despawnFor(p);
+            }
+        }
+        for (final Player p : should)
+            if (this.viewers.add(p))
+                this.spawnFor(p, body);
+    }
+
+    private void spawnFor(final Player viewer, final Mannequin body) throws ReflectiveOperationException {
+        final boolean opp = viewer.equals(this.opponent);
+        send(viewer, infoPacket.newInstance(EnumSet.of((Enum) addPlayer), infoEntry.newInstance(this.uuid, this.gameProfile, false, 0, survival,
+                null, true, 0, null)));
+        send(viewer, teamPacket.invoke(null, opp ? this.opponentTeam : this.othersTeam, true));
+        send(viewer, addPacket.newInstance(this.id, this.uuid, this.x, this.y, this.z, this.pitch, this.yaw, playerType, 0, zero, (double) this.yaw));
+        send(viewer, this.data(body));
+        send(viewer, this.equipment());
+        send(viewer, this.head(body));
+        send(viewer, addPacket.newInstance(this.labelId, UUID.randomUUID(), this.x, this.y + this.labelHeight(), this.z, 0f, 0f,
+                textDisplayType, 0, zero, 0d));
+        send(viewer, dataPacket.newInstance(this.labelId, List.of(dataValue.invoke(null, textData, opp ? this.opponentLabel : this.othersLabel),
+                dataValue.invoke(null, billboardData, (byte) 3), dataValue.invoke(null, interpolationData, 2))));
+    }
+
+    private void despawnFor(final Player viewer) {
+        try {
+            send(viewer, removePacket.newInstance((Object) new int[]{this.id, this.labelId}));
+            send(viewer, teamRemovePacket.invoke(null, viewer.equals(this.opponent) ? this.opponentTeam : this.othersTeam));
+            send(viewer, infoRemovePacket.newInstance(List.of(this.uuid)));
+        } catch (final ReflectiveOperationException | RuntimeException ignored) {
+            // they've left, or it goes with the chunk
+        }
+    }
+
+    private void sendAll(final Object packet) throws ReflectiveOperationException {
+        for (final Player viewer : this.viewers)
+            send(viewer, packet);
+    }
+
+    /** Every tick, on the bot's thread: where it is, how it's standing, what it holds; who's watching, now and then. */
     void update(final Mannequin body) {
         if (!this.shown)
             return;
         this.ticks++;
         try {
+            if (this.ticks % 10 == 0)
+                this.refreshViewers(body);
             final org.bukkit.Location at = body.getLocation();
             if (at.getX() != this.x || at.getY() != this.y || at.getZ() != this.z || at.getYaw() != this.yaw || at.getPitch() != this.pitch) {
                 this.x = at.getX();
@@ -141,27 +223,31 @@ final class BotPuppet {
                 this.z = at.getZ();
                 this.yaw = at.getYaw();
                 this.pitch = at.getPitch();
-                send(this.viewer, syncPacket.newInstance(this.id, positionOf.invoke(null, handle(body)), body.isOnGround()));
-                send(this.viewer, this.head(body));
+                this.sendAll(syncPacket.newInstance(this.id, positionOf.invoke(null, handle(body)), body.isOnGround()));
+                this.sendAll(this.head(body));
                 this.moveLabel(body);
             } else if ((body.getPose() == org.bukkit.entity.Pose.SNEAKING) != this.labelLow) {
                 this.moveLabel(body);
             }
             if (this.gearChanged(body))
-                send(this.viewer, this.equipment());
+                this.sendAll(this.equipment());
             if (this.ticks % 2 == 0) // crouching, sprinting...
-                send(this.viewer, this.data(body));
+                this.sendAll(this.data(body));
         } catch (final ReflectiveOperationException | RuntimeException e) {
             SpawnArena.INSTANCE.getLogger().warning("Stopped drawing a sumo bot: " + e);
             this.remove();
         }
     }
 
+    private double labelHeight() {
+        return this.labelLow ? LABEL_Y - 0.3 : LABEL_Y;
+    }
+
     /** Above its head, as a name tag is (a little lower while it crouches). */
     private void moveLabel(final Mannequin body) throws ReflectiveOperationException {
         this.labelLow = body.getPose() == org.bukkit.entity.Pose.SNEAKING;
-        final Object at = vec3Ctor.newInstance(this.x, this.y + (this.labelLow ? LABEL_Y - 0.3 : LABEL_Y), this.z);
-        send(this.viewer, syncPacket.newInstance(this.labelId, positionCtor.newInstance(at, zero, 0f, 0f), false));
+        final Object at = vec3Ctor.newInstance(this.x, this.y + this.labelHeight(), this.z);
+        this.sendAll(syncPacket.newInstance(this.labelId, positionCtor.newInstance(at, zero, 0f, 0f), false));
     }
 
     void swing(final Mannequin body) {
@@ -170,7 +256,7 @@ final class BotPuppet {
         try {
             final Object packet = animatePacket.newInstance(handle(body), 0);
             animateId.setInt(packet, this.id);
-            send(this.viewer, packet);
+            this.sendAll(packet);
         } catch (final ReflectiveOperationException | RuntimeException ignored) {
             // just no swing
         }
@@ -181,7 +267,7 @@ final class BotPuppet {
         if (!this.shown)
             return;
         try {
-            send(this.viewer, hurtPacket.newInstance(this.id, yaw));
+            this.sendAll(hurtPacket.newInstance(this.id, yaw));
         } catch (final ReflectiveOperationException | RuntimeException ignored) {
             // just no flash
         }
@@ -192,13 +278,9 @@ final class BotPuppet {
             return;
         this.shown = false;
         BY_ID.remove(this.id);
-        try {
-            send(this.viewer, removePacket.newInstance((Object) new int[]{this.id, this.labelId}));
-            send(this.viewer, teamRemovePacket.invoke(null, this.team));
-            send(this.viewer, infoRemovePacket.newInstance(List.of(this.uuid)));
-        } catch (final ReflectiveOperationException | RuntimeException ignored) {
-            // they've left, or it goes with the chunk
-        }
+        for (final Player viewer : this.viewers)
+            this.despawnFor(viewer);
+        this.viewers.clear();
     }
 
     private Object data(final Mannequin body) throws ReflectiveOperationException {

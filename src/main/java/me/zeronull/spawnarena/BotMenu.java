@@ -28,8 +28,8 @@ public final class BotMenu implements InventoryHolder {
     private static final int[] SLOTS = {11, 12, 13, 14, 15};
     private static final int SLOT_BACK = 22;
     private static final Map<BotDifficulty, List<String>> ABOUT = Map.of(
-            BotDifficulty.EASY, List.of("<gray>Slow to aim and react,", "<gray>misses a lot. A warm-up."),
-            BotDifficulty.MEDIUM, List.of("<gray>Like a decent player:", "<gray>some w-taps and strafing."),
+            BotDifficulty.EASY, List.of("<gray>A casual player: a bit", "<gray>slow, misses now and then."),
+            BotDifficulty.MEDIUM, List.of("<gray>A decent player: w-taps,", "<gray>strafes and jump-resets."),
             BotDifficulty.HARD, List.of("<gray>W-taps, strafes, jump-resets", "<gray>and stays off the edge."),
             BotDifficulty.CHEATER, List.of("<gray>Hard, with extra reach", "<gray>and less knockback taken.", "<gray>If it starts losing... it", "<gray>might stop hiding it."),
             BotDifficulty.COMBO, List.of("<gray>Medium, with fists and", "<gray>no hit delay: combos!"));

@@ -211,6 +211,14 @@ public final class FightGlow implements Listener {
         return colours == null || colours.isEmpty() ? NamedTextColor.RED : COLOURS[colours.get(0)];
     }
 
+    /** A sumo bot's outline as anyone but its opponent sees it: the fight's colour; null when fights don't glow. */
+    public static NamedTextColor fightOutline(final Fight fight) {
+        if (!enabled())
+            return null;
+        final java.util.List<Integer> colours = COLOUR_OF.get(fight);
+        return colours == null || colours.isEmpty() ? NamedTextColor.RED : COLOURS[colours.get(0)];
+    }
+
     // ── colouring ───────────────────────────────────────────────────────────
 
     private static boolean sides() {
