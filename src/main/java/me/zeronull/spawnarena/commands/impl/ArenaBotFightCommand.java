@@ -68,11 +68,10 @@ public final class ArenaBotFightCommand implements CommandExecutor, TabCompleter
             sender.sendMessage(USAGE);
             return true;
         }
-        final String problem = BotShow.start(arena, levels);
+        // (how it goes is told to the sender alone)
+        final String problem = BotShow.start(arena, levels, sender);
         if (problem != null)
             sender.sendMessage("§c" + problem);
-        else if (!(sender instanceof Player p) || p.getWorld() != BotShow.worldOf(arena) || arena.distanceFrom(p.getLocation()) > 64)
-            sender.sendMessage("§aBot fight started in " + arena.getArenaName() + ".");
         return true;
     }
 

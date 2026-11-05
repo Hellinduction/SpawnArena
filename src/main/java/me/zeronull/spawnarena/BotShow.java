@@ -24,8 +24,6 @@ public final class BotShow implements SumoBot.BotMatch {
     private static final List<BotShow> RUNNING = new CopyOnWriteArrayList<>();
     /** The longest a show match goes on before it's a draw (three minutes) */
     private static final long MAX_TICKS = 20L * 180;
-    /** How far away people hear how it went */
-    private static final double TELL_DISTANCE = 64;
     /** How far apart teammates come in, either side of the spawn point */
     private static final double TEAMMATE_GAP = 0.9;
 
@@ -48,7 +46,11 @@ public final class BotShow implements SumoBot.BotMatch {
     /** The skins its bots have borrowed: never two the same */
     private final java.util.Set<String> skins = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
-    private BotShow(final Arena arena, final Location centre) {
+    /** Who started it (/arenabotfight): the only one told how it goes */
+    private final org.bukkit.command.CommandSender starter;
+
+    private BotShow(final Arena arena, final Location centre, final org.bukkit.command.CommandSender starter) {
+        this.starter = starter;
         this.arena = arena;
         this.centre = centre;
     }
@@ -57,7 +59,7 @@ public final class BotShow implements SumoBot.BotMatch {
      * Starts a show match in this arena: the first half of {@code levels} against the second (1v1 or 2v2); returns why
      * it couldn't, or null.
      */
-    public static String start(final Arena arena, final List<BotDifficulty> levels) {
+    public static String start(final Arena arena, final List<BotDifficulty> levels, final org.bukkit.command.CommandSender starter) {
         if (levels.size() != 2 && levels.size() != 4)
             return "Bot fights are 1v1 (2 bots) or 2v2 (4 bots).";
         if (!BotFight.available(arena))
@@ -69,7 +71,7 @@ public final class BotShow implements SumoBot.BotMatch {
         final Location p1 = arena.spawnPoint1, p2 = arena.spawnPoint2;
         if (p1 == null || p2 == null)
             return "That arena has no spawn points.";
-        final BotShow show = new BotShow(arena, p1.clone().add(p2).multiply(0.5));
+        final BotShow show = new BotShow(arena, p1.clone().add(p2).multiply(0.5), starter);
         final int perTeam = levels.size() / 2;
         show.colours = FightGlow.showColours(show, perTeam > 1);
         // Teammates side by side, across the line between the spawn points
@@ -289,16 +291,18 @@ public final class BotShow implements SumoBot.BotMatch {
         return null;
     }
 
-    /** To everyone near enough to be watching, who hasn't turned win messages off (/arenawins). */
+    /** To whoever started it (/arenabotfight), and nobody else. */
     @Override
     public void tell(final Component message) {
-        for (final Player p : this.centre.getWorld().getPlayers())
-            Threads.entity(p, () -> {
-                if (p.isOnline() && p.getWorld().equals(this.centre.getWorld()) && p.getLocation().distance(this.centre) <= TELL_DISTANCE
-                        && WinMessagePrefs.wantsWinMessages(p)) {
-                    p.sendMessage(message);
-                    p.playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING, 0.6f, 1.4f);
-                }
-            });
+        if (!(this.starter instanceof Player p)) {
+            this.starter.sendMessage(message);
+            return;
+        }
+        Threads.entity(p, () -> {
+            if (p.isOnline()) {
+                p.sendMessage(message);
+                p.playSound(p, Sound.BLOCK_NOTE_BLOCK_PLING, 0.6f, 1.4f);
+            }
+        });
     }
 }

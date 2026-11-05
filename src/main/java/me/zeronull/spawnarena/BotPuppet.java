@@ -206,12 +206,15 @@ final class BotPuppet {
                     this.despawnFor(p);
             }
         }
+        final long now = System.currentTimeMillis();
         for (final Player p : should)
-            if ((p.equals(this.opponent) || !this.inOtherMatchHere(p)) && this.viewers.add(p)) // (asked again: one may just have started)
+            if ((p.equals(this.opponent) || !this.inOtherMatchHere(p)) && this.viewers.add(p)) { // (asked again: one may just have started)
                 this.spawnFor(p, body);
+                // And again a second and three seconds on, in case their game didn't take it the first time
+                this.redrawAt.put(p.getUniqueId(), new long[]{now + 1000, now + 3000});
+            }
         // Sent again to anyone whose game may have dropped it (see redraw): after a teleport event, or a jump in where
         // they are or which world (some teleports, e.g. Folia's, come with no event)
-        final long now = System.currentTimeMillis();
         for (final Player p : this.viewers) {
             final org.bukkit.Location here = p.getLocation(), was = this.lastAt.put(p.getUniqueId(), here);
             if (was != null && (was.getWorld() != here.getWorld() || was.distanceSquared(here) > 64))
