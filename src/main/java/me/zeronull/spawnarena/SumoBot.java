@@ -50,8 +50,10 @@ public final class SumoBot {
     /** A speed hack's bhop speed (blocks a tick), steady: a sprint-jump peaks at about 0.36. */
     private static final double BHOP_SPEED = 0.42;
 
-    private final BotFight fight;
-    private final Player target;
+    /** The match it's in: a practice match against a player, or a show match against another bot */
+    private final BotMatch match;
+    /** Who it fights: a player, or another bot (set once both are made) */
+    private volatile Foe foe;
     private final BotDifficulty level;
     private final Location centre;
     private volatile Mannequin body;
@@ -64,6 +66,15 @@ public final class SumoBot {
     private double noiseYaw, noisePitch;
     /** How fast its aim is turning (degrees a tick): it speeds up and settles like a hand does, rather than snapping. */
     private double yawSpeed, pitchSpeed;
+    /** How far from where it means to aim its aim has wandered (blocks: up, and to the side) */
+    private double driftUp, driftSide;
+    /**
+     * Reading its opponent's strafe: which way they've been strafing (1 or -1, as it sees it: to its side vector), and
+     * how well it's got it (0 to 1). Strafing the same way for a while, it learns to aim a little ahead and misses
+     * less; a change of direction and it has to read them again.
+     */
+    private int strafeWay;
+    private double strafeRead;
     private boolean sprinting = true;
     private long sprintAgainAt, nextSwingAt, strafeUntil, jumpCooldownUntil, startAt;
     private int strafeDir = 1;
@@ -95,10 +106,113 @@ public final class SumoBot {
     private final Deque<Vector> seen = new ArrayDeque<>();
 
     SumoBot(final BotFight fight, final Player target, final BotDifficulty level, final Location centre) {
-        this.fight = fight;
-        this.target = target;
+        this.match = fight;
+        this.foe = new PlayerFoe(target);
         this.level = level;
         this.centre = centre;
+    }
+
+    /** For a show match: its foe, another bot, is given once both are made ({@link #fights}). */
+    SumoBot(final BotMatch match, final BotDifficulty level, final Location centre) {
+        this.match = match;
+        this.level = level;
+        this.centre = centre;
+    }
+
+    /** A show match: these two fight each other; {@code otherSpawn} is where the other comes in (until it's there). */
+    static void fights(final SumoBot a, final SumoBot b, final Location aSpawn, final Location bSpawn) {
+        a.foe = new BotFoe(b, bSpawn);
+        b.foe = new BotFoe(a, aSpawn);
+    }
+
+    // ── Who it fights ───────────────────────────────────────────────────────
+
+    /** The match a bot is in: what it needs to know of it, and tells it. */
+    interface BotMatch {
+        FightState state();
+
+        /** Its foe is still in it (online and fighting, or not out) */
+        boolean inPlay();
+
+        /** This bot is out (in the water or lava) */
+        void out(SumoBot bot);
+
+        Arena arena();
+
+        /** The real fight, for a practice match (null for a show) */
+        Fight fight();
+
+        /** Something everyone it concerns hears (a rage message) */
+        void tell(net.kyori.adventure.text.Component message);
+    }
+
+    /** Who a bot fights. */
+    private interface Foe {
+        Location location();
+
+        org.bukkit.util.BoundingBox box();
+
+        /** The entity, for line of sight and its thread */
+        org.bukkit.entity.LivingEntity entity();
+
+        /** Can be hurt now (not creative, spectator, out...) */
+        boolean hittable();
+
+        int maxNoDamageTicks();
+
+        /** Whose skin it mustn't borrow */
+        java.util.UUID skinOf();
+
+        /** On the foe's thread: {@code by}'s hit lands, as a player's hit would. */
+        void hit(SumoBot by, Location from, float yaw, boolean sprint, int knockbackLevel);
+    }
+
+    private final class PlayerFoe implements Foe {
+        final Player player;
+
+        PlayerFoe(final Player player) {
+            this.player = player;
+        }
+
+        public Location location() { return this.player.getLocation(); }
+        public org.bukkit.util.BoundingBox box() { return this.player.getBoundingBox(); }
+        public org.bukkit.entity.LivingEntity entity() { return this.player; }
+        public boolean hittable() { return canBeHit(this.player); }
+        public int maxNoDamageTicks() { return this.player.getMaximumNoDamageTicks(); }
+        public java.util.UUID skinOf() { return this.player.getUniqueId(); }
+
+        public void hit(final SumoBot by, final Location from, final float yaw, final boolean sprint, final int knockbackLevel) {
+            by.land(this.player, from, yaw, sprint, knockbackLevel);
+        }
+    }
+
+    private static final class BotFoe implements Foe {
+        final SumoBot bot;
+        final Location spawn;
+
+        BotFoe(final SumoBot bot, final Location spawn) {
+            this.bot = bot;
+            this.spawn = spawn;
+        }
+
+        public Location location() {
+            final Mannequin b = this.bot.body;
+            return b == null ? this.spawn.clone() : b.getLocation();
+        }
+
+        public org.bukkit.util.BoundingBox box() {
+            final Mannequin b = this.bot.body;
+            return b == null ? org.bukkit.util.BoundingBox.of(this.spawn, 0.3, 0.9, 0.3).shift(0, 0.9, 0) : b.getBoundingBox();
+        }
+
+        public org.bukkit.entity.LivingEntity entity() { return this.bot.body; }
+        public boolean hittable() { final Mannequin b = this.bot.body; return b != null && b.isValid(); }
+        public int maxNoDamageTicks() { final Mannequin b = this.bot.body; return b == null ? 20 : b.getMaximumNoDamageTicks(); }
+        public java.util.UUID skinOf() { return null; }
+
+        public void hit(final SumoBot by, final Location from, final float yaw, final boolean sprint, final int knockbackLevel) {
+            this.bot.takeHit(by, from, yaw, sprint, knockbackLevel);
+        }
     }
 
     public static SumoBot of(final org.bukkit.entity.Entity entity) {
@@ -110,8 +224,9 @@ public final class SumoBot {
                 || m.getPersistentDataContainer().has(KEY, PersistentDataType.BYTE));
     }
 
+    /** The player it fights (null in a show match, where it fights another bot). */
     public Player getTarget() {
-        return this.target;
+        return this.foe instanceof PlayerFoe p ? p.player : null;
     }
 
     public BotDifficulty getLevel() {
@@ -122,20 +237,25 @@ public final class SumoBot {
         return this.body;
     }
 
+    /** Its practice match (null in a show match). */
     public BotFight getFight() {
-        return this.fight;
+        return this.match instanceof BotFight f ? f : null;
+    }
+
+    BotMatch getMatch() {
+        return this.match;
     }
 
     /** On {@code at}'s thread: the bot comes in, facing its opponent, and starts playing. */
     void spawn(final Location at) {
         final World world = at.getWorld();
         final Location spot = at.clone();
-        final Vector toTarget = this.target.getLocation().toVector().subtract(spot.toVector());
+        final Vector toTarget = this.foe.location().toVector().subtract(spot.toVector());
         spot.setYaw((float) Math.toDegrees(Math.atan2(-toTarget.getX(), toTarget.getZ())));
         spot.setPitch(0);
         this.yaw = spot.getYaw();
         // Someone from the server's skin (never their opponent's own), under the bot's own name
-        final com.destroystokyo.paper.profile.PlayerProfile skin = BotSkins.pick(this.target.getUniqueId());
+        final com.destroystokyo.paper.profile.PlayerProfile skin = BotSkins.pick(this.foe.skinOf());
         this.body = world.spawn(spot, Mannequin.class, m -> {
             m.setPersistent(false);
             m.setVisibleByDefault(false);
@@ -157,12 +277,13 @@ public final class SumoBot {
         });
         BOTS.put(this.body.getUniqueId(), this);
         // Drawn as a player (a Mannequin's arm never swings on the client); as the Mannequin itself if that can't be done
-        this.puppet = BotPuppet.show(this.target, this, this.body, skin, this.level);
-        if (this.puppet == null)
-            Threads.entity(this.target, () -> {
+        final Player target = this.getTarget();
+        this.puppet = BotPuppet.show(target, this, this.body, skin, this.level);
+        if (this.puppet == null && target != null)
+            Threads.entity(target, () -> {
                 final Mannequin b = this.body;
-                if (b != null && this.target.isOnline())
-                    this.target.showEntity(SpawnArena.INSTANCE, b);
+                if (b != null && target.isOnline())
+                    target.showEntity(SpawnArena.INSTANCE, b);
             });
         // A moment to react to the start, like anyone
         this.startAt = this.level.reactionTicks + 4;
@@ -221,7 +342,7 @@ public final class SumoBot {
         b.setHealth(b.getMaxHealth());
         final BotPuppet p = this.puppet;
         if (p != null) {
-            final Location at = b.getLocation(), from = this.target.getLocation();
+            final Location at = b.getLocation(), from = this.foe.location();
             p.hurt((float) (Math.toDegrees(Math.atan2(from.getZ() - at.getZ(), from.getX() - at.getX())) - at.getYaw()));
         }
         if (ThreadLocalRandom.current().nextDouble() < this.level.jumpResetChance)
@@ -259,13 +380,8 @@ public final class SumoBot {
      */
     private void startRage(final String why) {
         this.rage = true;
-        Threads.entity(this.target, () -> {
-            if (!this.target.isOnline())
-                return;
-            this.target.sendMessage(MiniMessage.miniMessage().deserialize(this.level.colour
-                    + "<bold>" + this.level.label + "</bold> <gray>bot " + why + " so it's started <red><bold>rage cheating</bold><gray>!"));
-            this.target.playSound(this.target, Sound.ENTITY_WITHER_SPAWN, 0.4f, 1.6f);
-        });
+        this.match.tell(MiniMessage.miniMessage().deserialize(this.level.colour
+                + "<bold>" + this.level.label + "</bold> <gray>bot " + why + " so it's started <red><bold>rage cheating</bold><gray>!"));
     }
 
     // ── Thinking ────────────────────────────────────────────────────────────
@@ -278,27 +394,28 @@ public final class SumoBot {
         final BotPuppet puppet = this.puppet;
         if (puppet != null)
             puppet.update(b);
-        final FightState state = this.fight.getState();
+        final FightState state = this.match.state();
         if (state == FightState.ENDING || state == FightState.OVER) {
             this.remove();
             return;
         }
-        if (state != FightState.IN_FIGHT || !this.target.isOnline() || !this.fight.isFighter(this.target))
+        if (state != FightState.IN_FIGHT || this.foe == null || !this.match.inPlay())
             return;
 
         final Location at = b.getLocation();
         // Out exactly when a player would be: once the block at its feet is water or lava (not just touching some at its
         // side, or above it), however far it falls first; or if it somehow falls well below the arena without any
         if (me.zeronull.spawnarena.events.LiquidListener.inLiquid(at.getBlock()) || at.getY() < this.centre.getY() - 30) {
-            this.fight.botOut();
+            this.match.out(this);
             return;
         }
 
         // What it knows of its opponent: where they were reactionTicks ago
-        final Location now = this.target.getLocation();
+        final Location now = this.foe.location();
         this.seen.addLast(now.toVector());
         while (this.seen.size() > this.level.reactionTicks + 1)
             this.seen.removeFirst();
+        this.readStrafe(at);
         final Vector known = this.seen.peekFirst();
 
         this.aim(at, known);
@@ -320,10 +437,22 @@ public final class SumoBot {
      * Better bots react harder and leave smaller errors.
      */
     private void aim(final Location at, final Vector target) {
-        final double dx = target.getX() - at.getX(), dz = target.getZ() - at.getZ();
-        final double dy = (target.getY() + this.level.aimHeight) - (at.getY() + EYE);
-        final double flat = Math.sqrt(dx * dx + dz * dz);
+        // Where on them it's aiming wanders slowly about their body (up and down, side to side), as a hand's does
         final ThreadLocalRandom random = ThreadLocalRandom.current();
+        final double roam = 0.15 + 0.05 * this.level.aimNoise;
+        this.driftUp = Math.max(-roam, Math.min(roam, this.driftUp * 0.97 + random.nextGaussian() * 0.03));
+        this.driftSide = Math.max(-roam, Math.min(roam, this.driftSide * 0.97 + random.nextGaussian() * 0.03));
+        double dx = target.getX() - at.getX(), dz = target.getZ() - at.getZ();
+        final double sideLength = Math.sqrt(dx * dx + dz * dz);
+        if (sideLength > 1.0E-4) {
+            final double sideX = -dz / sideLength, sideZ = dx / sideLength; // sideways to it
+            // (and, once it's read their strafe, a little ahead of them that way)
+            final double ahead = this.driftSide + this.strafeWay * this.strafeRead * 0.5;
+            dx += sideX * ahead;
+            dz += sideZ * ahead;
+        }
+        final double dy = (target.getY() + this.level.aimHeight + this.driftUp) - (at.getY() + EYE);
+        final double flat = Math.sqrt(dx * dx + dz * dz);
         this.noiseYaw = this.noiseYaw * 0.85 + random.nextGaussian() * this.level.aimNoise * 0.15 * 2.5;
         this.noisePitch = this.noisePitch * 0.85 + random.nextGaussian() * this.level.aimNoise * 0.1 * 2.5;
         final double wantYaw = Math.toDegrees(Math.atan2(-dx, dz)) + this.noiseYaw;
@@ -331,12 +460,12 @@ public final class SumoBot {
 
         double errYaw = ((wantYaw - this.yaw) % 360 + 540) % 360 - 180;
         double errPitch = wantPitch - this.pitch;
-        final double deadZone = this.level.aimNoise * 0.6;
+        final double deadZone = Math.max(0.6, this.level.aimNoise * 1.0); // small errors are left be, as a person's are
         if (Math.abs(errYaw) < deadZone)
             errYaw *= 0.2;
         if (Math.abs(errPitch) < deadZone)
             errPitch *= 0.2;
-        final double gain = Math.min(0.55, 0.1 + this.level.turnSpeed / 160);
+        final double gain = Math.min(0.45, 0.08 + this.level.turnSpeed / 180);
         this.yawSpeed = clamp(this.yawSpeed * 0.6 + errYaw * gain, this.level.turnSpeed);
         this.pitchSpeed = clamp(this.pitchSpeed * 0.6 + errPitch * gain, this.level.turnSpeed * 0.6);
         this.yaw = (float) (this.yaw + this.yawSpeed);
@@ -511,19 +640,20 @@ public final class SumoBot {
         if (this.tick < this.nextSwingAt)
             return;
         final Location eye = at.clone().add(0, EYE, 0);
-        final double reachTo = distanceToBox(eye, this.target.getBoundingBox());
+        final Foe foe = this.foe;
+        final double reachTo = distanceToBox(eye, foe.box());
         // Swings a little before it's in reach, like anyone does, if it's looking about the right way
         final double off = this.angleOff(eye);
         final double reach = this.rage ? RAGE_REACH : this.level.reach;
         if (reachTo > reach + 0.6 || off > 35)
             return;
         // Not someone it can't hurt (creative, spectator), and not through blocks
-        if (!canBeHit(this.target) || !b.hasLineOfSight(this.target))
+        if (!foe.hittable() || foe.entity() == null || !b.hasLineOfSight(foe.entity()))
             return;
         final ThreadLocalRandom random = ThreadLocalRandom.current();
         // Comboing: the swing waits until they can be hit again (half their hit delay), so none is wasted
         this.nextSwingAt = this.tick + (this.rage ? 3 + random.nextInt(2)
-                : this.comboing ? this.target.getMaximumNoDamageTicks() / 2 + random.nextInt(2)
+                : this.comboing ? foe.maxNoDamageTicks() / 2 + random.nextInt(2)
                 : this.level.minSwingTicks + random.nextInt(this.level.maxSwingTicks - this.level.minSwingTicks + 1));
         b.swingMainHand();
         final BotPuppet puppet = this.puppet;
@@ -538,7 +668,7 @@ public final class SumoBot {
         final float hitYaw = this.yaw;
         final Location from = at.clone();
         final int knockbackLevel = this.level.combo ? 0 : SlapFish.create().getEnchantmentLevel(org.bukkit.enchantments.Enchantment.KNOCKBACK);
-        Threads.entity(this.target, () -> this.land(from, hitYaw, sprintHit, knockbackLevel));
+        Threads.entity(foe.entity(), () -> foe.hit(this, from, hitYaw, sprintHit, knockbackLevel));
         if (sprintHit) {
             // A sprint hit slows the hitter and ends their sprint; w-tapping gets it back sooner
             b.setVelocity(b.getVelocity().multiply(new Vector(0.6, 1, 0.6)));
@@ -559,19 +689,23 @@ public final class SumoBot {
         }
     }
 
-    /** On its opponent's thread: the hit lands like a player's, unless they're still in their hit delay. */
-    private void land(final Location from, final float hitYaw, final boolean sprintHit, final int knockbackLevel) {
-        final Player p = this.target;
-        if (!p.isOnline() || !this.fight.isFighter(p) || this.fight.getState() != FightState.IN_FIGHT || !canBeHit(p))
-            return;
-        if (!this.level.combo && p.getNoDamageTicks() > p.getMaximumNoDamageTicks() / 2)
-            return;
-        p.setNoDamageTicks(this.level.combo ? 0 : p.getMaximumNoDamageTicks());
+    /** It landed a hit: a run of them starts a combo (bots that sneak-tap). */
+    private void landed() {
         this.hitsLanded++;
         if (++this.hitsInARow >= 2 && this.level.sneakTapChance > 0 && !this.comboing) {
             this.comboing = true;
             this.comboMisses = 0;
         }
+    }
+
+    /** On its opponent's thread: the hit lands like a player's, unless they're still in their hit delay. */
+    private void land(final Player p, final Location from, final float hitYaw, final boolean sprintHit, final int knockbackLevel) {
+        if (!p.isOnline() || !this.match.inPlay() || this.match.state() != FightState.IN_FIGHT || !canBeHit(p))
+            return;
+        if (!this.level.combo && p.getNoDamageTicks() > p.getMaximumNoDamageTicks() / 2)
+            return;
+        p.setNoDamageTicks(this.level.combo ? 0 : p.getMaximumNoDamageTicks());
+        this.landed();
 
         // The game's own knockback (LivingEntity.knockback), as a player's hit gives it: 0.4 away from the hitter, then
         // (sprinting, or a Knockback enchantment) half a block per level in the direction they're facing
@@ -589,6 +723,44 @@ public final class SumoBot {
             p.setVelocity(v); // sent to their game, as a hit's knockback is
         p.sendHurtAnimation((float) (Math.toDegrees(Math.atan2(from.getZ() - pos.getZ(), from.getX() - pos.getX())) - p.getYaw()));
         p.getWorld().playSound(p, Sound.ENTITY_PLAYER_HURT, 1f, 1f);
+    }
+
+    /**
+     * On this bot's thread, in a show match: {@code by} (the other bot) hits it, as a player's hit would: the same hit
+     * delay, and the same knockback (worked out as the game does, then less for a bot that takes less), then its own
+     * reaction to being hit.
+     */
+    private void takeHit(final SumoBot by, final Location from, final float hitYaw, final boolean sprintHit, final int knockbackLevel) {
+        final Mannequin b = this.body;
+        if (b == null || !b.isValid() || this.match.state() != FightState.IN_FIGHT)
+            return;
+        if (!by.level.combo && b.getNoDamageTicks() > b.getMaximumNoDamageTicks() / 2)
+            return;
+        b.setNoDamageTicks(by.level.combo ? 0 : b.getMaximumNoDamageTicks());
+        by.landed();
+        final Location pos = b.getLocation();
+        Vector v = knockback(b.getVelocity(), b.isOnGround(), 0.4, from.getX() - pos.getX(), from.getZ() - pos.getZ());
+        final int strength = knockbackLevel + (sprintHit ? 1 : 0);
+        final double rad = Math.toRadians(hitYaw);
+        if (strength > 0)
+            v = knockback(v, b.isOnGround(), strength * 0.5, Math.sin(rad), -Math.cos(rad));
+        double scale = this.level.knockbackTaken;
+        if (by.level.combo)
+            scale /= 1.2000000476837158; // combo sumo's softer knockback
+        b.setVelocity(v.setX(v.getX() * scale).setZ(v.getZ() * scale));
+        b.getWorld().playSound(pos, Sound.ENTITY_PLAYER_HURT, 1f, 1f);
+        this.hurt();
+    }
+
+    /** LivingEntity.knockback: half the old velocity, pushed away from (x, z) by strength, a hop up if on the ground. */
+    private static Vector knockback(final Vector old, final boolean onGround, final double strength, final double x, final double z) {
+        double dx = x, dz = z;
+        while (dx * dx + dz * dz < 1.0E-5) {
+            dx = (Math.random() - Math.random()) * 0.01;
+            dz = (Math.random() - Math.random()) * 0.01;
+        }
+        final Vector push = new Vector(dx, 0, dz).normalize().multiply(strength);
+        return new Vector(old.getX() / 2 - push.getX(), onGround ? Math.min(0.4, old.getY() / 2 + strength) : old.getY(), old.getZ() / 2 - push.getZ());
     }
 
     private static boolean canBeHit(final Player p) {
@@ -609,14 +781,38 @@ public final class SumoBot {
             return 0;
         to.normalize();
         final double across = Math.abs(moved.getX() * to.getZ() - moved.getZ() * to.getX()); // sideways speed
-        return Math.min(0.6, across / 0.25 * 0.5 * (1 - this.level.strafeResist));
+        return Math.min(0.6, across / 0.25 * 0.5 * (1 - this.level.strafeResist)) * (1 - 0.6 * this.strafeRead);
+    }
+
+    /** Each tick: which way they're strafing, and whether it's the same way as before (see strafeRead). */
+    private void readStrafe(final Location at) {
+        if (this.seen.size() < 3)
+            return;
+        final Vector now = this.seen.peekLast(), before = this.seen.stream().skip(this.seen.size() - 3).findFirst().orElse(now);
+        final Vector moved = now.clone().subtract(before).setY(0).multiply(0.5);
+        final Vector to = now.clone().subtract(at.toVector()).setY(0);
+        if (to.lengthSquared() < 1.0E-4)
+            return;
+        to.normalize();
+        final double sideways = -(moved.getX() * to.getZ() - moved.getZ() * to.getX()); // along its side vector
+        if (Math.abs(sideways) < 0.05) {
+            this.strafeRead *= 0.97; // not strafing: it slowly forgets
+            return;
+        }
+        final int way = sideways > 0 ? 1 : -1;
+        if (way != this.strafeWay) {
+            this.strafeWay = way;
+            this.strafeRead = 0;
+        }
+        // About 3 seconds of the same strafe to read it fully for Easy, about 1.2 for the best
+        this.strafeRead = Math.min(1, this.strafeRead + (1 + 1.5 * this.level.strafeResist) / 60);
     }
 
     /** Degrees between where it's looking and where on its opponent it aims. */
     private double angleOff(final Location eye) {
         final Vector look = new Vector(-Math.sin(Math.toRadians(this.yaw)) * Math.cos(Math.toRadians(this.pitch)),
                 -Math.sin(Math.toRadians(this.pitch)), Math.cos(Math.toRadians(this.yaw)) * Math.cos(Math.toRadians(this.pitch)));
-        final Vector to = this.target.getLocation().toVector().add(new Vector(0, this.level.aimHeight, 0)).subtract(eye.toVector());
+        final Vector to = this.foe.location().toVector().add(new Vector(0, this.level.aimHeight, 0)).subtract(eye.toVector());
         if (to.lengthSquared() < 1.0E-6)
             return 0;
         return Math.toDegrees(look.angle(to));

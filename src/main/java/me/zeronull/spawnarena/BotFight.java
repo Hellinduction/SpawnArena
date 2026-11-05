@@ -13,7 +13,7 @@ import java.util.UUID;
  * after, with the bot at the other spawn point. It counts for nothing (no wins, losses, streaks, Elo, rewards, bets,
  * broadcast or fight time); only a "bots beaten" count per difficulty is kept.
  */
-public final class BotFight extends Fight {
+public final class BotFight extends Fight implements SumoBot.BotMatch {
     private final BotDifficulty level;
     private final Player player;
     private volatile SumoBot bot;
@@ -25,6 +25,43 @@ public final class BotFight extends Fight {
 
     public BotDifficulty getLevel() {
         return this.level;
+    }
+
+    // ── As its bot sees it ──────────────────────────────────────────────────
+
+    @Override
+    public FightState state() {
+        return this.getState();
+    }
+
+    @Override
+    public boolean inPlay() {
+        return this.player.isOnline() && this.isFighter(this.player);
+    }
+
+    @Override
+    public void out(final SumoBot bot) {
+        this.botOut();
+    }
+
+    @Override
+    public Arena arena() {
+        return this.getArena();
+    }
+
+    @Override
+    public Fight fight() {
+        return this;
+    }
+
+    @Override
+    public void tell(final net.kyori.adventure.text.Component message) {
+        Threads.entity(this.player, () -> {
+            if (!this.player.isOnline())
+                return;
+            this.player.sendMessage(message);
+            this.player.playSound(this.player, org.bukkit.Sound.ENTITY_WITHER_SPAWN, 0.4f, 1.6f);
+        });
     }
 
     /** Where its bot is now, or null if it isn't in yet (or any more). */

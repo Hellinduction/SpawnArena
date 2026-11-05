@@ -111,9 +111,9 @@ final class BotPuppet {
      */
     static void hideFrom(final Fight fight) {
         for (final BotPuppet puppet : SHOWN) {
-            final Fight theirs = puppet.bot.getFight();
-            if (theirs == fight || theirs.getArena() == null || fight.getArena() == null
-                    || !theirs.getArena().getArenaName().equals(fight.getArena().getArenaName()))
+            final SumoBot.BotMatch theirs = puppet.bot.getMatch();
+            if (theirs.fight() == fight || theirs.arena() == null || fight.getArena() == null
+                    || !theirs.arena().getArenaName().equals(fight.getArena().getArenaName()))
                 continue;
             for (final Player p : fight.getMembers())
                 if (puppet.viewers.remove(p))
@@ -140,8 +140,10 @@ final class BotPuppet {
                 profile.setProperties(skin.getProperties());
             // Outlined as a player in the fight is: the other side's colour to its opponent, the fight's to anyone else
             // (the name takes the outline's colour); with no outlines, named in its level's colour
-            final net.kyori.adventure.text.format.NamedTextColor toOpponent = FightGlow.botOutline(bot.getFight());
-            final net.kyori.adventure.text.format.NamedTextColor toOthers = FightGlow.fightOutline(bot.getFight());
+            // (a show match between bots isn't a fight: no outline)
+            final Fight fight = bot.getMatch().fight();
+            final net.kyori.adventure.text.format.NamedTextColor toOpponent = fight == null ? null : FightGlow.botOutline(fight);
+            final net.kyori.adventure.text.format.NamedTextColor toOthers = fight == null ? null : FightGlow.fightOutline(fight);
             if (toOpponent != null)
                 body.setGlowing(true); // passed on with the rest of its entity data
             final String teamName = "sa_bot_" + Integer.toString(n, 36);
@@ -190,7 +192,7 @@ final class BotPuppet {
      */
     private void refreshViewers(final Mannequin body) throws ReflectiveOperationException {
         final java.util.Set<Player> should = new java.util.HashSet<>();
-        if (this.opponent.isOnline() && this.opponent.getWorld().equals(body.getWorld()))
+        if (this.opponent != null && this.opponent.isOnline() && this.opponent.getWorld().equals(body.getWorld()))
             should.add(this.opponent);
         final org.bukkit.Location bodyAt = body.getLocation();
         for (final Player p : body.getWorld().getNearbyPlayers(bodyAt, VIEW_DISTANCE))
@@ -244,11 +246,11 @@ final class BotPuppet {
 
     /** In another match in this bot's arena: fighters of different matches there don't see each other. */
     private boolean inOtherMatchHere(final Player p) {
-        final Fight fight = this.bot.getFight();
+        final Fight fight = this.bot.getMatch().fight();
+        final Arena arena = this.bot.getMatch().arena();
         final Arena theirs = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(p);
         final Fight theirFight = theirs == null ? null : theirs.getFight(p);
-        return theirFight != null && theirFight != fight && fight.getArena() != null
-                && theirs.getArenaName().equals(fight.getArena().getArenaName());
+        return theirFight != null && theirFight != fight && arena != null && theirs.getArenaName().equals(arena.getArenaName());
     }
 
     private void spawnFor(final Player viewer, final Mannequin body) throws ReflectiveOperationException {

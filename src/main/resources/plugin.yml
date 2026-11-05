@@ -71,6 +71,11 @@ commands:
     permission: spawnarena.arenaannounce
     permission-message: "§cYou don't have permission!"
 
+  arenabotfight:
+    description: Two sumo bots fight each other, to watch (/arenabotfight stop ends it)
+    usage: "/arenabotfight <level> <level> [arena]  or  /arenabotfight stop [arena]"
+    permission: spawnarena.arenabotfight
+    permission-message: "§cYou don't have permission!"
   arenalock:
     description: Close or open all arenas or one (no new queues or fights while closed; closing sends everyone out of free-for-alls)
     usage: "/arenalock [arena] [on|off]"
@@ -193,6 +198,8 @@ permissions:
   spawnarena.arenaannounce:
     default: op
   spawnarena.arenalock:
+    default: op
+  spawnarena.arenabotfight:
     default: op
   spawnarena.arenareload:
     default: op

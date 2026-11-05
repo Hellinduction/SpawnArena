@@ -40,6 +40,8 @@ public abstract class Arena extends ArenaOptions {
             return null;
         if (this.isCrystalPvp() && this.getArenaMode() == ArenaMode.MULTI && CrystalCopies.supported() && !(this instanceof CrystalCopy))
             return CrystalCopies.free(this);
+        if (this.getArenaMode() != ArenaMode.MULTI && BotShow.runningIn(this))
+            return null; // two bots are fighting in it (/arenabotfight)
         return this.getFights().isEmpty() || this.getArenaMode() == ArenaMode.MULTI ? this : null;
     }
     public ArenaQueue queue;
