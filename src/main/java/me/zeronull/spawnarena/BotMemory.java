@@ -24,6 +24,7 @@ import java.util.concurrent.ThreadLocalRandom;
 final class BotMemory {
     /** Master's styles (AGGRESSIVE, DEFENSIVE, STRAFER, BALANCED: see SumoBot.Style) */
     static final int STYLES = 4;
+    private static final String[] STYLE_NAMES = {"Aggressive", "Defensive", "Strafer", "Balanced"};
     /** Each match, how much everything before it still counts */
     private static final double FORGET = 0.93;
     private static final NamespacedKey KEY = new NamespacedKey(SpawnArena.INSTANCE, "bot_memory");
@@ -58,6 +59,36 @@ final class BotMemory {
         final BotMemory memory = LOADED.get(player.getUniqueId());
         if (memory != null && player.isOnline())
             player.getPersistentDataContainer().set(KEY, PersistentDataType.STRING, memory.toString());
+    }
+
+    /** On the player's thread: what's remembered of them, loaded if it isn't yet. */
+    static BotMemory peek(final Player player) {
+        final BotMemory memory = LOADED.get(player.getUniqueId());
+        return memory != null ? memory : load(player);
+    }
+
+    /** What it's learnt of them, for /arenabotmemory (MiniMessage lines). */
+    synchronized java.util.List<String> describe() {
+        final java.util.List<String> out = new java.util.ArrayList<>();
+        double matches = 0;
+        for (int i = 0; i < STYLES; i++)
+            matches += this.styleWins[i] + this.styleLosses[i];
+        out.add("<gray>Master matches remembered: <white>" + String.format("%.1f", matches) + " <dark_gray>(older ones count for less)");
+        for (int i = 0; i < STYLES; i++) {
+            final double w = this.styleWins[i], l = this.styleLosses[i];
+            final int chance = (int) Math.round(100 * (w + 1) / (w + l + 2));
+            out.add("<gray> " + STYLE_NAMES[i] + ": <green>" + String.format("%.1f", w) + " won <gray>/ <red>"
+                    + String.format("%.1f", l) + " lost <dark_gray>(it reckons " + chance + "% to beat them)");
+        }
+        final double side = this.strafeSide();
+        out.add("<gray>Strafes: <white>" + (Math.abs(side) < 0.1 ? "both ways about the same"
+                : Math.round(100 * this.strafeRight / Math.max(1, this.strafeRight + this.strafeLeft)) + "% to a bot's right")
+                + " <dark_gray>(" + Math.round(this.strafeRight + this.strafeLeft) + " ticks seen)");
+        final double run = this.averageRun(0, 0);
+        out.add("<gray>Switches strafe after: <white>" + (run > 0 ? String.format("%.1f", run / 20) + " s on average" : "not known yet"));
+        out.add("<gray>Sprint-jumps in: <white>" + Math.round(100 * this.jumpInRate(0, 0)) + "% of the time <dark_gray>("
+                + Math.round(this.approaches) + " times coming in seen" + (this.jumpInRate(0, 0) > 0.3 ? "; Master sidesteps them" : "") + ")");
+        return out;
     }
 
     static void forget(final UUID id) {

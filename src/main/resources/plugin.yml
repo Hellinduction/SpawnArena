@@ -76,6 +76,11 @@ commands:
     usage: "/arenabotfight <level> <level> [arena]  or  /arenabotfight stop [arena]"
     permission: spawnarena.arenabotfight
     permission-message: "§cYou don't have permission!"
+  arenabotmemory:
+    description: What sumo bots (Master) have learnt of a player - which of its styles beat them, and their habits
+    usage: "/arenabotmemory <player>"
+    permission: spawnarena.arenabotmemory
+    permission-message: "§cYou don't have permission!"
   arenalock:
     description: Close or open all arenas or one (no new queues or fights while closed; closing sends everyone out of free-for-alls)
     usage: "/arenalock [arena] [on|off]"
@@ -200,6 +205,8 @@ permissions:
   spawnarena.arenalock:
     default: op
   spawnarena.arenabotfight:
+    default: op
+  spawnarena.arenabotmemory:
     default: op
   spawnarena.arenareload:
     default: op

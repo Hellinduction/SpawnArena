@@ -98,6 +98,9 @@ public final class SumoBot {
     private volatile long knockedUntil;
     /** Moving backwards until this tick (an S-tap after a hit). */
     private long sTapUntil;
+    /** Sidestepping (out of the way of someone jumping in, still sprinting) until this tick, and which way */
+    private long sidestepUntil;
+    private int sidestepDir = 1;
     /**
      * Comboing (bots that sneak-tap): it's landed hits in a row without being hit back, so it presses on in a pattern,
      * straight at them, each swing timed for when they can next be hit, alternating a sneak-tap and a W-tap so each hit
@@ -152,14 +155,16 @@ public final class SumoBot {
     private enum Style {
         //            backOff strafe switch jumpIn jumpReset sTap
         USUAL(1.3, 1.0, 25, 1.0, 1.0, 1.0),
-        /** Rushes in: sprint-jumps in more, stays close, W-taps more */
-        AGGRESSIVE(1.0, 0.7, 25, 1.7, 0.9, 0.6),
-        /** Keeps its distance: backs off sooner, S-taps a lot, jump-resets more, rarely jumps in */
-        DEFENSIVE(1.8, 1.15, 22, 0.5, 1.2, 1.3),
+        // (Each only changes how it plays: none gives up anything the usual Master has: same strafing or more, the
+        // same spacing give or take a little, as many jump-resets or more)
+        /** Rushes in: sprint-jumps in more, stays a little closer, W-taps more */
+        AGGRESSIVE(1.15, 1.0, 22, 1.6, 1.0, 0.75),
+        /** Keeps its distance: backs off a little sooner, S-taps a lot, jump-resets more */
+        DEFENSIVE(1.45, 1.15, 22, 0.85, 1.2, 1.3),
         /** Strafes hard and switches way often, hard to hit */
-        STRAFER(1.3, 1.35, 12, 0.9, 1.0, 1.0),
-        /** A bit of all of it */
-        BALANCED(1.4, 1.1, 18, 1.2, 1.1, 1.1);
+        STRAFER(1.3, 1.3, 12, 1.0, 1.0, 1.0),
+        /** A bit more of all of it */
+        BALANCED(1.3, 1.1, 18, 1.2, 1.1, 1.1);
 
         final double backOff, strafe, jumpIn, jumpReset, sTap;
         final int strafeSwitch;
@@ -396,6 +401,17 @@ public final class SumoBot {
         m.learn(this.level == BotDifficulty.MASTER ? this.style.index() : -1, botWon, this.seenRight, this.seenLeft,
                 this.runTicksSeen, this.runsSeen, this.approachesSeen, this.jumpInsSeen);
         Threads.entity(p, () -> BotMemory.save(p));
+    }
+
+    /** For /arenabotmemory: tells {@code to} what bots have learnt of {@code player} (read on the player's thread). */
+    public static void describeMemory(final Player player, final org.bukkit.command.CommandSender to) {
+        Threads.entity(player, () -> {
+            if (!player.isOnline())
+                return;
+            to.sendMessage(MiniMessage.miniMessage().deserialize("<aqua><bold>Master</bold> <gray>on <white>" + player.getName() + "<gray>:"));
+            for (final String line : BotMemory.peek(player).describe())
+                to.sendMessage(MiniMessage.miniMessage().deserialize(line));
+        });
     }
 
     /** Gone (the fight's over): from any thread. */
@@ -636,6 +652,10 @@ public final class SumoBot {
             }
         } else {
             this.circling = 0;
+        }
+        if (this.tick < this.sidestepUntil) {
+            across = this.sidestepDir; // a sidestep, keeping on forward (and its sprint)
+            ahead = Math.max(ahead, 0.6);
         }
         Vector input = forward.clone().multiply(ahead).add(side.clone().multiply(across));
 
@@ -957,8 +977,11 @@ public final class SumoBot {
             this.jumpedComingIn = true;
             if (this.plays()) {
                 final double rate = this.memory.jumpInRate(this.approachesSeen, this.jumpInsSeen);
-                if (rate > 0.3 && ThreadLocalRandom.current().nextDouble() < rate)
-                    this.sTapUntil = this.tick + 3 + ThreadLocalRandom.current().nextInt(2);
+                if (rate > 0.3 && ThreadLocalRandom.current().nextDouble() < rate) {
+                    // Out of their line, still sprinting: they come down beside it, and its first hit is a full one
+                    this.sidestepDir = ThreadLocalRandom.current().nextBoolean() ? 1 : -1;
+                    this.sidestepUntil = this.tick + 4 + ThreadLocalRandom.current().nextInt(3);
+                }
             }
         }
         if (distance < 3.5) {
