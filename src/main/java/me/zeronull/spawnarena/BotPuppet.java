@@ -244,6 +244,47 @@ final class BotPuppet {
         return p.getLocation().distanceSquared(at) <= blocks * blocks;
     }
 
+    /**
+     * For /arenabotviewers: each bot drawn now, who it's drawn for, and why anyone else within 100 blocks isn't one
+     * (MiniMessage lines, sent to {@code to} from each bot's own thread).
+     */
+    static int report(final org.bukkit.command.CommandSender to) {
+        int n = 0;
+        for (final BotPuppet puppet : SHOWN) {
+            final Mannequin body = puppet.bot.getBody();
+            if (body == null)
+                continue;
+            n++;
+            Threads.entity(body, () -> {
+                final org.bukkit.Location at = body.getLocation();
+                final List<String> lines = new ArrayList<>();
+                lines.add("<aqua>" + puppet.bot.getLevel().label + " bot <gray>(" + (puppet.opponent != null ? "against " + puppet.opponent.getName() : "a bot fight")
+                        + ") at <white>" + at.getWorld().getName() + " " + at.getBlockX() + ", " + at.getBlockY() + ", " + at.getBlockZ());
+                lines.add("<gray> Drawn for: <white>" + (puppet.viewers.isEmpty() ? "nobody" : String.join(", ", puppet.viewers.stream().map(Player::getName).toList())));
+                for (final Player p : at.getWorld().getPlayers()) {
+                    if (puppet.viewers.contains(p) || p.getLocation().distanceSquared(at) > 100 * 100)
+                        continue;
+                    final double distance = p.getLocation().distance(at);
+                    final int chunks = Math.min(p.getViewDistance(), p.getClientViewDistance());
+                    final String why;
+                    if (distance > VIEW_DISTANCE)
+                        why = "further than " + (int) VIEW_DISTANCE + " blocks";
+                    else if (puppet.inOtherMatchHere(p))
+                        why = "in another match in this arena";
+                    else if (!withinView(p, at))
+                        why = "past their view distance (server " + p.getViewDistance() + ", their game " + p.getClientViewDistance() + " chunks: "
+                                + (int) Math.max(16, (chunks - 1) * 16) + " blocks)";
+                    else
+                        why = "should be: not checked yet (it looks twice a second)";
+                    lines.add("<gray> Not drawn for <white>" + p.getName() + "<gray>, " + String.format("%.1f", distance) + " blocks away: <yellow>" + why);
+                }
+                for (final String line : lines)
+                    to.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(line));
+            });
+        }
+        return n;
+    }
+
     /** In another match in this bot's arena: fighters of different matches there don't see each other. */
     private boolean inOtherMatchHere(final Player p) {
         final Fight fight = this.bot.getMatch().fight();

@@ -168,6 +168,11 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("arenalock", new ArenaLockCommand());
         this.registerCommand("arenabotfight", new me.zeronull.spawnarena.commands.impl.ArenaBotFightCommand());
         this.registerCommand("arenabotmemory", new me.zeronull.spawnarena.commands.impl.ArenaBotMemoryCommand());
+        this.registerCommand("arenabotviewers", (sender, cmd, label, args) -> {
+            if (BotPuppet.report(sender) == 0)
+                sender.sendMessage("§eNo sumo bots are being drawn right now.");
+            return true;
+        });
         this.registerCommand("arenareload", new ArenaReloadCommand());
         this.registerCommand("arenapaste", new me.zeronull.spawnarena.commands.impl.ArenaPasteCommand());
         this.registerCommand("arenamove", new ArenaMoveCommand());
