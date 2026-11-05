@@ -128,13 +128,24 @@ public final class SumoBot {
     /** Where its opponent was, the last few ticks: it acts on where they were reactionTicks ago. */
     private final Deque<Vector> seen = new ArrayDeque<>();
 
+    /**
+     * How it aims, clicks and takes hits: its level's, or, locked in, sharper (still no cheats: the same reach and
+     * knockback, just trying its hardest: steadier, faster aim, faster clicking, fewer misses, more jump-resets)
+     */
+    private double turnSpeed, aimNoise, missChance, strafeResist, jumpResetChance;
+    private int minSwingTicks, maxSwingTicks;
+    /** Locked in: it's lost to them too many times in a row, so for a few matches it tries its hardest (unannounced) */
+    private boolean lockedIn;
+
     SumoBot(final BotFight fight, final Player target, final BotDifficulty level, final Location centre) {
         this.match = fight;
         this.foe = new PlayerFoe(target);
         this.level = level;
         this.centre = centre;
         this.memory = BotMemory.of(target.getUniqueId());
-        this.style = Style.of(level, this.memory);
+        this.lockedIn = level == BotDifficulty.MASTER && this.memory != null && this.memory.lockedIn();
+        this.style = Style.of(level, this.memory, this.lockedIn);
+        this.play();
     }
 
     /** For a show match: its foe, another bot, is given once they're all made ({@link #fight}). */
@@ -143,7 +154,29 @@ public final class SumoBot {
         this.level = level;
         this.centre = centre;
         this.memory = null;
-        this.style = Style.of(level, null);
+        this.style = Style.of(level, null, false);
+        this.play();
+    }
+
+    /** Its aim, clicking and so on: its level's, sharper when locked in. */
+    private void play() {
+        final BotDifficulty l = this.level;
+        final boolean on = this.lockedIn;
+        this.turnSpeed = l.turnSpeed * (on ? 1.1 : 1);
+        this.aimNoise = l.aimNoise * (on ? 0.7 : 1);
+        this.missChance = l.missChance * (on ? 0.5 : 1);
+        this.strafeResist = Math.min(0.9, l.strafeResist + (on ? 0.1 : 0));
+        this.jumpResetChance = Math.min(0.85, l.jumpResetChance + (on ? 0.15 : 0));
+        this.minSwingTicks = on ? Math.max(4, l.minSwingTicks) : l.minSwingTicks;
+        this.maxSwingTicks = on ? this.minSwingTicks : l.maxSwingTicks;
+    }
+
+    /** A show match: it's lost to this bot level too often in a row, so it locks in (Master only). */
+    void lockIn() {
+        if (this.level != BotDifficulty.MASTER)
+            return;
+        this.lockedIn = true;
+        this.play();
     }
 
     /**
@@ -181,10 +214,13 @@ public final class SumoBot {
         /** Master's, in {@link BotMemory}'s order */
         static final Style[] MASTER_STYLES = {AGGRESSIVE, DEFENSIVE, STRAFER, BALANCED};
 
-        static Style of(final BotDifficulty level, final BotMemory memory) {
+        /** Locked in, it plays the style that's done best against them (no trying others). */
+        static Style of(final BotDifficulty level, final BotMemory memory, final boolean lockedIn) {
             if (level != BotDifficulty.MASTER)
                 return USUAL;
-            return MASTER_STYLES[memory != null ? memory.pickStyle() : ThreadLocalRandom.current().nextInt(MASTER_STYLES.length)];
+            if (memory == null)
+                return MASTER_STYLES[ThreadLocalRandom.current().nextInt(MASTER_STYLES.length)];
+            return MASTER_STYLES[lockedIn ? memory.bestStyle() : memory.pickStyle()];
         }
 
         int index() {
@@ -398,6 +434,7 @@ public final class SumoBot {
         final Player p = this.getTarget();
         if (m == null || p == null)
             return;
+        // (Lost to them once too often, it's locked in next time: nothing's said, it just plays harder)
         m.learn(this.level == BotDifficulty.MASTER ? this.style.index() : -1, botWon, this.seenRight, this.seenLeft,
                 this.runTicksSeen, this.runsSeen, this.approachesSeen, this.jumpInsSeen);
         Threads.entity(p, () -> BotMemory.save(p));
@@ -469,13 +506,13 @@ public final class SumoBot {
             final Location at = b.getLocation(), from = this.foe.location();
             p.hurt((float) (Math.toDegrees(Math.atan2(from.getZ() - at.getZ(), from.getX() - at.getX())) - at.getYaw()));
         }
-        if (ThreadLocalRandom.current().nextDouble() < this.level.jumpResetChance * this.style.jumpReset)
+        if (ThreadLocalRandom.current().nextDouble() < this.jumpResetChance * this.style.jumpReset)
             this.jumpResetNext = true;
         // Thrown off by the hit, as a player is: its aim jolts (less the better it is) and it takes a moment to swing
         // back, so a run of good hits can keep it in a combo
         final ThreadLocalRandom random = ThreadLocalRandom.current();
         // (with no hit delay hits come all the time, so each one throws it off much less, or it'd never aim again)
-        final double jolt = (4 + this.level.aimNoise * 3) * (this.level.combo ? 0.25 : 1);
+        final double jolt = (4 + this.aimNoise * 3) * (this.level.combo ? 0.25 : 1);
         this.noiseYaw += random.nextGaussian() * jolt;
         this.noisePitch += random.nextGaussian() * jolt * 0.5;
         if (!this.level.combo) // with no hit delay, it's all about clicking straight back
@@ -565,7 +602,7 @@ public final class SumoBot {
     private void aim(final Location at, final Vector target) {
         // Where on them it's aiming wanders slowly about their body (up and down, side to side), as a hand's does
         final ThreadLocalRandom random = ThreadLocalRandom.current();
-        final double roam = 0.15 + 0.05 * this.level.aimNoise;
+        final double roam = 0.15 + 0.05 * this.aimNoise;
         this.driftUp = Math.max(-roam, Math.min(roam, this.driftUp * 0.97 + random.nextGaussian() * 0.03));
         this.driftSide = Math.max(-roam, Math.min(roam, this.driftSide * 0.97 + random.nextGaussian() * 0.03));
         double dx = target.getX() - at.getX(), dz = target.getZ() - at.getZ();
@@ -579,21 +616,21 @@ public final class SumoBot {
         }
         final double dy = (target.getY() + this.level.aimHeight + this.driftUp) - (at.getY() + EYE);
         final double flat = Math.sqrt(dx * dx + dz * dz);
-        this.noiseYaw = this.noiseYaw * 0.85 + random.nextGaussian() * this.level.aimNoise * 0.15 * 2.5;
-        this.noisePitch = this.noisePitch * 0.85 + random.nextGaussian() * this.level.aimNoise * 0.1 * 2.5;
+        this.noiseYaw = this.noiseYaw * 0.85 + random.nextGaussian() * this.aimNoise * 0.15 * 2.5;
+        this.noisePitch = this.noisePitch * 0.85 + random.nextGaussian() * this.aimNoise * 0.1 * 2.5;
         final double wantYaw = Math.toDegrees(Math.atan2(-dx, dz)) + this.noiseYaw;
         final double wantPitch = Math.max(-60, Math.min(60, -Math.toDegrees(Math.atan2(dy, flat)) + this.noisePitch));
 
         double errYaw = ((wantYaw - this.yaw) % 360 + 540) % 360 - 180;
         double errPitch = wantPitch - this.pitch;
-        final double deadZone = Math.max(0.6, this.level.aimNoise * 1.0); // small errors are left be, as a person's are
+        final double deadZone = Math.max(0.6, this.aimNoise * 1.0); // small errors are left be, as a person's are
         if (Math.abs(errYaw) < deadZone)
             errYaw *= 0.2;
         if (Math.abs(errPitch) < deadZone)
             errPitch *= 0.2;
-        final double gain = Math.min(0.45, 0.08 + this.level.turnSpeed / 180);
-        this.yawSpeed = clamp(this.yawSpeed * 0.6 + errYaw * gain, this.level.turnSpeed);
-        this.pitchSpeed = clamp(this.pitchSpeed * 0.6 + errPitch * gain, this.level.turnSpeed * 0.6);
+        final double gain = Math.min(0.45, 0.08 + this.turnSpeed / 180);
+        this.yawSpeed = clamp(this.yawSpeed * 0.6 + errYaw * gain, this.turnSpeed);
+        this.pitchSpeed = clamp(this.pitchSpeed * 0.6 + errPitch * gain, this.turnSpeed * 0.6);
         this.yaw = (float) (this.yaw + this.yawSpeed);
         this.pitch = (float) Math.max(-90, Math.min(90, this.pitch + this.pitchSpeed));
     }
@@ -811,12 +848,12 @@ public final class SumoBot {
         // Comboing: the swing waits until they can be hit again (half their hit delay), so none is wasted
         this.nextSwingAt = this.tick + (this.rage ? 3 + random.nextInt(2)
                 : this.comboing ? foe.maxNoDamageTicks() / 2 + random.nextInt(2)
-                : this.level.minSwingTicks + random.nextInt(this.level.maxSwingTicks - this.level.minSwingTicks + 1));
+                : this.minSwingTicks + random.nextInt(this.maxSwingTicks - this.minSwingTicks + 1));
         b.swingMainHand();
         final BotPuppet puppet = this.puppet;
         if (puppet != null)
             puppet.swing(b);
-        if (reachTo > reach || off > 18 || (!this.rage && random.nextDouble() < this.level.missChance + this.strafeMiss(at))) {
+        if (reachTo > reach || off > 18 || (!this.rage && random.nextDouble() < this.missChance + this.strafeMiss(at))) {
             if (this.comboing && ++this.comboMisses >= 2)
                 this.comboing = false;
             return;
@@ -952,7 +989,7 @@ public final class SumoBot {
             return 0;
         to.normalize();
         final double across = Math.abs(moved.getX() * to.getZ() - moved.getZ() * to.getX()); // sideways speed
-        return Math.min(0.6, across / 0.25 * 0.5 * (1 - this.level.strafeResist)) * (1 - 0.6 * this.strafeRead);
+        return Math.min(0.6, across / 0.25 * 0.5 * (1 - this.strafeResist)) * (1 - 0.6 * this.strafeRead);
     }
 
     /**
@@ -1025,7 +1062,7 @@ public final class SumoBot {
         }
         this.runNow++;
         // About 3 seconds of the same strafe to read it fully for Easy, about 1.2 for the best
-        this.strafeRead = Math.min(1, this.strafeRead + (1 + 1.5 * this.level.strafeResist) / 60);
+        this.strafeRead = Math.min(1, this.strafeRead + (1 + 1.5 * this.strafeResist) / 60);
     }
 
     /** Degrees between where it's looking and where on its opponent it aims. */

@@ -40,6 +40,11 @@ public final class BotShow implements SumoBot.BotMatch {
     private volatile ScheduledTask targeting;
     /** Its outline colours, picked as a fight's are (one, or one per team in a 2v2); null when fights don't glow */
     private volatile java.util.List<NamedTextColor> colours;
+    /**
+     * Master against each bot level: [show matches lost to it in a row, locked-in matches left against it]. Lose to
+     * the same level too often and it locks in against it for the next few (as against a player: see BotMemory).
+     */
+    private static final java.util.Map<BotDifficulty, int[]> RIVALS = new java.util.concurrent.ConcurrentHashMap<>();
     /** The skins its bots have borrowed: never two the same */
     private final java.util.Set<String> skins = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
@@ -78,6 +83,13 @@ public final class BotShow implements SumoBot.BotMatch {
             show.spawns.put(bot, (first ? p1 : p2).clone().add(side.clone().multiply(offset)));
             show.in.add(bot);
         }
+        // Master locks in against a level it's kept losing to
+        for (final SumoBot bot : show.spawns.keySet())
+            for (final SumoBot foe : show.teamA.contains(bot) ? show.teamB : show.teamA) {
+                final int[] rival = RIVALS.get(foe.getLevel());
+                if (bot.getLevel() == BotDifficulty.MASTER && rival != null && rival[1] > 0)
+                    bot.lockIn();
+            }
         show.retarget();
         RUNNING.add(show);
         for (final java.util.Map.Entry<SumoBot, Location> e : show.spawns.entrySet()) {
@@ -225,10 +237,33 @@ public final class BotShow implements SumoBot.BotMatch {
                 }
             this.state = FightState.ENDING;
         }
+        this.rivalry(other, team);
         final boolean solo = this.teamA.size() == 1;
         this.tell(MiniMessage.miniMessage().deserialize("<gold>Bot fight: <gray>" + (solo ? "the " : "") + names(other)
                 + " <gray>" + (solo ? "bot beat the " : "beat ") + names(team) + (solo ? " <gray>bot!" : "<gray>!")));
         this.end();
+    }
+
+    /** The result, for Master's record against each bot level it played (see RIVALS). */
+    private void rivalry(final List<SumoBot> winners, final List<SumoBot> losers) {
+        for (final List<SumoBot> side : List.of(winners, losers))
+            for (final SumoBot bot : side) {
+                if (bot.getLevel() != BotDifficulty.MASTER)
+                    continue;
+                for (final SumoBot foe : side == winners ? losers : winners) {
+                    final int[] rival = RIVALS.computeIfAbsent(foe.getLevel(), l -> new int[2]);
+                    synchronized (rival) {
+                        if (rival[1] > 0)
+                            rival[1]--;
+                        else if (side == winners)
+                            rival[0] = 0;
+                        else if (++rival[0] >= BotMemory.LOSSES_TO_LOCK) {
+                            rival[0] = 0;
+                            rival[1] = BotMemory.LOCKED_MATCHES;
+                        }
+                    }
+                }
+            }
     }
 
     @Override

@@ -25,6 +25,8 @@ final class BotMemory {
     /** Master's styles (AGGRESSIVE, DEFENSIVE, STRAFER, BALANCED: see SumoBot.Style) */
     static final int STYLES = 4;
     private static final String[] STYLE_NAMES = {"Aggressive", "Defensive", "Strafer", "Balanced"};
+    /** Master matches lost to them in a row before it locks in, and how many matches it stays locked in for */
+    static final int LOSSES_TO_LOCK = 2, LOCKED_MATCHES = 3;
     /** Each match, how much everything before it still counts */
     private static final double FORGET = 0.93;
     private static final NamespacedKey KEY = new NamespacedKey(SpawnArena.INSTANCE, "bot_memory");
@@ -38,6 +40,8 @@ final class BotMemory {
     private double runTicks, runs;
     /** Times they came in from range, and how many of those were sprint-jumps in */
     private double approaches, jumpIns;
+    /** Master matches lost to them in a row (since it last locked in), and its locked-in matches left against them */
+    private int lossesInARow, lockedInLeft;
 
     /** On the player's thread, as a match starts: what's remembered of them (nothing yet: a fresh memory). */
     static BotMemory load(final Player player) {
@@ -73,6 +77,8 @@ final class BotMemory {
         double matches = 0;
         for (int i = 0; i < STYLES; i++)
             matches += this.styleWins[i] + this.styleLosses[i];
+        out.add(this.lockedInLeft > 0 ? "<red><bold>Locked in</bold> <gray>for their next <white>" + this.lockedInLeft + " <gray>Master match(es)"
+                : "<gray>Master's losing run against them: <white>" + this.lossesInARow + "/" + LOSSES_TO_LOCK + " <dark_gray>(then it locks in)");
         out.add("<gray>Master matches remembered: <white>" + String.format("%.1f", matches) + " <dark_gray>(older ones count for less)");
         for (int i = 0; i < STYLES; i++) {
             final double w = this.styleWins[i], l = this.styleLosses[i];
@@ -135,8 +141,31 @@ final class BotMemory {
         return (this.jumpIns + moreJumpIns) / (this.approaches + moreApproaches + 3);
     }
 
-    /** A match is over: what it saw is added, everything before counting for a little less. */
-    synchronized void learn(final int style, final boolean botWon, final double right, final double left,
+    /** Master is locked in against them (lost to them too often in a row). */
+    synchronized boolean lockedIn() {
+        return this.lockedInLeft > 0;
+    }
+
+    /** The style that's done best against them (its share of wins, a little evened out). */
+    synchronized int bestStyle() {
+        int best = 0;
+        double bestShare = -1;
+        for (int i = 0; i < STYLES; i++) {
+            final double share = (this.styleWins[i] + 1) / (this.styleWins[i] + this.styleLosses[i] + 2);
+            if (share > bestShare) {
+                bestShare = share;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * A match is over: what it saw is added, everything before counting for a little less. For Master: a locked-in
+     * match is one fewer to go; otherwise a loss adds to its losing run, and one too many locks it in for the next few.
+     * Returns whether it's just locked in.
+     */
+    synchronized boolean learn(final int style, final boolean botWon, final double right, final double left,
                             final double runTicks, final int runs, final int approaches, final int jumpIns) {
         for (int i = 0; i < STYLES; i++) {
             this.styleWins[i] *= FORGET;
@@ -154,24 +183,42 @@ final class BotMemory {
         this.runs = this.runs * FORGET + runs;
         this.approaches = this.approaches * FORGET + approaches;
         this.jumpIns = this.jumpIns * FORGET + jumpIns;
+        if (style < 0)
+            return false;
+        if (this.lockedInLeft > 0) {
+            this.lockedInLeft--;
+            return false;
+        }
+        if (botWon) {
+            this.lossesInARow = 0;
+            return false;
+        }
+        if (++this.lossesInARow < LOSSES_TO_LOCK)
+            return false;
+        this.lossesInARow = 0;
+        this.lockedInLeft = LOCKED_MATCHES;
+        return true;
     }
 
     // ── Kept as text ────────────────────────────────────────────────────────
 
     @Override
     public synchronized String toString() {
-        final StringBuilder out = new StringBuilder("1");
+        final StringBuilder out = new StringBuilder("2");
         for (int i = 0; i < STYLES; i++)
             out.append(',').append(round(this.styleWins[i])).append(',').append(round(this.styleLosses[i]));
         for (final double d : new double[]{this.strafeRight, this.strafeLeft, this.runTicks, this.runs, this.approaches, this.jumpIns})
             out.append(',').append(round(d));
+        out.append(',').append(this.lossesInARow).append(',').append(this.lockedInLeft);
         return out.toString();
     }
 
     private void parse(final String saved) {
         try {
             final String[] parts = saved.split(",");
-            if (!"1".equals(parts[0]) || parts.length != 1 + STYLES * 2 + 6)
+            // (1: before locked-in mode, without its last two)
+            final boolean two = "2".equals(parts[0]);
+            if (!(two && parts.length == 1 + STYLES * 2 + 8) && !("1".equals(parts[0]) && parts.length == 1 + STYLES * 2 + 6))
                 return;
             int n = 1;
             for (int i = 0; i < STYLES; i++) {
@@ -183,7 +230,11 @@ final class BotMemory {
             this.runTicks = Double.parseDouble(parts[n++]);
             this.runs = Double.parseDouble(parts[n++]);
             this.approaches = Double.parseDouble(parts[n++]);
-            this.jumpIns = Double.parseDouble(parts[n]);
+            this.jumpIns = Double.parseDouble(parts[n++]);
+            if (two) {
+                this.lossesInARow = Integer.parseInt(parts[n++]);
+                this.lockedInLeft = Integer.parseInt(parts[n]);
+            }
         } catch (final NumberFormatException ignored) {
             // Unreadable: start again
         }
