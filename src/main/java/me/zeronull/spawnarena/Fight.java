@@ -1081,6 +1081,8 @@ public class Fight {
         this.logMatch(winners, losers, countStats, countStats && !this.unranked, selfOut);
 
         final List<Integer> winnerStreaks = new ArrayList<>();
+        /** Whether each winner's streak (same order) is their best yet there: "(New Best!)" after it */
+        final List<Boolean> newBests = new ArrayList<>();
         final Map<Player, Integer> endedStreaks = new LinkedHashMap<>();
         Map<UUID, int[]> elo = Map.of();
         long matchNumber = 0, milestone = 0;
@@ -1093,8 +1095,12 @@ public class Fight {
                     endedStreaks.put(loser, streak);
                 SpawnArena.statsManager.recordLoss(loser, this.arena.arenaName);
             }
-            for (final Player winner : winners)
-                winnerStreaks.add(SpawnArena.statsManager.recordWin(winner, this.arena.arenaName));
+            for (final Player winner : winners) {
+                final int best = SpawnArena.statsManager.getBestWinStreak(winner.getUniqueId(), this.arena.arenaName); // (before it's raised)
+                final int streak = SpawnArena.statsManager.recordWin(winner, this.arena.arenaName);
+                winnerStreaks.add(streak);
+                newBests.add(streak >= NEW_BEST_MIN && streak > best);
+            }
 
             final long seconds = this.startedAt == 0 ? 0 : (System.currentTimeMillis() - this.startedAt) / 1000;
             matchNumber = SpawnArena.statsManager.recordMatch(this.arena.arenaName, seconds);
@@ -1132,12 +1138,12 @@ public class Fight {
                         Placeholder.unparsed("wins", winners.size() > 1 ? "win" : "wins"), // "Bot1 & Bot3 win"
                         Placeholder.component("loser", displayNames(losers)),
                         Placeholder.parsed("arena", arenaPart),
-                        Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners))).hoverEvent(statsHover),
+                        Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners, newBests))).hoverEvent(statsHover),
                         winners, losers);
             } else {
                 // A long streak just ended: that replaces the usual result message
                 for (final Map.Entry<Player, Integer> ended : endedStreaks.entrySet())
-                    this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut, winnerStreaks);
+                    this.announceStreakEnded(ended.getKey(), ended.getValue(), winners, losers, statsHover, selfOut, winnerStreaks, newBests);
             }
             return null;
         });
@@ -1176,7 +1182,7 @@ public class Fight {
 
     private void announceStreakEnded(final Player loser, final int streak, final List<Player> winners, final List<Player> losers,
                                      final net.kyori.adventure.text.event.HoverEvent<Component> statsHover, final boolean selfOut,
-                                     final List<Integer> winnerStreaks) {
+                                     final List<Integer> winnerStreaks, final List<Boolean> newBests) {
         // Worded and coloured like the usual "X beat Y in the sumo arena!" result; only the headline and the streak stand out
         final Component message = MiniMessage.miniMessage().deserialize(selfOut
                         ? "<dark_red><bold>STREAK ENDED!</bold> <loser> took themselves out in the <arena>arena, losing their "
@@ -1192,7 +1198,7 @@ public class Fight {
                     Placeholder.unparsed("wins", winners.size() > 1 ? "win" : "wins"), // "Bot1 & Bot3 win"
                 Placeholder.unparsed("streak", String.valueOf(streak)),
                 // The winner's own streak, like the usual result message has
-                Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners)),
+                Placeholder.parsed("ws_str", streakPart(winnerStreaks, winners, newBests)),
                 Placeholder.unparsed("arena", "arena".equals(this.arena.getArenaName()) ? "" : Arena.displayName(this.arena.getArenaName()) + " ")).hoverEvent(statsHover);
 
         broadcast(this.getArena(), message, winners, losers);
@@ -1248,9 +1254,13 @@ public class Fight {
      * " with a win streak of 5" (1v1); in 2v2 " with a win streak of 5 (Alice)" when only one shows, or " with win
      * streaks of 5 & 4" (same order as the names) when both do. Only streaks of 3 or more show; empty if there are none.
      */
-    private static String streakPart(final List<Integer> streaks, final List<Player> winners) {
+    /** From this win streak up, beating your best gets "(New Best!)" after it (not for someone's 1st or 2nd win ever) */
+    static final int NEW_BEST_MIN = 3;
+    private static final String NEW_BEST = " <gold><bold>(New Best!)</bold></gold><dark_red>";
+
+    private static String streakPart(final List<Integer> streaks, final List<Player> winners, final List<Boolean> newBests) {
         if (streaks.size() == 1)
-            return streaks.get(0) > 2 ? " with a win streak of <white>" + streaks.get(0) + "<dark_red>" : "";
+            return streaks.get(0) > 2 ? " with a win streak of <white>" + streaks.get(0) + "<dark_red>" + (best(newBests, 0) ? NEW_BEST : "") : "";
         final List<Integer> shown = new ArrayList<>();
         for (int i = 0; i < streaks.size() && i < winners.size(); i++)
             if (streaks.get(i) > 2)
@@ -1260,11 +1270,15 @@ public class Fight {
         // Just one: say whose it is. All of them: they're in the same order as the names, so that's clear already
         if (shown.size() == 1 && streaks.size() > 1)
             return " with a win streak of <white>" + streaks.get(shown.get(0)) + "<dark_red> ("
-                    + MiniMessage.miniMessage().escapeTags(winners.get(shown.get(0)).getName()) + ")";
+                    + MiniMessage.miniMessage().escapeTags(winners.get(shown.get(0)).getName()) + ")" + (best(newBests, shown.get(0)) ? NEW_BEST : "");
         final List<String> parts = new ArrayList<>();
         for (final int i : shown)
-            parts.add("<white>" + streaks.get(i) + "<dark_red>");
+            parts.add("<white>" + streaks.get(i) + "<dark_red>" + (best(newBests, i) ? NEW_BEST : ""));
         return (parts.size() == 1 ? " with a win streak of " : " with win streaks of ") + String.join(" & ", parts);
+    }
+
+    private static boolean best(final List<Boolean> newBests, final int i) {
+        return i < newBests.size() && newBests.get(i);
     }
 
     private static Component displayNames(final List<Player> players) {

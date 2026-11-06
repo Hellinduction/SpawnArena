@@ -29,6 +29,9 @@ public final class FfaFight extends Fight {
     /** Why someone is out. */
     private enum Out { DIED, QUIT, FLED, LEFT }
 
+    /** Each player's best kill streak here (loaded as they come in, raised as they beat it): "(New Best!)" */
+    private final Map<UUID, Integer> bestStreak = new ConcurrentHashMap<>();
+
     /** When each player came in (this life): the kill message's stats card counts from there */
     private final Map<UUID, Long> cameInAt = new ConcurrentHashMap<>();
 
@@ -284,6 +287,11 @@ public final class FfaFight extends Fight {
                 // Their stats (for the hover on kill messages) count from now: each time in is a new life
                 this.stats().reset(player);
                 this.cameInAt.put(player.getUniqueId(), System.currentTimeMillis());
+                if (SpawnArena.statsManager != null) {
+                    final UUID who = player.getUniqueId();
+                    final String name = this.arena.getArenaName();
+                    Threads.async(() -> this.bestStreak.put(who, SpawnArena.statsManager.getFfaBestStreak(who, name)));
+                }
             }
             else
                 this.joining.remove(player);
@@ -958,7 +966,16 @@ public final class FfaFight extends Fight {
         });
 
         // The message, to everyone in here, the victim and whoever got the kill
-        final Component killers = this.names(credit, newStreaks);
+        // Beating their best kill streak here (3 and up): "(New Best!)" (not known yet: no tag)
+        final Set<UUID> newBest = new HashSet<>();
+        for (final Map.Entry<UUID, Integer> e : newStreaks.entrySet()) {
+            final Integer best = this.bestStreak.get(e.getKey());
+            if (best != null && e.getValue() >= Fight.NEW_BEST_MIN && e.getValue() > best) {
+                newBest.add(e.getKey());
+                this.bestStreak.put(e.getKey(), e.getValue());
+            }
+        }
+        final Component killers = this.names(credit, newStreaks, newBest);
         final String template = credit.isEmpty()
                 ? switch (why) {
                     case QUIT -> "<red>☠</red> <gray><victim> logged out mid-fight.";
@@ -1032,7 +1049,7 @@ public final class FfaFight extends Fight {
     }
 
     /** "FatBlack (3 streak) & Bob", most recent hit first. Names of people who have since gone offline still show. */
-    private Component names(final List<UUID> players, final Map<UUID, Integer> streaks) {
+    private Component names(final List<UUID> players, final Map<UUID, Integer> streaks, final Set<UUID> newBest) {
         final List<Component> parts = new ArrayList<>();
         for (final UUID id : players) {
             final Player online = Bukkit.getPlayer(id);
@@ -1042,7 +1059,8 @@ public final class FfaFight extends Fight {
             name = name.colorIfAbsent(net.kyori.adventure.text.format.NamedTextColor.WHITE);
             final int streak = streaks.getOrDefault(id, 0);
             if (streak >= 2)
-                name = name.append(MiniMessage.miniMessage().deserialize(" <dark_gray>(<gold><streak> streak</gold>)",
+                name = name.append(MiniMessage.miniMessage().deserialize(" <dark_gray>(<gold><streak> streak</gold>"
+                                + (newBest.contains(id) ? " · <gold><bold>New Best!</bold></gold>" : "") + ")",
                         Placeholder.unparsed("streak", String.valueOf(streak))));
             parts.add(name);
         }

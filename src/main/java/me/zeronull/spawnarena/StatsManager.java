@@ -1580,6 +1580,11 @@ public class StatsManager {
         return getField(uuid, arena, "fight_seconds");
     }
 
+    /** Their best free-for-all kill streak in this arena. */
+    public int getFfaBestStreak(UUID uuid, String arena) {
+        return getField(uuid, arena, "ffa_best_streak");
+    }
+
     public int getBestWinStreak(UUID uuid, String arena) {
         return getField(uuid, arena, "best_win_streak");
     }
