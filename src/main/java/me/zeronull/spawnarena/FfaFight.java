@@ -183,7 +183,7 @@ public final class FfaFight extends Fight {
             JOINING.add(player.getUniqueId());
         }
         DuelManager.cancelSentRequests(player, "joined a free-for-all");
-        player.sendMessage(ChatColor.GREEN + "Joining the " + Arena.displayName(arena.getArenaName()) + " free-for-all...");
+        player.sendMessage(ChatColor.GREEN + "Joining the " + Arena.displayName(arena.getArenaName()) + " arena...");
         session.arenaReady.whenComplete((ready, error) ->
                 Threads.entity(player, () -> session.prepare(player, error == null && Boolean.TRUE.equals(ready))));
     }
@@ -311,7 +311,7 @@ public final class FfaFight extends Fight {
         if (this.variant != null)
             player.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce(this.arena)));
         player.sendMessage(MiniMessage.miniMessage().deserialize(
-                "<green>You're in the <white><arena></white> free-for-all! Everyone here is your opponent.</green> "
+                "<green>You're in the <white><arena></white> arena! Everyone here is your opponent.</green> "
                         + "<gray>Your things are kept: you get them back as they were when you die or leave. Leave with "
                         + "<click:run_command:'/leavearena'><hover:show_text:'<gray>Click to leave the free-for-all'><yellow><u>/leavearena</u></yellow></hover></click>"
                         + " once you're out of combat.",
@@ -1009,10 +1009,10 @@ public final class FfaFight extends Fight {
         if (lostStreak >= every) {
             final Player ender = killersHere.isEmpty() ? null : killersHere.get(0);
             broadcast(this.getArena(), MiniMessage.miniMessage().deserialize(ender == null
-                            ? "<dark_red><bold>STREAK ENDED!</bold> <victim> took themselves out in the <arena> free-for-all, losing their "
+                            ? "<dark_red><bold>STREAK ENDED!</bold> <victim> took themselves out in the <arena> arena, losing their "
                                     + "<white><bold><streak></bold></white> kill streak."
                             : "<dark_red><bold>STREAK ENDED!</bold> <killer> ended <victim><possessive> "
-                                    + "<white><bold><streak></bold></white> kill streak in the <arena> free-for-all!",
+                                    + "<white><bold><streak></bold></white> kill streak in the <arena> arena!",
                     Placeholder.component("victim", victim.displayName()),
                     Placeholder.unparsed("possessive", Grammar.possessiveSuffix(victim.getName())),
                     Placeholder.component("killer", ender == null ? Component.empty() : ender.displayName()),
@@ -1024,7 +1024,7 @@ public final class FfaFight extends Fight {
             if (killer != null && e.getValue() >= every && e.getValue() % every == 0)
                 broadcast(this.getArena(), MiniMessage.miniMessage().deserialize(
                         "<gold><bold>KILL STREAK!</bold></gold> <yellow><killer></yellow> <gold>is on a <white><bold><streak></bold></white> "
-                                + "kill streak in the <arena> free-for-all!",
+                                + "kill streak in the <arena> arena!",
                         Placeholder.component("killer", killer.displayName()),
                         Placeholder.unparsed("streak", String.valueOf(e.getValue())),
                         Placeholder.unparsed("arena", where)), told, List.of());
