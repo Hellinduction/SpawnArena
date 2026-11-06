@@ -231,6 +231,12 @@ public final class SumoBot {
         }
     }
 
+    /** A match with players and bots: it goes for this player. */
+    void fight(final Player player) {
+        if (!(this.foe instanceof PlayerFoe f) || !f.player.equals(player))
+            this.foe = new PlayerFoe(player);
+    }
+
     /** A show match: it goes for {@code other} (which comes in at {@code otherSpawn}, until its body's there). */
     void fight(final SumoBot other, final Location otherSpawn) {
         if (!(this.foe instanceof BotFoe f) || f.bot != other)
@@ -264,6 +270,16 @@ public final class SumoBot {
 
         /** Its team's outline colour, in a show match (null: none, or as a fight has it) */
         default net.kyori.adventure.text.format.NamedTextColor teamColour(final SumoBot bot) {
+            return null;
+        }
+
+        /** Whether this player's hit on the bot counts (one of its opponents, fighting) */
+        default boolean canHit(final Player player, final SumoBot bot) {
+            return false;
+        }
+
+        /** The bot's outline as {@code viewer} sees it (null: as everyone else does) */
+        default net.kyori.adventure.text.format.NamedTextColor colourFor(final SumoBot bot, final Player viewer) {
             return null;
         }
     }
@@ -399,14 +415,19 @@ public final class SumoBot {
         });
         BOTS.put(this.body.getUniqueId(), this);
         // Drawn as a player (a Mannequin's arm never swings on the client); as the Mannequin itself if that can't be done
-        final Player target = this.getTarget();
+        // (with more than one player in the match, everyone sees its body itself, drawn as a player: see BotPuppet)
+        final Player target = this.match instanceof BotFight ? this.getTarget() : null;
         this.puppet = BotPuppet.show(target, this, this.body, skin, this.level);
-        if (this.puppet == null && target != null)
-            Threads.entity(target, () -> {
-                final Mannequin b = this.body;
-                if (b != null && target.isOnline())
-                    target.showEntity(SpawnArena.INSTANCE, b);
-            });
+        if (this.puppet == null) {
+            final java.util.List<Player> see = target != null ? java.util.List.of(target)
+                    : this.match.fight() != null ? this.match.fight().getMembers() : java.util.List.of();
+            for (final Player p : see)
+                Threads.entity(p, () -> {
+                    final Mannequin b = this.body;
+                    if (b != null && p.isOnline())
+                        p.showEntity(SpawnArena.INSTANCE, b);
+                });
+        }
         // A moment to react to the start, like anyone
         this.startAt = this.level.reactionTicks + 4;
         // Master remembers which way they like to strafe: it's half read before they've moved
@@ -911,6 +932,9 @@ public final class SumoBot {
     private void land(final Player p, final Location from, final float hitYaw, final boolean sprintHit, final int knockbackLevel) {
         if (!p.isOnline() || !this.match.inPlay() || this.match.state() != FightState.IN_FIGHT || !canBeHit(p))
             return;
+        final Fight fight = this.match.fight();
+        if (fight != null && !fight.isFighter(p))
+            return; // out already (a teammate's still fighting)
         if (!this.level.combo && p.getNoDamageTicks() > p.getMaximumNoDamageTicks() / 2)
             return;
         p.setNoDamageTicks(this.level.combo ? 0 : p.getMaximumNoDamageTicks());

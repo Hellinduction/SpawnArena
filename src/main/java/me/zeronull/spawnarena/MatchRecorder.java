@@ -98,7 +98,7 @@ public final class MatchRecorder implements Listener {
     /** A fight has just gone live: a sumo match between players is recorded. */
     static void start(final Fight fight) {
         final Arena arena = fight.getArena();
-        if (!enabled() || fight instanceof BotFight || !arena.isDeathOnTouchLiquid() || arena.isFfa())
+        if (!enabled() || fight.withBots() || !arena.isDeathOnTouchLiquid() || arena.isFfa())
             return;
         final Location a = arena.spawnPoint1, b = arena.spawnPoint2;
         if (a == null || b == null)

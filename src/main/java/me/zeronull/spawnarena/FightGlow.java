@@ -73,12 +73,12 @@ public final class FightGlow implements Listener {
         final java.util.List<Player> fighters = fight.getFighters();
         if (fighters.isEmpty())
             return;
-        final java.util.List<Player> firstTeam = fight.getTeamOf(fighters.get(0));
         final boolean teams = fight.getMode() == FightMode.TWO_V_TWO;
         final java.util.List<Integer> colours = pick(fight, teams ? 2 : 1);
 
         for (final Player fighter : fighters) {
-            final int colour = colours.size() > 1 && !firstTeam.contains(fighter) ? colours.get(1) : colours.get(0);
+            // (the first team the first colour: a team's bots go by the same, see teamOutline)
+            final int colour = colours.size() > 1 && !fight.onFirstTeam(fighter) ? colours.get(1) : colours.get(0);
             // Checked again on their thread: they may already be out by the time it runs
             Threads.entity(fighter, () -> {
                 if (!fight.isFighter(fighter) || !COLOUR_OF.containsKey(fight) || !fighter.isOnline())
@@ -232,6 +232,21 @@ public final class FightGlow implements Listener {
             return NamedTextColor.RED;
         final java.util.List<Integer> colours = COLOUR_OF.get(fight);
         return colours == null || colours.isEmpty() ? NamedTextColor.RED : COLOURS[colours.get(0)];
+    }
+
+    /** A team's outline in this fight (the first team's, or the second's), as its players have it; null when fights don't glow. */
+    public static NamedTextColor teamOutline(final Fight fight, final boolean firstTeam) {
+        if (!enabled())
+            return null;
+        final java.util.List<Integer> colours = COLOUR_OF.get(fight);
+        if (colours == null || colours.isEmpty())
+            return firstTeam ? NamedTextColor.GREEN : NamedTextColor.RED;
+        return COLOURS[colours.get(colours.size() > 1 && !firstTeam ? 1 : 0)];
+    }
+
+    /** Whether fighters see their own side green and the other red (fightGlowSides), and fights glow at all */
+    public static boolean showsSides() {
+        return enabled() && sides();
     }
 
     /** A sumo bot's outline as anyone but its opponent sees it: the fight's colour; null when fights don't glow. */

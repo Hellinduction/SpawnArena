@@ -64,6 +64,23 @@ public final class BotFight extends Fight implements SumoBot.BotMatch {
         });
     }
 
+    @Override
+    public boolean withBots() {
+        return true;
+    }
+
+    @Override
+    public List<Location> botLocations() {
+        final Location at = this.botLocation();
+        return at == null ? List.of() : List.of(at);
+    }
+
+    /** Only its opponent hits it, while they're fighting. */
+    @Override
+    public boolean canHit(final Player player, final SumoBot bot) {
+        return player.equals(this.player) && this.getState() == FightState.IN_FIGHT && this.isFighter(player);
+    }
+
     /** Where its bot is now, or null if it isn't in yet (or any more). */
     public Location botLocation() {
         final SumoBot b = this.bot;

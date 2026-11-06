@@ -53,6 +53,7 @@ public class SpawnArena extends JavaPlugin {
         FightGlow.cleanUpOnEnable();
         LagOuts.watchOnline();
         MatchSounds.installOnline();
+        Threads.globalLater(() -> CoreProtectSkip.install(this), 1L); // (once every plugin is enabled, CoreProtect included)
         // Bets held by fights that never finished (crash/shutdown) go back; a bit later, as the economy
         // plugin may register after this one
         Threads.globalLater(() -> {

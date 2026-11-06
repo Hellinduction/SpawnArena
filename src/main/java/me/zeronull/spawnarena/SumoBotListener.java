@@ -10,7 +10,7 @@ import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 
 /**
- * Sumo bots: only their opponent can hit them (whatever WorldGuard says about hitting a non-player in the arena),
+ * Sumo bots: only their opponents can hit them (whatever WorldGuard says about hitting a non-player in the arena),
  * nothing else hurts them, a Superior Gaming Chair bot takes less knockback, and a body left over from before (a crash) is removed
  * as soon as it's loaded.
  */
@@ -26,9 +26,7 @@ public final class SumoBotListener implements Listener {
             return;
         }
         final Entity damager = e.getDamager() instanceof Projectile p && p.getShooter() instanceof Entity shooter ? shooter : e.getDamager();
-        final boolean opponent = damager instanceof Player player && player.equals(bot.getTarget())
-                && bot.getFight().getState() == FightState.IN_FIGHT && bot.getFight().isFighter(player);
-        e.setCancelled(!opponent);
+        e.setCancelled(!(damager instanceof Player player && bot.getMatch().canHit(player, bot)));
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -69,8 +67,7 @@ public final class SumoBotListener implements Listener {
     }
 
     private static boolean byOpponent(final SumoBot bot, final Entity by) {
-        return by instanceof Player player && player.equals(bot.getTarget())
-                && bot.getFight().getState() == FightState.IN_FIGHT && bot.getFight().isFighter(player);
+        return by instanceof Player player && bot.getMatch().canHit(player, bot);
     }
 
     @EventHandler

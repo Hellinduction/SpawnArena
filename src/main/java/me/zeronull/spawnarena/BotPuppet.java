@@ -82,6 +82,11 @@ final class BotPuppet {
     private final java.util.Set<Player> watchers = ConcurrentHashMap.newKeySet();
     /** The body's outline colour as watchers see it (a team of their own, by packets) */
     private Object watcherTeam;
+    /** For outlines some watchers see in a colour of their own (their side's, in a match with players and bots) */
+    private String teamName, name, bodyUuid;
+    private BotDifficulty level;
+    /** Colour -> {its name tag team, its body's team, its label}: made the first time a watcher needs it */
+    private final Map<net.kyori.adventure.text.format.NamedTextColor, Object[]> byColour = new ConcurrentHashMap<>();
     /** Viewer -> when to send it to them again: {first, second} (the first is 0 once done) */
     private final Map<UUID, long[]> redrawAt = new ConcurrentHashMap<>();
     /** Everyone it's ever been sent to: all told it's gone when it goes, viewers now or not */
@@ -163,13 +168,18 @@ final class BotPuppet {
             // (the name takes the outline's colour); with no outlines, named in its level's colour
             // (a show match between bots isn't a fight: each team in its own colour)
             final Fight fight = bot.getMatch().fight();
-            final net.kyori.adventure.text.format.NamedTextColor toOpponent = fight == null ? bot.getMatch().teamColour(bot) : FightGlow.botOutline(fight);
-            final net.kyori.adventure.text.format.NamedTextColor toOthers = fight == null ? bot.getMatch().teamColour(bot) : FightGlow.fightOutline(fight);
+            final net.kyori.adventure.text.format.NamedTextColor team = bot.getMatch().teamColour(bot);
+            final net.kyori.adventure.text.format.NamedTextColor toOpponent = fight == null || team != null ? team : FightGlow.botOutline(fight);
+            final net.kyori.adventure.text.format.NamedTextColor toOthers = fight == null || team != null ? team : FightGlow.fightOutline(fight);
             if (toOpponent != null)
                 body.setGlowing(true); // passed on with the rest of its entity data
             final String teamName = "sa_bot_" + Integer.toString(n, 36);
             final BotPuppet puppet = new BotPuppet(uuid, opponent, bot, authlibCopy.invoke(null, profile),
                     team(teamName, name, toOpponent, level), team(teamName, name, toOthers, level), label(toOpponent, level), label(toOthers, level));
+            puppet.teamName = teamName;
+            puppet.name = name;
+            puppet.level = level;
+            puppet.bodyUuid = body.getUniqueId().toString();
             final org.bukkit.Location at = body.getLocation();
             puppet.x = at.getX();
             puppet.y = at.getY();
@@ -366,18 +376,38 @@ final class BotPuppet {
             if (!p.isOnline() || !this.shown || !body.isValid())
                 return;
             this.sentTo.add(p.getUniqueId());
+            // In its own colour for them (e.g. green on their side, red on the other), or as everyone else sees it
+            Object nameTeam = this.othersTeam, bodyTeam = this.watcherTeam, label = this.othersLabel;
+            try {
+                final net.kyori.adventure.text.format.NamedTextColor colour = this.bot.getMatch().colourFor(this.bot, p);
+                if (colour != null && this.teamName != null) {
+                    final Object[] own = this.byColour.computeIfAbsent(colour, c -> {
+                        try {
+                            return new Object[]{team(this.teamName, this.name, c, this.level),
+                                    team(this.teamName.replace("sa_bot_", "sa_botw_"), this.bodyUuid, c, this.level, true), label(c, this.level)};
+                        } catch (final ReflectiveOperationException e) {
+                            throw new IllegalStateException(e);
+                        }
+                    });
+                    nameTeam = own[0];
+                    bodyTeam = own[1];
+                    label = own[2];
+                }
+            } catch (final RuntimeException ignored) {
+                // as everyone else sees it
+            }
             try {
                 // Its team first, so its own name tag is hidden from the start: as a player (see forWatcher), and as
                 // the Mannequin, should their game get that
-                send(p, teamPacket.invoke(null, this.othersTeam, true));
-                if (this.watcherTeam != null)
-                    send(p, teamPacket.invoke(null, this.watcherTeam, true));
+                send(p, teamPacket.invoke(null, nameTeam, true));
+                if (bodyTeam != null)
+                    send(p, teamPacket.invoke(null, bodyTeam, true));
             } catch (final ReflectiveOperationException | RuntimeException ignored) {
                 // just no colour
             }
             p.showEntity(SpawnArena.INSTANCE, body);
             try {
-                this.sendLabel(p, this.othersLabel);
+                this.sendLabel(p, label);
             } catch (final ReflectiveOperationException | RuntimeException ignored) {
                 // just no name
             }

@@ -133,6 +133,10 @@ public final class SettingsConfig {
             "the fight's colour."})
     public boolean fightGlowSides = true;
 
+    @Comment({"CoreProtect logs nothing inside crystal arenas (CrystalPvP, CrystalFFA, and each copy of a MULTI one): the",
+            "blocks and crystals placed and blown up there are put back by the arena itself. false = logged as anywhere else."})
+    public boolean coreProtectSkipsCrystalArenas = true;
+
     @Comment({"Free-for-all arenas: seconds after hitting or being hit by another player that someone counts as in combat.",
             "They can't /leavearena until it runs out, logging out or teleporting away in combat counts as dying, and",
             "everyone who hit a player in this window gets the kill."})

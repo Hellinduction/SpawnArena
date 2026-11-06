@@ -287,6 +287,38 @@ public class Fight {
         return this;
     }
 
+    // ── Bots in the match (see BotFight, MixedBotFight) ─────────────────────
+
+    /** How many sumo bots fight on the first team (true) or the second, alongside its players */
+    protected int botsOnTeam(final boolean firstTeam) {
+        return 0;
+    }
+
+    /** Whether any sumo bot fights in this match (it isn't a real match: not recorded, no teammates remembered) */
+    public boolean withBots() {
+        return false;
+    }
+
+    /** Where this match's bots still in are now (for whose a sound is) */
+    public List<Location> botLocations() {
+        return List.of();
+    }
+
+    /** A bot on {@code team}'s side is still in, so the team hasn't lost yet even with none of its players left */
+    protected boolean othersStillIn(final List<Player> team) {
+        return false;
+    }
+
+    /** Whether this player is on the first team */
+    public boolean onFirstTeam(final Player player) {
+        return this.teamA.contains(player);
+    }
+
+    /** A team's spawn point (sides may be swapped, as for its players) */
+    protected Location teamSpawn(final boolean firstTeam) {
+        return firstTeam == !this.swapSides ? this.arena.spawnPoint1 : this.arena.spawnPoint2;
+    }
+
     public FightMode getMode() {
         return this.mode;
     }
@@ -355,7 +387,8 @@ public class Fight {
 
     public void initiateTeamFight(final List<Player> teamA, final List<Player> teamB, final Arena arena) {
         this.arena = arena;
-        this.mode = teamA.size() >= 2 ? FightMode.TWO_V_TWO : FightMode.ONE_V_ONE;
+        this.mode = teamA.size() + this.botsOnTeam(true) >= 2 || teamB.size() + this.botsOnTeam(false) >= 2
+                ? FightMode.TWO_V_TWO : FightMode.ONE_V_ONE;
         this.teamA.addAll(teamA);
         this.teamB.addAll(teamB);
         this.alive.addAll(teamA);
@@ -371,7 +404,7 @@ public class Fight {
             for (final Player p : this.getMembers())
                 p.sendMessage(MiniMessage.miniMessage().deserialize(this.variant.announce(this.arena)));
 
-        if (this.mode == FightMode.TWO_V_TWO)
+        if (this.mode == FightMode.TWO_V_TWO && !this.withBots()) // (a match with bots says who's on which side itself)
             this.announceTeams();
 
         // A ping so they notice they've been matched, only for them
@@ -515,11 +548,13 @@ public class Fight {
                 Threads.global(() -> Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "invsave " + fighter.getName()));
 
         // 2v2 side-by-side spots are worked out where the spawns are (block checks), then everyone goes
-        final java.util.concurrent.CompletableFuture<Void> spots = this.mode == FightMode.TWO_V_TWO
-                ? java.util.concurrent.CompletableFuture.allOf(
-                        Threads.supplyAt(this.getSpawnOf(this.teamA.get(0)), () -> { this.placeSideBySide(this.teamA); return null; }),
-                        Threads.supplyAt(this.getSpawnOf(this.teamB.get(0)), () -> { this.placeSideBySide(this.teamB); return null; }))
-                : java.util.concurrent.CompletableFuture.completedFuture(null);
+        // (a team of a player and a bot too: the player on one side, the bot on the other)
+        final List<java.util.concurrent.CompletableFuture<Void>> placing = new ArrayList<>();
+        for (final List<Player> team : List.of(this.teamA, this.teamB))
+            if (!team.isEmpty() && team.size() + this.botsOnTeam(team == this.teamA) == 2)
+                placing.add(Threads.supplyAt(this.getSpawnOf(team.get(0)), () -> { this.placeSideBySide(team); return null; }));
+        final java.util.concurrent.CompletableFuture<Void> spots = java.util.concurrent.CompletableFuture.allOf(
+                placing.toArray(new java.util.concurrent.CompletableFuture[0]));
 
         // If a spawn's area doesn't answer in time, start anyway (teammates just share the spawn point)
         final java.util.concurrent.CompletableFuture<Void> placed = spots.completeOnTimeout(null, 3, java.util.concurrent.TimeUnit.SECONDS)
@@ -704,7 +739,7 @@ public class Fight {
                             p.sendActionBar(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(this.totemsBar(p)));
                     });
             }, 0L, 20L);
-        if (this.mode == FightMode.TWO_V_TWO)
+        if (this.mode == FightMode.TWO_V_TWO && !this.withBots())
             Threads.async(() -> TeamPicker.remember(this.teamA, this.teamB));
         this.performHideLogic();
         this.startTickCounter();
@@ -764,7 +799,7 @@ public class Fight {
             this.eliminatedAt.put(player.getUniqueId(), player.getLocation().clone());
             this.countFightTime(player.getUniqueId());
             team = getTeamOf(player);
-            teamOut = team.stream().noneMatch(this.alive::contains);
+            teamOut = team.stream().noneMatch(this.alive::contains) && !this.othersStillIn(team);
             if (teamOut)
                 this.fightState = FightState.ENDING; // claimed: nothing else can finish this fight now
         }
@@ -814,7 +849,7 @@ public class Fight {
                 return;
             if (!this.alive.contains(player))
                 return;
-            lastOfTeam = getTeamOf(player).stream().filter(this.alive::contains).count() == 1;
+            lastOfTeam = getTeamOf(player).stream().filter(this.alive::contains).count() == 1 && !this.othersStillIn(getTeamOf(player));
             if (lastOfTeam)
                 this.fightState = FightState.ENDING; // claimed for the draw
         }
@@ -1358,11 +1393,26 @@ public class Fight {
      * the way it faces. If either spot isn't safe, they both use the spawn itself as before.
      */
     private void placeSideBySide(final List<Player> team) {
-        if (team.size() != 2)
+        if (team.isEmpty() || team.size() + this.botsOnTeam(team == this.teamA) != 2)
             return;
         final Location spawn = this.getSpawnOf(team.get(0));
         if (spawn == null || spawn.getWorld() == null)
             return;
+        final Location[] sides = this.sideSpots(spawn);
+        if (sides == null)
+            return;
+        this.spawnSpots.put(team.get(0).getUniqueId(), sides[0]);
+        if (team.size() > 1)
+            this.spawnSpots.put(team.get(1).getUniqueId(), sides[1]); // (one player: their bot teammate takes the other side)
+    }
+
+    /**
+     * On the spawn's thread: the two spots a block either side of {@code spawn} (a block's gap between them), sideways
+     * to the way it faces; null if either isn't safe (then both use the spawn itself).
+     */
+    protected Location[] sideSpots(final Location spawn) {
+        if (spawn == null || spawn.getWorld() == null)
+            return null;
 
         // Sideways from the spawn's facing, snapped to the nearest axis
         final double yaw = Math.toRadians(spawn.getYaw());
@@ -1373,10 +1423,8 @@ public class Fight {
         final Location left = spawn.clone().add(sx, 0, sz);
         final Location right = spawn.clone().add(-sx, 0, -sz);
         if (!this.isSafeSpawn(left) || !this.isSafeSpawn(right))
-            return;
-
-        this.spawnSpots.put(team.get(0).getUniqueId(), left);
-        this.spawnSpots.put(team.get(1).getUniqueId(), right);
+            return null;
+        return new Location[]{left, right};
     }
 
     /** Room to stand (feet and head clear, no liquid), solid ground that won't hurt, and inside the arena. */

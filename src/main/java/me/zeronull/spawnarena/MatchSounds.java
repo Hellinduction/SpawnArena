@@ -78,12 +78,12 @@ public final class MatchSounds implements Listener {
                         nearest = fight;
                     }
                 }
-                // A bot match's bot is its too (its steps, landing, being hit)
-                final Location bot = fight instanceof BotFight botFight ? botFight.botLocation() : null;
-                if (bot != null && bot.getWorld() == at.getWorld() && bot.distanceSquared(at) <= best) {
-                    best = bot.distanceSquared(at);
-                    nearest = fight;
-                }
+                // A bot match's bots are its too (their steps, landing, being hit)
+                for (final Location bot : fight.botLocations())
+                    if (bot.getWorld() == at.getWorld() && bot.distanceSquared(at) <= best) {
+                        best = bot.distanceSquared(at);
+                        nearest = fight;
+                    }
             }
             // So are two bots fighting each other there (/arenabotfight): never this receiver's match
             for (final BotShow show : BotShow.running())

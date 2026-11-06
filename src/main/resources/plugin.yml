@@ -72,8 +72,8 @@ commands:
     permission-message: "§cYou don't have permission!"
 
   arenabotfight:
-    description: Two sumo bots fight each other, to watch (/arenabotfight stop ends it)
-    usage: "/arenabotfight <level> <level> [arena]  or  /arenabotfight stop [arena]"
+    description: Sumo bots fight each other to watch, or players and bots in a match (/arenabotfight stop ends a show)
+    usage: "/arenabotfight [arena] <bot or player> <bot or player> [<bot or player> <bot or player>]  or  /arenabotfight stop [arena]"
     permission: spawnarena.arenabotfight
     permission-message: "§cYou don't have permission!"
   arenabotmemory:
