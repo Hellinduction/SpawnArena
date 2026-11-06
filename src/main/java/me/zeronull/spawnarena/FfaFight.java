@@ -767,9 +767,10 @@ public final class FfaFight extends Fight {
     }
 
     /**
-     * A kill in a crystal free-for-all: {@code killer}'s inventory and armour are put back to what they came in with
-     * (totems, crystals, gapples and all), with a little message. It costs nothing: whatever they have in here is thrown
-     * away when they leave, and what they came in with given back.
+     * A kill in a crystal free-for-all: {@code killer} is topped back up to what they came in with (totems, crystals,
+     * gapples and all, their gear mended), with a little message. Only what's missing is given, wherever there's room:
+     * their inventory stays laid out however they've arranged it. It costs nothing: whatever they have in here is
+     * thrown away when they leave, and what they came in with given back.
      */
     private void rekit(final Player killer, final Player victim) {
         final PlayerPreFightData data = this.preFightData.get(killer.getUniqueId());
@@ -778,9 +779,7 @@ public final class FfaFight extends Fight {
         Threads.entity(killer, () -> {
             if (!killer.isOnline() || !this.alive.contains(killer) || this.getState() != FightState.IN_FIGHT)
                 return;
-            final org.bukkit.inventory.PlayerInventory inv = killer.getInventory();
-            inv.setContents(copy(data.contents));
-            inv.setArmorContents(copy(data.armorContents));
+            restock(killer, data.contents, data.armorContents);
             killer.updateInventory();
             killer.sendActionBar(MiniMessage.miniMessage().deserialize("<green><bold>⚔ Rekitted!</bold></green> <gray>for taking out </gray><victim>",
                     Placeholder.component("victim", victim.displayName().colorIfAbsent(net.kyori.adventure.text.format.NamedTextColor.WHITE))));
@@ -788,11 +787,137 @@ public final class FfaFight extends Fight {
         });
     }
 
-    private static ItemStack[] copy(final ItemStack[] items) {
-        final ItemStack[] out = new ItemStack[items.length];
-        for (int i = 0; i < items.length; i++)
-            out[i] = items[i] == null ? null : items[i].clone();
-        return out;
+    /** The off hand's index in PlayerInventory#getContents (storage is 0-35, armour 36-39). */
+    private static final int OFF_HAND = 40;
+
+    /**
+     * Gives {@code player} back what's missing of {@code kit} (a getContents copy) and {@code armour}, leaving
+     * everything where they've put it: armour and tools the same as the kit's are mended, an empty armour slot gets the
+     * kit's piece, and each other kind of item is topped up to the kit's count: first onto the stacks of it they
+     * have (wherever they've put them), then into the slots it was in if those are free, then into any free slot.
+     */
+    static void restock(final Player player, final ItemStack[] kit, final ItemStack[] armour) {
+        final org.bukkit.inventory.PlayerInventory inv = player.getInventory();
+        if (armour != null) {
+            final ItemStack[] worn = inv.getArmorContents();
+            for (int i = 0; i < worn.length && i < armour.length; i++) {
+                final ItemStack want = armour[i];
+                if (want == null || want.isEmpty())
+                    continue;
+                if (worn[i] == null || worn[i].isEmpty())
+                    worn[i] = want.clone();
+                else if (sameKind(worn[i], want))
+                    mend(worn[i], want);
+            }
+            inv.setArmorContents(worn);
+        }
+        if (kit == null)
+            return;
+        // Each kind of item in the kit: how many it had, and in which slots
+        final List<ItemStack> kinds = new ArrayList<>();
+        final List<List<Integer>> slotsOf = new ArrayList<>();
+        final List<Integer> wanted = new ArrayList<>();
+        for (int slot = 0; slot < kit.length; slot++) {
+            if (slot > 35 && slot != OFF_HAND)
+                continue;
+            final ItemStack item = kit[slot];
+            if (item == null || item.isEmpty())
+                continue;
+            int k = -1;
+            for (int j = 0; j < kinds.size(); j++)
+                if (sameKind(kinds.get(j), item)) {
+                    k = j;
+                    break;
+                }
+            if (k < 0) {
+                kinds.add(item);
+                slotsOf.add(new ArrayList<>());
+                wanted.add(0);
+                k = kinds.size() - 1;
+            }
+            slotsOf.get(k).add(slot);
+            wanted.set(k, wanted.get(k) + item.getAmount());
+        }
+        final ItemStack cursor = player.getItemOnCursor();
+        for (int k = 0; k < kinds.size(); k++) {
+            final ItemStack kind = kinds.get(k);
+            // What they have of it now, wherever it is (the cursor too), mended as it's counted
+            int have = 0;
+            for (int slot = 0; slot <= OFF_HAND; slot++) {
+                if (slot > 35 && slot != OFF_HAND)
+                    continue;
+                final ItemStack item = inv.getItem(slot);
+                if (item != null && !item.isEmpty() && sameKind(item, kind)) {
+                    mend(item, kind);
+                    have += item.getAmount();
+                }
+            }
+            if (cursor != null && !cursor.isEmpty() && sameKind(cursor, kind))
+                have += cursor.getAmount();
+            int missing = wanted.get(k) - have;
+            final int max = kind.getMaxStackSize();
+            // Onto the stacks of it they have, wherever they've put them (the off hand too)
+            for (int slot = 0; slot <= OFF_HAND && missing > 0; slot++) {
+                if (slot > 35 && slot != OFF_HAND)
+                    continue;
+                final ItemStack there = inv.getItem(slot);
+                if (there != null && !there.isEmpty() && sameKind(there, kind) && there.getAmount() < max) {
+                    final int n = Math.min(missing, max - there.getAmount());
+                    there.setAmount(there.getAmount() + n);
+                    missing -= n;
+                }
+            }
+            // Then into the slots it was in, if they're free
+            for (final int slot : slotsOf.get(k)) {
+                if (missing <= 0)
+                    break;
+                final ItemStack there = inv.getItem(slot);
+                if (there == null || there.isEmpty()) {
+                    final int n = Math.min(missing, Math.max(kit[slot].getAmount(), 1));
+                    final ItemStack put = kind.clone();
+                    put.setAmount(n);
+                    inv.setItem(slot, put);
+                    missing -= n;
+                }
+            }
+            // Free slots, the hotbar first (with none left, the rest isn't given)
+            for (int slot = 0; slot <= 35 && missing > 0; slot++) {
+                final ItemStack there = inv.getItem(slot);
+                if (there == null || there.isEmpty()) {
+                    final int n = Math.min(missing, max);
+                    final ItemStack put = kind.clone();
+                    put.setAmount(n);
+                    inv.setItem(slot, put);
+                    missing -= n;
+                }
+            }
+        }
+    }
+
+    /** The same item but for wear (a sword or a piece of armour, worn down or not). */
+    private static boolean sameKind(final ItemStack a, final ItemStack b) {
+        return a.getType() == b.getType() && unworn(a).isSimilar(unworn(b));
+    }
+
+    private static ItemStack unworn(final ItemStack item) {
+        final ItemStack copy = item.clone();
+        copy.setAmount(1);
+        if (copy.getItemMeta() instanceof org.bukkit.inventory.meta.Damageable meta && meta.hasDamage()) {
+            meta.setDamage(0);
+            copy.setItemMeta(meta);
+        }
+        return copy;
+    }
+
+    /** No more worn than the kit's one was. */
+    private static void mend(final ItemStack item, final ItemStack kit) {
+        if (!(item.getItemMeta() instanceof org.bukkit.inventory.meta.Damageable meta))
+            return;
+        final int want = kit.getItemMeta() instanceof org.bukkit.inventory.meta.Damageable k ? k.getDamage() : 0;
+        if (meta.getDamage() > want) {
+            meta.setDamage(want);
+            item.setItemMeta(meta);
+        }
     }
 
     private void death(final Player victim, final Out why, final List<UUID> credit, final int lostStreak) {

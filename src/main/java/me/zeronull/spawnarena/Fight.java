@@ -669,6 +669,12 @@ public class Fight {
         for (final Player p : this.getFighters())
             this.fightingSince.put(p.getUniqueId(), now);
         this.stats.start();
+        // Anything opened on them meanwhile (a menu, a chest, their own inventory) is closed again as it starts
+        for (final Player p : this.getFighters())
+            Threads.entity(p, () -> {
+                if (p.isOnline() && this.isFighter(p))
+                    p.closeInventory();
+            });
         for (final Player p : this.getFighters())
             this.showFakeIce(p);
         if (this.fakeIce != null || this.variant == SumoVariant.MOON)

@@ -64,6 +64,64 @@ public final class SlapFish implements Listener {
             e.setCancelled(true);
     }
 
+    // ── It stays in the hotbar: moved between hotbar slots if they like, never anywhere else ──
+
+    /** This slot of the open view is one of the player's own hotbar slots. */
+    private static boolean hotbar(final org.bukkit.inventory.InventoryView view, final int rawSlot) {
+        return rawSlot >= 0 && view.getInventory(rawSlot) instanceof org.bukkit.inventory.PlayerInventory
+                && view.getSlotType(rawSlot) == org.bukkit.event.inventory.InventoryType.SlotType.QUICKBAR;
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onClick(final org.bukkit.event.inventory.InventoryClickEvent e) {
+        if (e.getWhoClicked().getGameMode() == org.bukkit.GameMode.CREATIVE)
+            return;
+        final org.bukkit.inventory.InventoryView view = e.getView();
+        final boolean fishHere = isSlapFish(e.getCurrentItem()), fishHeld = isSlapFish(e.getCursor());
+        final boolean intoHotbar = hotbar(view, e.getRawSlot());
+        switch (e.getClick()) {
+            // Shift-click moves it out of the hotbar (into the inventory or whatever's open); the off hand is no place for it
+            case SHIFT_LEFT, SHIFT_RIGHT, SWAP_OFFHAND -> {
+                if (fishHere)
+                    e.setCancelled(true);
+            }
+            // A number key: the fish swapped from this slot into the hotbar, or from the hotbar into this slot
+            case NUMBER_KEY -> {
+                final org.bukkit.inventory.ItemStack hotbarItem = e.getWhoClicked().getInventory().getItem(e.getHotbarButton());
+                if (!intoHotbar && (fishHere || isSlapFish(hotbarItem)))
+                    e.setCancelled(true);
+            }
+            case DROP, CONTROL_DROP -> {
+                if (fishHere)
+                    e.setCancelled(true);
+            }
+            default -> {
+                // Put down (or swapped onto the cursor and down) anywhere but the hotbar; or taken out of the view
+                if ((fishHeld && !intoHotbar && e.getRawSlot() >= 0) || (fishHeld && e.getRawSlot() < 0))
+                    e.setCancelled(true);
+                // Picked up from somewhere it shouldn't be in (an older fight's): that's fine, it's being taken back out
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onDrag(final org.bukkit.event.inventory.InventoryDragEvent e) {
+        if (e.getWhoClicked().getGameMode() == org.bukkit.GameMode.CREATIVE || !isSlapFish(e.getOldCursor()))
+            return;
+        for (final int slot : e.getRawSlots())
+            if (!hotbar(e.getView(), slot)) {
+                e.setCancelled(true);
+                return;
+            }
+    }
+
+    /** Not into the off hand (the F key) either. */
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onSwapHands(final org.bukkit.event.player.PlayerSwapHandItemsEvent e) {
+        if (isSlapFish(e.getMainHandItem()) || isSlapFish(e.getOffHandItem()))
+            e.setCancelled(true);
+    }
+
     /** One that's on the ground anyway (older versions let staff drop it) goes, rather than to whoever walks over it. */
     @EventHandler(priority = EventPriority.LOWEST)
     public void onPickup(final org.bukkit.event.entity.EntityPickupItemEvent e) {
