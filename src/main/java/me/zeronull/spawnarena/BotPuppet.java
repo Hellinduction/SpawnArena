@@ -32,7 +32,7 @@ final class BotPuppet {
     private static Method getHandle, packAll, getEntityData, positionOf, asNmsCopy, pairOf, sendPacket, dataId, authlibCopy,
             asVanilla, teamPacket, teamRemovePacket, setSuffix, setColour, teamPlayers, formattingByName, setNameTagVisibility, dataValue;
     private static Constructor<?> positionCtor, vec3Ctor;
-    private static Object textDisplayType, hiddenTag, textData, billboardData, interpolationData;
+    private static Object textDisplayType, hiddenTag, shownTag, textData, billboardData, interpolationData;
     private static Field animateId, headId;
     private static Class<?> packetClass;
     private static Object playerType, zero, addPlayer, survival;
@@ -65,8 +65,16 @@ final class BotPuppet {
     /** Its name tag team and name, as its opponent sees them (outlined as the other side) and as anyone else does */
     private final Object opponentTeam, othersTeam;
     private final Object opponentLabel, othersLabel;
-    /** Everyone it's drawn for now: its opponent, and anyone watching who isn't in another fight in this arena */
+    /** Who it's drawn for now (as a player, by packets): only its opponent */
     private final java.util.Set<Player> viewers = ConcurrentHashMap.newKeySet();
+    /**
+     * Everyone else watching (not in another fight in this arena) is shown its body itself, a real entity the server
+     * keeps moving and takes away like any other (the packet-only player could be left standing, or never arrive, in a
+     * watcher's game). Its arm doesn't swing for them.
+     */
+    private final java.util.Set<Player> watchers = ConcurrentHashMap.newKeySet();
+    /** The body's outline colour as watchers see it (a team of their own, by packets) */
+    private Object watcherTeam;
     /** Viewer -> when to send it to them again: {first, second} (the first is 0 once done) */
     private final Map<UUID, long[]> redrawAt = new ConcurrentHashMap<>();
     /** Everyone it's ever been sent to: all told it's gone when it goes, viewers now or not */
@@ -117,9 +125,12 @@ final class BotPuppet {
             if (theirs.fight() == fight || theirs.arena() == null || fight.getArena() == null
                     || !theirs.arena().getArenaName().equals(fight.getArena().getArenaName()))
                 continue;
-            for (final Player p : fight.getMembers())
+            for (final Player p : fight.getMembers()) {
                 if (puppet.viewers.remove(p))
                     puppet.despawnFor(p);
+                if (puppet.watchers.remove(p))
+                    puppet.unwatch(p);
+            }
         }
     }
 
@@ -158,6 +169,7 @@ final class BotPuppet {
             puppet.yaw = at.getYaw();
             puppet.pitch = at.getPitch();
             puppet.gearChanged(body);
+            puppet.watcherTeam = team("sa_botw_" + Integer.toString(n, 36), body.getUniqueId().toString(), toOthers, level, false);
             puppet.shown = true;
             BY_ID.put(puppet.id, bot);
             SHOWN.add(puppet);
@@ -172,11 +184,16 @@ final class BotPuppet {
 
     private static Object team(final String teamName, final String member, final net.kyori.adventure.text.format.NamedTextColor outline,
                                final BotDifficulty level) throws ReflectiveOperationException {
+        return team(teamName, member, outline, level, true);
+    }
+
+    private static Object team(final String teamName, final String member, final net.kyori.adventure.text.format.NamedTextColor outline,
+                               final BotDifficulty level, final boolean hideName) throws ReflectiveOperationException {
         final Object team = teamCtor.newInstance(scoreboardCtor.newInstance(), teamName);
         final Object colour = formattingByName.invoke(null, outline != null ? outline.toString() : level.colour.replaceAll("[<>]", ""));
         if (colour != null)
             setColour.invoke(team, colour);
-        setNameTagVisibility.invoke(team, hiddenTag);
+        setNameTagVisibility.invoke(team, hideName ? hiddenTag : shownTag);
         @SuppressWarnings("unchecked") final java.util.Collection<String> players = (java.util.Collection<String>) teamPlayers.invoke(team);
         players.add(member);
         return team;
@@ -200,6 +217,22 @@ final class BotPuppet {
         for (final Player p : body.getWorld().getNearbyPlayers(bodyAt, VIEW_DISTANCE))
             if (!p.equals(this.opponent) && !this.inOtherMatchHere(p) && withinView(p, bodyAt))
                 should.add(p);
+        // Watchers: shown its body (see watchers)
+        final java.util.Set<Player> watch = new java.util.HashSet<>(should);
+        if (this.opponent != null)
+            watch.remove(this.opponent);
+        should.retainAll(this.opponent == null ? java.util.Set.of() : java.util.Set.of(this.opponent));
+        for (final java.util.Iterator<Player> it = this.watchers.iterator(); it.hasNext(); ) {
+            final Player p = it.next();
+            if (!watch.contains(p)) {
+                it.remove();
+                this.unwatch(p);
+            }
+        }
+        for (final Player p : watch)
+            if (this.watchers.add(p))
+                this.watch(p, body);
+        // Its opponent: drawn as a player
         for (final java.util.Iterator<Player> it = this.viewers.iterator(); it.hasNext(); ) {
             final Player p = it.next();
             if (!should.contains(p)) {
@@ -269,8 +302,9 @@ final class BotPuppet {
                 lines.add("<aqua>" + puppet.bot.getLevel().label + " bot <gray>(" + (puppet.opponent != null ? "against " + puppet.opponent.getName() : "a bot fight")
                         + ") at <white>" + at.getWorld().getName() + " " + at.getBlockX() + ", " + at.getBlockY() + ", " + at.getBlockZ());
                 lines.add("<gray> Drawn for: <white>" + (puppet.viewers.isEmpty() ? "nobody" : String.join(", ", puppet.viewers.stream().map(Player::getName).toList())));
+                lines.add("<gray> Shown to (watching): <white>" + (puppet.watchers.isEmpty() ? "nobody" : String.join(", ", puppet.watchers.stream().map(Player::getName).toList())));
                 for (final Player p : at.getWorld().getPlayers()) {
-                    if (puppet.viewers.contains(p) || p.getLocation().distanceSquared(at) > 100 * 100)
+                    if (puppet.viewers.contains(p) || puppet.watchers.contains(p) || p.getLocation().distanceSquared(at) > 100 * 100)
                         continue;
                     final double distance = p.getLocation().distance(at);
                     final int chunks = Math.min(p.getViewDistance(), p.getClientViewDistance());
@@ -316,6 +350,38 @@ final class BotPuppet {
                 textDisplayType, 0, zero, 0d));
         send(viewer, dataPacket.newInstance(this.labelId, List.of(dataValue.invoke(null, textData, opp ? this.opponentLabel : this.othersLabel),
                 dataValue.invoke(null, billboardData, (byte) 3), dataValue.invoke(null, interpolationData, 2))));
+    }
+
+    /** Shows a watcher its body (on their thread), outlined in the fight's colour. */
+    private void watch(final Player p, final Mannequin body) {
+        Threads.entity(p, () -> {
+            if (!p.isOnline() || !this.shown || !body.isValid())
+                return;
+            p.showEntity(SpawnArena.INSTANCE, body);
+            try {
+                if (this.watcherTeam != null)
+                    send(p, teamPacket.invoke(null, this.watcherTeam, true));
+            } catch (final ReflectiveOperationException | RuntimeException ignored) {
+                // just no colour
+            }
+        });
+    }
+
+    /** Its body hidden from a watcher again (on their thread). */
+    private void unwatch(final Player p) {
+        final Mannequin body = this.bot.getBody();
+        Threads.entity(p, () -> {
+            if (!p.isOnline())
+                return;
+            if (body != null)
+                p.hideEntity(SpawnArena.INSTANCE, body);
+            try {
+                if (this.watcherTeam != null)
+                    send(p, teamRemovePacket.invoke(null, this.watcherTeam));
+            } catch (final ReflectiveOperationException | RuntimeException ignored) {
+                // they've left
+            }
+        });
     }
 
     private void despawnFor(final Player viewer) {
@@ -407,6 +473,9 @@ final class BotPuppet {
         for (final Player viewer : this.viewers)
             this.despawnFor(viewer);
         this.viewers.clear();
+        for (final Player watcher : this.watchers)
+            this.unwatch(watcher);
+        this.watchers.clear();
         // Anyone else it was ever sent to (a watcher who walked off, changed world or relogged meanwhile), and everyone
         // once more a second on, in case anything of it was still on its way to them
         final java.util.Set<UUID> all = new java.util.HashSet<>(this.sentTo);
@@ -527,6 +596,7 @@ final class BotPuppet {
                 slots[i] = slot.getField(NMS_SLOTS[i]).get(null);
             textDisplayType = entityType.getField("TEXT_DISPLAY").get(null);
             hiddenTag = Class.forName("net.minecraft.world.scores.Team$Visibility", true, cl).getField("NEVER").get(null);
+            shownTag = hiddenTag.getClass().getField("ALWAYS").get(null);
             setNameTagVisibility = playerTeam.getMethod("setNameTagVisibility", hiddenTag.getClass());
             final Class<?> display = Class.forName("net.minecraft.world.entity.Display", true, cl);
             textData = field(Class.forName("net.minecraft.world.entity.Display$TextDisplay", true, cl), "DATA_TEXT_ID").get(null);
