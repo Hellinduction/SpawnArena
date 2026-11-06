@@ -29,6 +29,9 @@ public final class FfaFight extends Fight {
     /** Why someone is out. */
     private enum Out { DIED, QUIT, FLED, LEFT }
 
+    /** When each player came in (this life): the kill message's stats card counts from there */
+    private final Map<UUID, Long> cameInAt = new ConcurrentHashMap<>();
+
     /** Players anywhere in the middle of joining a free-for-all (saved, being sent in, not fighting yet). */
     private static final Set<UUID> JOINING = ConcurrentHashMap.newKeySet();
     private static final NamespacedKey PROTECTED_KEY = new NamespacedKey(SpawnArena.INSTANCE, "ffa_spawn_protection");
@@ -278,6 +281,9 @@ public final class FfaFight extends Fight {
                 this.forgetTotems(player.getUniqueId());
                 this.alive.add(player);
                 this.fightingSince.put(player.getUniqueId(), System.currentTimeMillis());
+                // Their stats (for the hover on kill messages) count from now: each time in is a new life
+                this.stats().reset(player);
+                this.cameInAt.put(player.getUniqueId(), System.currentTimeMillis());
             }
             else
                 this.joining.remove(player);
@@ -760,6 +766,35 @@ public final class FfaFight extends Fight {
         return out.length() == 0 ? "none" : out.toString();
     }
 
+    /**
+     * A kill in a crystal free-for-all: {@code killer}'s inventory and armour are put back to what they came in with
+     * (totems, crystals, gapples and all), with a little message. It costs nothing: whatever they have in here is thrown
+     * away when they leave, and what they came in with given back.
+     */
+    private void rekit(final Player killer, final Player victim) {
+        final PlayerPreFightData data = this.preFightData.get(killer.getUniqueId());
+        if (data == null)
+            return;
+        Threads.entity(killer, () -> {
+            if (!killer.isOnline() || !this.alive.contains(killer) || this.getState() != FightState.IN_FIGHT)
+                return;
+            final org.bukkit.inventory.PlayerInventory inv = killer.getInventory();
+            inv.setContents(copy(data.contents));
+            inv.setArmorContents(copy(data.armorContents));
+            killer.updateInventory();
+            killer.sendActionBar(MiniMessage.miniMessage().deserialize("<green><bold>⚔ Rekitted!</bold></green> <gray>for taking out </gray><victim>",
+                    Placeholder.component("victim", victim.displayName().colorIfAbsent(net.kyori.adventure.text.format.NamedTextColor.WHITE))));
+            killer.playSound(killer, Sound.ITEM_ARMOR_EQUIP_NETHERITE, 0.8f, 1.2f);
+        });
+    }
+
+    private static ItemStack[] copy(final ItemStack[] items) {
+        final ItemStack[] out = new ItemStack[items.length];
+        for (int i = 0; i < items.length; i++)
+            out[i] = items[i] == null ? null : items[i].clone();
+        return out;
+    }
+
     private void death(final Player victim, final Out why, final List<UUID> credit, final int lostStreak) {
         final String arenaName = this.arena.getArenaName();
         final List<Player> killersHere = new ArrayList<>();
@@ -772,6 +807,12 @@ public final class FfaFight extends Fight {
             if (p != null)
                 killersHere.add(p);
         }
+
+        // Crystal free-for-all: whoever got the kill is rekitted
+        if (this.arena.isCrystalPvp())
+            for (final Player k : killersHere)
+                if (!k.equals(victim))
+                    this.rekit(k, victim);
 
         // Kills between alts don't count (they still show)
         final Player victimPlayer = victim;
@@ -804,10 +845,15 @@ public final class FfaFight extends Fight {
                     case FLED -> "<red>⚔</red> <gray><victim> left mid-fight, so <killers> <get> the kill.";
                     default -> "<red>⚔</red> <gray><victim> was taken out by <killers>.";
                 };
+        // Hovered, the stats of this life: whoever got the kill (with their hearts left) and the victim, from when the
+        // victim came in
+        final Long since = this.cameInAt.remove(victim.getUniqueId());
+        final Component card = this.stats().card(this, killersHere, List.of(victim), Map.of(), since == null ? 0 : since);
         final Component message = MiniMessage.miniMessage().deserialize(template,
                 Placeholder.component("victim", victim.displayName().colorIfAbsent(net.kyori.adventure.text.format.NamedTextColor.WHITE)),
                 Placeholder.component("killers", killers),
-                Placeholder.unparsed("get", credit.size() == 1 ? "gets" : "get"));
+                Placeholder.unparsed("get", credit.size() == 1 ? "gets" : "get"))
+                .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(card));
         final List<Player> told = new ArrayList<>(this.getMembers());
         if (!told.contains(victim))
             told.add(victim);

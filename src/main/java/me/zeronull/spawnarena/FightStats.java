@@ -65,6 +65,11 @@ public final class FightStats {
         return true;
     }
 
+    /** Starts {@code player}'s stats again from nothing (a free-for-all: each time they come in, a new life). */
+    public void reset(final Player player) {
+        this.lines.remove(player.getUniqueId());
+    }
+
     public void swung(final Player player) { this.of(player).swings.incrementAndGet(); }
     public void crystalPlaced(final Player player) { this.of(player).crystals.incrementAndGet(); }
     public void anchorSetOff(final Player player) { this.of(player).anchors.incrementAndGet(); }
@@ -78,12 +83,18 @@ public final class FightStats {
 
     /** With each player's Elo after the fight and how much it moved ({new, change}), where it counted. */
     public Component card(final Fight fight, final List<Player> winners, final List<Player> losers, final java.util.Map<java.util.UUID, int[]> elo) {
+        return this.card(fight, winners, losers, elo, this.startedAt);
+    }
+
+    /** As above, its time counted from {@code since} (a free-for-all kill: when the victim came in). */
+    public Component card(final Fight fight, final List<Player> winners, final List<Player> losers, final java.util.Map<java.util.UUID, int[]> elo,
+                          final long since) {
         final Arena arena = fight.getArena();
         final boolean damageOn = arena.isAllowDamage() && !arena.isDeathOnTouchLiquid();
         final boolean crystal = arena.isCrystalPvp();
         final StringBuilder text = new StringBuilder("<gold><bold>Fight stats</bold></gold>");
-        if (this.startedAt > 0)
-            text.append(" <dark_gray>·</dark_gray> <gray>").append(duration(System.currentTimeMillis() - this.startedAt)).append("</gray>");
+        if (since > 0)
+            text.append(" <dark_gray>·</dark_gray> <gray>").append(duration(System.currentTimeMillis() - since)).append("</gray>");
 
         final List<Player> everyone = new ArrayList<>(winners);
         everyone.addAll(losers);
