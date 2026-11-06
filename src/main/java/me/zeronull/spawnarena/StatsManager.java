@@ -1551,11 +1551,16 @@ public class StatsManager {
         return SpawnArena.settings == null ? 0 : Math.max(0, SpawnArena.settings.eloMinGames);
     }
 
+    /** Free-for-all kills needed to show on a K/D board (kdMinKills); its #1 also gets the #1 tag. */
+    public static int kdMinKills() {
+        return SpawnArena.settings == null ? 50 : Math.max(0, SpawnArena.settings.kdMinKills);
+    }
+
     /** Who a board may list: FFA boards only those who've played FFA, Elo boards only those with enough rated fights. */
     private static String boardFilter(final String field, final String alias) {
         final int ratioMin = SpawnArena.settings == null ? 20 : Math.max(0, SpawnArena.settings.ratioMinGames);
         if (field.equals("kdr"))
-            return " AND " + alias + "ffa_kills + " + alias + "ffa_deaths >= " + Math.max(1, ratioMin);
+            return " AND " + alias + "ffa_kills >= " + Math.max(1, kdMinKills());
         if (field.equals("wlr"))
             return " AND " + alias + "wins + " + alias + "losses >= " + Math.max(1, ratioMin);
         if (field.startsWith("ffa_"))

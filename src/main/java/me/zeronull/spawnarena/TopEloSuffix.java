@@ -8,7 +8,7 @@ import java.util.*;
 import java.util.logging.Level;
 
 /**
- * Each arena's #1 on its Elo board gets a LuckPerms suffix (topEloSuffix, e.g. " #1 CrystalPvP"). Someone #1 in
+ * Each arena's #1 on its Elo board (a free-for-all's: its K/D board, see kdMinKills) gets a LuckPerms suffix (topEloSuffix, e.g. " #1 CrystalPvP"). Someone #1 in
  * several arenas shows the one they reached first. Checked every minute and after each rated fight; who holds what
  * since when, and the suffix each player was given, are kept in top-elo.yml so they survive restarts and the right
  * suffix can be taken off again. Without LuckPerms (or with topEloSuffix empty) it does nothing.
@@ -56,8 +56,8 @@ public final class TopEloSuffix {
             final Map<String, String> suffixOf = new HashMap<>();
             for (final Arena arena : SpawnArena.arenas) {
                 final String name = arena.getArenaName().toLowerCase(java.util.Locale.ROOT);
-                final List<StatsManager.LeaderboardEntry> top = SpawnArena.statsManager.getTopPlayers(name, "elo", 1);
-                final UUID first = top.isEmpty() ? null : top.get(0).uuid();
+                // A free-for-all has no Elo: its #1 is the best K/D among those with enough kills there
+                final UUID first = arena.isFfa() ? topKd(name) : firstOf(SpawnArena.statsManager.getTopPlayers(name, "elo", 1));
                 final Holder was = HOLDERS.get(name);
                 if (first == null) {
                     changed |= HOLDERS.remove(name) != null;
@@ -115,6 +115,15 @@ public final class TopEloSuffix {
                 SpawnArena.INSTANCE.getLogger().log(Level.WARNING, "Couldn't update the #1 Elo suffixes (will keep trying quietly)", t);
             }
         }
+    }
+
+    private static UUID firstOf(final List<StatsManager.LeaderboardEntry> top) {
+        return top.isEmpty() ? null : top.get(0).uuid();
+    }
+
+    /** The top of a free-for-all's K/D board (which only lists those with kdMinKills kills there), or null. */
+    private static UUID topKd(final String arena) {
+        return firstOf(SpawnArena.statsManager.getTopPlayers(arena, "kdr", 1));
     }
 
     private static boolean luckPermsPresent() {

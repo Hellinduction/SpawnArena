@@ -56,9 +56,14 @@ public final class SettingsConfig {
             "unranked until then), so winning a couple and never playing again can't top it. 0 = everyone shows."})
     public int eloMinGames = 5;
 
-    @Comment({"K/D (free-for-all kills / deaths) and W/L (wins / losses) leaderboards only list players with at least this many",
-            "kills + deaths (K/D) or games (W/L) in that arena, so someone who's 1-0 can't top them. 0 = everyone shows."})
+    @Comment({"W/L (wins / losses) leaderboards only list players with at least this many games in that arena, so someone",
+            "who's 1-0 can't top them. 0 = everyone shows."})
     public int ratioMinGames = 20;
+
+    @Comment({"K/D (free-for-all kills / deaths) leaderboards only list players with at least this many free-for-all kills in",
+            "that arena, so a few lucky kills and quitting can't top them. The board's #1 also gets the #1 tag (topEloSuffix),",
+            "as free-for-alls have no Elo."})
+    public int kdMinKills = 50;
 
     @Comment({"Don't pay win rewards when the winner and loser have ever connected from the same IP address.",
             "IPs are stored hashed. Local/LAN addresses are ignored."})
@@ -196,7 +201,7 @@ public final class SettingsConfig {
             "require-authenticated-admin: false), or it refuses and nobody is exempted."})
     public boolean iceRinkAnticheatExempt = true;
 
-    @Comment({"With LuckPerms: each arena's #1 on its Elo board gets this suffix (%arena% is the arena's name). Someone #1 in",
+    @Comment({"With LuckPerms: each arena's #1 on its Elo board (a free-for-all's: K/D) gets this suffix (%arena% is the arena's name). Someone #1 in",
             "several arenas shows the one they got to first. Empty turns it off (and takes the suffixes off again).",
             "Colours are whatever your chat plugin reads in a LuckPerms suffix: &6 codes, or hex like &#FFD700."})
     public String topEloSuffix = " &#FFD700#1 &#FFA62B%arena%";
@@ -207,6 +212,7 @@ public final class SettingsConfig {
 
     @Comment("LuckPerms priority of that suffix: high, so it shows over any suffix a rank or other plugin gives")
     public int topEloSuffixPriority = 1000;
+
 
     @Comment({"Commands fighters can still use mid-fight (all others are blocked): messaging, and staff punishing someone",
             "(players without the permission just get the usual \"no permission\"). Each one's aliases are allowed too (e.g. msg",
