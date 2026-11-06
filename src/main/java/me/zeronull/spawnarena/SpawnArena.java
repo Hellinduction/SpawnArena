@@ -105,7 +105,12 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.ArenaMobSpawnGuard(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.ArenaVillagerGuard(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPreventCraftingSlot(), this);
-        Bukkit.getServer().getPluginManager().registerEvents(new ArenaPlayerLeave(), this);
+        final ArenaPlayerLeave leave = new ArenaPlayerLeave();
+        Bukkit.getServer().getPluginManager().registerEvents(leave, this);
+        // Before any other plugin hears of a fighter logging out (e.g. one saving their inventory), and again once
+        // everything has started up
+        ArenaPlayerLeave.runFirst(leave);
+        Threads.globalLater(() -> ArenaPlayerLeave.runFirst(leave), 1L);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaPlayerLeaveAreaEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new QueuePlayerLeave(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new PlayerLeaveSpawn(), this);

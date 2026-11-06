@@ -6,12 +6,20 @@ import me.zeronull.spawnarena.FightState;
 import me.zeronull.spawnarena.SpawnArena;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.RegisteredListener;
 
 public class ArenaPlayerLeave implements Listener {
 
-    @EventHandler
+    /**
+     * A fighter logging out gets their own things back right here, before anything else hears they've gone: a plugin that
+     * saves inventories as players leave (PerWorlds keeps one per world group, saved at LOWEST) would otherwise save the
+     * match kit and put that back over their real inventory when they next join. So this runs at LOWEST, and
+     * {@link #runFirst} puts it ahead of every other plugin's LOWEST handler.
+     */
+    @EventHandler(priority = EventPriority.LOWEST)
     public void onPlayerQuit(PlayerQuitEvent event) {
         Player player = event.getPlayer();
         me.zeronull.spawnarena.AnticheatExempt.remove(player.getUniqueId()); // by uuid, so it works once they're gone
@@ -59,4 +67,27 @@ public class ArenaPlayerLeave implements Listener {
         }
     }
 
+    /**
+     * Moves this listener's quit handler to the very front (handlers of the same priority run in the order they were
+     * registered, and a plugin enabled before this one, or this one reloaded, would otherwise go first). Everyone
+     * else's handlers keep their order; plugins enabled later are added behind it anyway.
+     */
+    public static void runFirst(final ArenaPlayerLeave ours) {
+        final org.bukkit.event.HandlerList handlers = PlayerQuitEvent.getHandlerList();
+        synchronized (handlers) {
+            final RegisteredListener[] all = handlers.getRegisteredListeners();
+            RegisteredListener mine = null;
+            for (final RegisteredListener l : all)
+                if (l.getListener() == ours)
+                    mine = l;
+            if (mine == null || (all.length > 0 && all[0] == mine))
+                return;
+            for (final RegisteredListener l : all)
+                handlers.unregister(l);
+            handlers.register(mine);
+            for (final RegisteredListener l : all)
+                if (l != mine)
+                    handlers.register(l);
+        }
+    }
 }

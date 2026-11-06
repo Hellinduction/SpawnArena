@@ -28,6 +28,7 @@ public final class ArenaPlayerJoinEvent implements Listener {
                 return;
             me.zeronull.spawnarena.PlayerPreFightData.restoreLeftOver(joined);
             me.zeronull.spawnarena.PlayerPreFightData.giveOwedItemsAsync(joined);
+            takeKitItems(joined);
         }, 20L);
 
         // IP history for the win-reward alt check; DB write kept off the main thread
@@ -37,5 +38,28 @@ public final class ArenaPlayerJoinEvent implements Listener {
             SpawnArena.statsManager.rememberName(uuid, e.getPlayer().getName());
         if (SpawnArena.statsManager != null && address != null)
             org.bukkit.Bukkit.getAsyncScheduler().runNow(SpawnArena.INSTANCE, task -> SpawnArena.statsManager.recordIp(uuid, address));
+    }
+
+    /**
+     * Nobody joining is in a match, so nothing handed out for one (the Slap Fish, a match's snowballs...) may still be on
+     * them: if something else put a match inventory back (a plugin's own copy of their inventory, saved mid-match), it's
+     * taken away here rather than kept. Inventory, off hand, cursor and ender chest.
+     */
+    private static void takeKitItems(final org.bukkit.entity.Player player) {
+        if (SpawnArena.arenas != null && SpawnArena.arenas.hasFighter(player))
+            return;
+        int taken = 0;
+        for (final org.bukkit.inventory.Inventory inv : java.util.List.of(player.getInventory(), player.getEnderChest()))
+            for (int i = 0; i < inv.getSize(); i++)
+                if (me.zeronull.spawnarena.SlapFish.isKitItem(inv.getItem(i))) {
+                    inv.setItem(i, null);
+                    taken++;
+                }
+        if (me.zeronull.spawnarena.SlapFish.isKitItem(player.getItemOnCursor())) {
+            player.setItemOnCursor(null);
+            taken++;
+        }
+        if (taken > 0)
+            SpawnArena.INSTANCE.getLogger().info("Took " + taken + " match kit item(s) off " + player.getName() + " as they joined (not in a match).");
     }
 }
