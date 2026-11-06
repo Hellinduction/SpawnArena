@@ -34,6 +34,11 @@ final class BotPuppet {
     private static Constructor<?> positionCtor, vec3Ctor;
     private static Object textDisplayType, hiddenTag, shownTag, textData, billboardData, interpolationData;
     private static Field animateId, headId;
+    private static Constructor<?> bundlePacket;
+    private static Class<?> addClass, dataClass, removeClass, bundleClass;
+    private static Method addGetId, addGetType, addX, addY, addZ, addXRot, addYRot, addHeadRot, addMovement, dataGetId, dataItems,
+            removeIds, bundleItems;
+    private static Object mannequinType;
     private static Class<?> packetClass;
     private static Object playerType, zero, addPlayer, survival;
     private static Object[] slots;
@@ -51,6 +56,8 @@ final class BotPuppet {
     private static final Map<Integer, SumoBot> BY_ID = new ConcurrentHashMap<>();
     /** Every puppet drawn now */
     private static final java.util.Set<BotPuppet> SHOWN = ConcurrentHashMap.newKeySet();
+    /** A bot's body (its entity id) -> its puppet: watchers' games are told the body is a player (see forWatcher) */
+    private static final Map<Integer, BotPuppet> BODIES = new ConcurrentHashMap<>();
     /** For names and team names, one per puppet. */
     private static final java.util.concurrent.atomic.AtomicInteger TEAMS = new java.util.concurrent.atomic.AtomicInteger();
 
@@ -70,7 +77,7 @@ final class BotPuppet {
     /**
      * Everyone else watching (not in another fight in this arena) is shown its body itself, a real entity the server
      * keeps moving and takes away like any other (the packet-only player could be left standing, or never arrive, in a
-     * watcher's game). Its arm doesn't swing for them.
+     * watcher's game). Their game is told it's a player, though, so its arm swings for them (see forWatcher).
      */
     private final java.util.Set<Player> watchers = ConcurrentHashMap.newKeySet();
     /** The body's outline colour as watchers see it (a team of their own, by packets) */
@@ -83,6 +90,7 @@ final class BotPuppet {
     private final Map<UUID, org.bukkit.Location> lastAt = new ConcurrentHashMap<>();
     private double x, y, z;
     private float yaw, pitch;
+    private int bodyId;
     private final ItemStack[] gear = new ItemStack[GEAR.length];
     private long ticks;
     private volatile boolean shown;
@@ -172,6 +180,8 @@ final class BotPuppet {
             // (its own name tag hidden: watchers get the label above it, as its opponent does, which every game shows)
             puppet.watcherTeam = team("sa_botw_" + Integer.toString(n, 36), body.getUniqueId().toString(), toOthers, level, true);
             puppet.shown = true;
+            puppet.bodyId = body.getEntityId();
+            BODIES.put(puppet.bodyId, puppet);
             BY_ID.put(puppet.id, bot);
             SHOWN.add(puppet);
             puppet.refreshViewers(body);
@@ -355,13 +365,21 @@ final class BotPuppet {
         Threads.entity(p, () -> {
             if (!p.isOnline() || !this.shown || !body.isValid())
                 return;
-            p.showEntity(SpawnArena.INSTANCE, body);
+            this.sentTo.add(p.getUniqueId());
             try {
+                // Its team first, so its own name tag is hidden from the start: as a player (see forWatcher), and as
+                // the Mannequin, should their game get that
+                send(p, teamPacket.invoke(null, this.othersTeam, true));
                 if (this.watcherTeam != null)
                     send(p, teamPacket.invoke(null, this.watcherTeam, true));
+            } catch (final ReflectiveOperationException | RuntimeException ignored) {
+                // just no colour
+            }
+            p.showEntity(SpawnArena.INSTANCE, body);
+            try {
                 this.sendLabel(p, this.othersLabel);
             } catch (final ReflectiveOperationException | RuntimeException ignored) {
-                // just no colour (or name)
+                // just no name
             }
         });
     }
@@ -378,6 +396,8 @@ final class BotPuppet {
                 send(p, removePacket.newInstance((Object) new int[]{this.labelId}));
                 if (this.watcherTeam != null)
                     send(p, teamRemovePacket.invoke(null, this.watcherTeam));
+                send(p, teamRemovePacket.invoke(null, this.othersTeam));
+                send(p, infoRemovePacket.newInstance(List.of(this.uuid)));
             } catch (final ReflectiveOperationException | RuntimeException ignored) {
                 // they've left
             }
@@ -479,6 +499,7 @@ final class BotPuppet {
         if (!this.shown)
             return;
         this.shown = false;
+        BODIES.remove(this.bodyId, this);
         BY_ID.remove(this.id);
         SHOWN.remove(this);
         for (final Player viewer : this.viewers)
@@ -503,6 +524,74 @@ final class BotPuppet {
                         this.despawnFor(p);
                 });
         }
+    }
+
+    /**
+     * On each player's connection, as a packet is sent (see MatchSounds): a bot's body, a Mannequin, is told to their
+     * game as a player instead (its skin, its name tag hidden), as a Mannequin's arm never moves on the client and a
+     * player's does. The server still adds it, moves it and takes it away as it would any entity, so it can't be left
+     * standing or never arrive. {@code asPlayer}: the entities their game has as players this way; their entity data
+     * is cut to what a player has (a Mannequin's own would break a player). On the connection's thread.
+     */
+    static Object forWatcher(final java.util.Set<Integer> asPlayer, final io.netty.channel.ChannelHandlerContext ctx, final Object msg) {
+        if (msg == null || addClass == null || (BODIES.isEmpty() && asPlayer.isEmpty()))
+            return msg;
+        try {
+            if (bundleClass.isInstance(msg)) {
+                final List<Object> parts = new ArrayList<>();
+                boolean changed = false;
+                for (final Object part : (Iterable<?>) bundleItems.invoke(msg)) {
+                    final Object now = forWatcherOne(asPlayer, ctx, part);
+                    changed |= now != part;
+                    if (now != null)
+                        parts.add(now);
+                }
+                return changed ? bundlePacket.newInstance(parts) : msg;
+            }
+            final Object now = forWatcherOne(asPlayer, ctx, msg);
+            return now != null ? now : bundlePacket.newInstance(List.of()); // (dropped: an empty bundle does nothing)
+        } catch (final ReflectiveOperationException | RuntimeException e) {
+            return msg;
+        }
+    }
+
+    private static Object forWatcherOne(final java.util.Set<Integer> asPlayer, final io.netty.channel.ChannelHandlerContext ctx, final Object packet)
+            throws ReflectiveOperationException {
+        if (addClass.isInstance(packet)) {
+            final int id = (int) addGetId.invoke(packet);
+            final BotPuppet puppet = BODIES.get(id);
+            if (puppet == null || addGetType.invoke(packet) != mannequinType || !puppet.shown) {
+                asPlayer.remove(id);
+                return packet;
+            }
+            // Who it is first (its skin): their game takes no player it doesn't know of
+            final Object info = infoPacket.newInstance(EnumSet.of((Enum) addPlayer), infoEntry.newInstance(puppet.uuid, puppet.gameProfile, false, 0,
+                    survival, null, true, 0, null));
+            final Object add = addPacket.newInstance(id, puppet.uuid, addX.invoke(packet), addY.invoke(packet), addZ.invoke(packet),
+                    addXRot.invoke(packet), addYRot.invoke(packet), playerType, 0, addMovement.invoke(packet), (double) (float) addHeadRot.invoke(packet));
+            ctx.write(info);
+            asPlayer.add(id);
+            return add;
+        }
+        if (dataClass.isInstance(packet)) {
+            final int id = (int) dataGetId.invoke(packet);
+            if (!asPlayer.contains(id))
+                return packet;
+            try {
+                final List<?> all = (List<?>) dataItems.invoke(packet);
+                final List<Object> shared = new ArrayList<>(all.size());
+                for (final Object value : all)
+                    if ((int) dataId.invoke(value) <= lastShared)
+                        shared.add(value);
+                return shared.size() == all.size() ? packet : dataPacket.newInstance(id, shared);
+            } catch (final ReflectiveOperationException | RuntimeException e) {
+                return null; // never let a Mannequin's own data through to it: their game would disconnect
+            }
+        }
+        if (removeClass.isInstance(packet) && !asPlayer.isEmpty())
+            for (final Object id : (Iterable<?>) removeIds.invoke(packet))
+                asPlayer.remove(id);
+        return packet;
     }
 
     private Object data(final Mannequin body) throws ReflectiveOperationException {
@@ -616,12 +705,36 @@ final class BotPuppet {
             final Class<?> accessorClass = Class.forName("net.minecraft.network.syncher.EntityDataAccessor", true, cl);
             dataValue = Class.forName("net.minecraft.network.syncher.SynchedEntityData$DataValue", true, cl).getMethod("create", accessorClass, Object.class);
             positionCtor = pmr.getConstructor(vec3, vec3, float.class, float.class);
+            mannequinType = entityType.getField("MANNEQUIN").get(null);
+            final Class<?> addC = Class.forName(game + "ClientboundAddEntityPacket", true, cl);
+            addGetId = addC.getMethod("getId");
+            addGetType = addC.getMethod("getType");
+            addX = addC.getMethod("getX");
+            addY = addC.getMethod("getY");
+            addZ = addC.getMethod("getZ");
+            addXRot = addC.getMethod("getXRot");
+            addYRot = addC.getMethod("getYRot");
+            addHeadRot = addC.getMethod("getYHeadRot");
+            addMovement = addC.getMethod("getMovement");
+            final Class<?> dataC = Class.forName(game + "ClientboundSetEntityDataPacket", true, cl);
+            dataGetId = dataC.getMethod("id");
+            dataItems = dataC.getMethod("packedItems");
+            final Class<?> removeC = Class.forName(game + "ClientboundRemoveEntitiesPacket", true, cl);
+            removeIds = removeC.getMethod("getEntityIds");
+            final Class<?> bundleC = Class.forName(game + "ClientboundBundlePacket", true, cl);
+            bundlePacket = bundleC.getConstructor(Iterable.class);
+            bundleItems = Class.forName("net.minecraft.network.protocol.BundlePacket", true, cl).getMethod("subPackets");
             vec3Ctor = vec3.getConstructor(double.class, double.class, double.class);
             final Class<?> avatar = Class.forName("net.minecraft.world.entity.Avatar", true, cl);
             final Class<?> accessor = Class.forName("net.minecraft.network.syncher.EntityDataAccessor", true, cl);
             final Method accessorId = accessor.getMethod("id");
             lastShared = Math.max((int) accessorId.invoke(field(avatar, "DATA_PLAYER_MODE_CUSTOMISATION").get(null)),
                     (int) accessorId.invoke(field(avatar, "DATA_PLAYER_MAIN_HAND").get(null)));
+            // (last: once set, forWatcher starts)
+            dataClass = dataC;
+            removeClass = removeC;
+            bundleClass = bundleC;
+            addClass = addC;
             return true;
         } catch (final ReflectiveOperationException | RuntimeException | LinkageError e) {
             broken = true;

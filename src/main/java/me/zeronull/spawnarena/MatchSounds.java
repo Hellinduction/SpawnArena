@@ -29,6 +29,8 @@ public final class MatchSounds implements Listener {
 
     private static final class Filter extends ChannelDuplexHandler {
         private final Player player;
+        /** Sumo bots' bodies their game has as players (see BotPuppet.forWatcher) */
+        private final java.util.Set<Integer> botsAsPlayers = new java.util.HashSet<>();
 
         Filter(final Player player) {
             this.player = player;
@@ -40,7 +42,7 @@ public final class MatchSounds implements Listener {
                 promise.setSuccess();
                 return;
             }
-            super.write(ctx, msg, promise);
+            super.write(ctx, BotPuppet.forWatcher(this.botsAsPlayers, ctx, msg), promise);
         }
     }
 
