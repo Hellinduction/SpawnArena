@@ -169,7 +169,8 @@ final class BotPuppet {
             puppet.yaw = at.getYaw();
             puppet.pitch = at.getPitch();
             puppet.gearChanged(body);
-            puppet.watcherTeam = team("sa_botw_" + Integer.toString(n, 36), body.getUniqueId().toString(), toOthers, level, false);
+            // (its own name tag hidden: watchers get the label above it, as its opponent does, which every game shows)
+            puppet.watcherTeam = team("sa_botw_" + Integer.toString(n, 36), body.getUniqueId().toString(), toOthers, level, true);
             puppet.shown = true;
             BY_ID.put(puppet.id, bot);
             SHOWN.add(puppet);
@@ -346,10 +347,7 @@ final class BotPuppet {
         send(viewer, this.data(body));
         send(viewer, this.equipment());
         send(viewer, this.head(body));
-        send(viewer, addPacket.newInstance(this.labelId, UUID.randomUUID(), this.x, this.y + this.labelHeight(), this.z, 0f, 0f,
-                textDisplayType, 0, zero, 0d));
-        send(viewer, dataPacket.newInstance(this.labelId, List.of(dataValue.invoke(null, textData, opp ? this.opponentLabel : this.othersLabel),
-                dataValue.invoke(null, billboardData, (byte) 3), dataValue.invoke(null, interpolationData, 2))));
+        this.sendLabel(viewer, opp ? this.opponentLabel : this.othersLabel);
     }
 
     /** Shows a watcher its body (on their thread), outlined in the fight's colour. */
@@ -361,8 +359,9 @@ final class BotPuppet {
             try {
                 if (this.watcherTeam != null)
                     send(p, teamPacket.invoke(null, this.watcherTeam, true));
+                this.sendLabel(p, this.othersLabel);
             } catch (final ReflectiveOperationException | RuntimeException ignored) {
-                // just no colour
+                // just no colour (or name)
             }
         });
     }
@@ -376,12 +375,21 @@ final class BotPuppet {
             if (body != null)
                 p.hideEntity(SpawnArena.INSTANCE, body);
             try {
+                send(p, removePacket.newInstance((Object) new int[]{this.labelId}));
                 if (this.watcherTeam != null)
                     send(p, teamRemovePacket.invoke(null, this.watcherTeam));
             } catch (final ReflectiveOperationException | RuntimeException ignored) {
                 // they've left
             }
         });
+    }
+
+    /** Its name, a text display above its head, sent to {@code viewer}. */
+    private void sendLabel(final Player viewer, final Object text) throws ReflectiveOperationException {
+        send(viewer, addPacket.newInstance(this.labelId, UUID.randomUUID(), this.x, this.y + this.labelHeight(), this.z, 0f, 0f,
+                textDisplayType, 0, zero, 0d));
+        send(viewer, dataPacket.newInstance(this.labelId, List.of(dataValue.invoke(null, textData, text),
+                dataValue.invoke(null, billboardData, (byte) 3), dataValue.invoke(null, interpolationData, 2))));
     }
 
     private void despawnFor(final Player viewer) {
@@ -438,7 +446,10 @@ final class BotPuppet {
     private void moveLabel(final Mannequin body) throws ReflectiveOperationException {
         this.labelLow = body.getPose() == org.bukkit.entity.Pose.SNEAKING;
         final Object at = vec3Ctor.newInstance(this.x, this.y + this.labelHeight(), this.z);
-        this.sendAll(syncPacket.newInstance(this.labelId, positionCtor.newInstance(at, zero, 0f, 0f), false));
+        final Object move = syncPacket.newInstance(this.labelId, positionCtor.newInstance(at, zero, 0f, 0f), false);
+        this.sendAll(move);
+        for (final Player watcher : this.watchers)
+            send(watcher, move);
     }
 
     void swing(final Mannequin body) {
