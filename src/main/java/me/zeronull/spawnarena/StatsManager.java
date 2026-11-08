@@ -285,6 +285,21 @@ public class StatsManager {
                 s.execute("CREATE INDEX owed_items_player ON owed_items (server_id, uuid)");
             if (!hasIndex(c, "stat_audit", "stat_audit_actor"))
                 s.execute("CREATE INDEX stat_audit_actor ON stat_audit (server_id, actor, changed_at)");
+            // The best win streak (and free-for-all kill streak) each player reached each day in each arena, for the daily
+            // boards; days over a week old are cleared out at start
+            s.execute("CREATE TABLE IF NOT EXISTS daily_streaks (" +
+                    "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
+                    "uuid VARCHAR(36) NOT NULL, " +
+                    "arena VARCHAR(64) NOT NULL, " +
+                    "stat_day VARCHAR(10) NOT NULL, " +
+                    "best INT NOT NULL DEFAULT 0, " +
+                    "best_at BIGINT NOT NULL DEFAULT 0, " +
+                    "ffa_best INT NOT NULL DEFAULT 0, " +
+                    "ffa_best_at BIGINT NOT NULL DEFAULT 0, " +
+                    "PRIMARY KEY (server_id, uuid, arena, stat_day))");
+            if (!hasIndex(c, "daily_streaks", "daily_streaks_board"))
+                s.execute("CREATE INDEX daily_streaks_board ON daily_streaks (server_id, arena, stat_day)");
+            s.executeUpdate("DELETE FROM daily_streaks WHERE stat_day < '" + java.time.LocalDate.now().minusDays(7) + "'");
             // Sumo bot practice: how many bots of each difficulty each player has beaten in each arena
             s.execute("CREATE TABLE IF NOT EXISTS bot_wins (" +
                     "server_id VARCHAR(36) NOT NULL DEFAULT '', " +
@@ -368,7 +383,7 @@ public class StatsManager {
     public int deleteArenaData(final String arena) {
         int removed = 0;
         try (Connection c = dataSource.getConnection()) {
-            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts", "arena_bet_bonuses", "ffa_streak_rewards", "bot_wins"}) {
+            for (final String table : new String[]{"arena_stats", "arena_rewards", "arena_payouts", "arena_bet_bonuses", "ffa_streak_rewards", "bot_wins", "daily_streaks"}) {
                 try (PreparedStatement ps = c.prepareStatement("DELETE FROM " + table + " WHERE server_id=" + sid + " AND arena=?")) {
                     ps.setString(1, arena.toLowerCase());
                     removed += ps.executeUpdate();
@@ -1659,8 +1674,10 @@ public class StatsManager {
         } catch (SQLException e) {
             warn("recordWin: " + e.getMessage());
         }
+        final int streak = getWinStreak(player.getUniqueId(), arena);
+        recordDailyStreak(player.getUniqueId(), arena, streak, false);
         invalidateLeaderboards();
-        return getWinStreak(player.getUniqueId(), arena);
+        return streak;
     }
 
     /** Ends their streak, keeping what it was (if they had one) as their last lost streak. */
@@ -1710,7 +1727,87 @@ public class StatsManager {
         } catch (SQLException e) {
             warn("recordFfaKill: " + e.getMessage());
         }
+        recordDailyStreak(uuid, arena, streak, true);
         invalidateLeaderboards();
+    }
+
+    // ── Daily boards ────────────────────────────────────────────────────────
+
+    /** The two board fields read from daily_streaks: today's best win streak, and today's best free-for-all kill streak. */
+    public static final String DAILY_STREAK = "daily_streak", FFA_DAILY_STREAK = "ffa_daily_streak";
+
+    private static boolean isDaily(final String field) {
+        return DAILY_STREAK.equals(field) || FFA_DAILY_STREAK.equals(field);
+    }
+
+    /** Raises their best streak today (a win streak, or {@code ffa} a kill streak) if this one beats it. */
+    private void recordDailyStreak(final UUID uuid, final String arena, final int streak, final boolean ffa) {
+        if (streak <= 0)
+            return;
+        final String best = ffa ? "ffa_best" : "best", at = ffa ? "ffa_best_at" : "best_at";
+        // When it was reached is read before the best is raised (MySQL applies SETs in order)
+        final String sql = "INSERT INTO daily_streaks (server_id, uuid, arena, stat_day, " + best + ", " + at + ") VALUES (" + sid + ", ?, ?, ?, ?, ?) "
+                + "ON DUPLICATE KEY UPDATE " + at + " = CASE WHEN VALUES(" + best + ") > " + best + " THEN VALUES(" + at + ") ELSE " + at + " END, "
+                + best + " = GREATEST(" + best + ", VALUES(" + best + "))";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.setString(2, arena.toLowerCase());
+            ps.setString(3, today());
+            ps.setInt(4, streak);
+            ps.setLong(5, System.currentTimeMillis());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            warn("recordDailyStreak: " + e.getMessage());
+        }
+    }
+
+    /** Today's board, best first (whoever got there first ranks higher on a tie). */
+    private List<LeaderboardEntry> topDaily(final String arena, final String field, final int limit) {
+        final String best = FFA_DAILY_STREAK.equals(field) ? "ffa_best" : "best", at = FFA_DAILY_STREAK.equals(field) ? "ffa_best_at" : "best_at";
+        final List<LeaderboardEntry> entries = new ArrayList<>();
+        final String sql = "SELECT uuid, " + best + " AS v FROM daily_streaks WHERE server_id=" + sid + " AND arena=? AND stat_day=? AND " + best
+                + " > 0 ORDER BY v DESC, " + at + " ASC, uuid ASC LIMIT ?";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, arena.toLowerCase());
+            ps.setString(2, today());
+            ps.setInt(3, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    final UUID uuid = UUID.fromString(rs.getString("uuid"));
+                    final String name = nameOf(uuid);
+                    entries.add(new LeaderboardEntry(uuid, name != null ? name : "...", rs.getInt("v")));
+                }
+            }
+        } catch (SQLException e) {
+            warn("topDaily: " + e.getMessage());
+        }
+        return entries;
+    }
+
+    /** Everyone's place on today's board; those with nothing today get 0. */
+    private java.util.Map<UUID, Standing> ranksDaily(final String arena, final String field) {
+        final String best = FFA_DAILY_STREAK.equals(field) ? "ffa_best" : "best", at = FFA_DAILY_STREAK.equals(field) ? "ffa_best_at" : "best_at";
+        final String sql = "SELECT uuid, " + best + " AS v FROM daily_streaks WHERE server_id=" + sid + " AND arena=? AND stat_day=? ORDER BY v DESC, "
+                + at + " ASC, uuid ASC";
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, arena.toLowerCase());
+            ps.setString(2, today());
+            final java.util.Map<UUID, Standing> ranks = new java.util.HashMap<>();
+            int place = 0;
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    final int v = rs.getInt("v");
+                    ranks.put(UUID.fromString(rs.getString("uuid")), new Standing(v > 0 ? ++place : 0, v));
+                }
+            }
+            return ranks;
+        } catch (SQLException e) {
+            warn("ranksDaily: " + e.getMessage());
+            return null;
+        }
     }
 
     /** A free-for-all death. Call off the main thread. */
@@ -2292,6 +2389,8 @@ public class StatsManager {
 
     /** Everyone in the arena in the board's order (value, who got there first, uuid); those the board leaves out get 0. */
     private java.util.Map<UUID, Standing> fetchRanks(final String arena, final String field) {
+        if (isDaily(field))
+            return ranksDaily(arena, field);
         final String reachedAt = reachedAtColumn(field);
         final String listed = boardFilter(field, "");
         final String sql = "SELECT uuid, " + column(field) + " AS v, " + (listed.isEmpty() ? "1" : "CASE WHEN 1=1" + listed + " THEN 1 ELSE 0 END")
@@ -2381,6 +2480,8 @@ public class StatsManager {
      * {@code field} must be one of: wins, win_streak, best_win_streak.
      */
     public List<LeaderboardEntry> getTopPlayers(String arena, String field, int limit) {
+        if (isDaily(field))
+            return topDaily(arena, field, limit);
         final List<LeaderboardEntry> entries = new ArrayList<>();
         // Ties: whoever reached that value first ranks higher, so there's always exactly one #1
         final String reachedAt = reachedAtColumn(field);

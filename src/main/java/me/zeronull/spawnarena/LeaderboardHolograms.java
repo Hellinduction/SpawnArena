@@ -94,6 +94,8 @@ public final class LeaderboardHolograms {
     private static List<String> leaderboardLines(final String arena, final String stat, final int limit) {
         final List<String> lines = new ArrayList<>();
         lines.add("<yellow>* <red><bold>" + BoardStats.title(displayName(arena), stat) + "</bold></red> *</yellow>");
+        if (BoardStats.isDaily(stat))
+            lines.add("<gray>Starts again in <white>%spawnarena_daily_reset%</white>");
         for (int rank = 1; rank <= limit; rank++) {
             lines.add(String.format("<light_purple>%d. <yellow>%%spawnarena_top_player_%s_%s_%d%%<gray>: %%spawnarena_top_value_%s_%s_%d%%",
                     rank, arena, stat, rank, arena, stat, rank));

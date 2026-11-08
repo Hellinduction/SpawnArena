@@ -18,12 +18,18 @@ public final class BoardStats {
      * Every type, ordered so a name ending in one is never mistaken for a shorter one it also ends with (ffa_best_streak
      * before best_streak and ffa_streak, those before streak). "kdr" is the old name for ffa_kdr.
      */
-    private static final List<String> PARSE_ORDER = List.of("ffa_best_streak", "ffa_streak", "ffa_kills", "ffa_deaths", "ffa_kdr",
-            "best_streak", "streak", "wins", "elo", "playtime", "wlr", "kdr");
+    private static final List<String> PARSE_ORDER = List.of("ffa_best_streak", "ffa_daily_streak", "ffa_streak", "ffa_kills", "ffa_deaths",
+            "ffa_kdr", "best_streak", "daily_streak", "streak", "wins", "elo", "playtime", "wlr", "kdr");
 
     /** What players and staff are offered, in this order. */
-    public static final List<String> SHOWN = List.of("wins", "streak", "best_streak", "elo", "wlr", "playtime",
-            "ffa_kills", "ffa_deaths", "ffa_kdr", "ffa_streak", "ffa_best_streak");
+    public static final List<String> SHOWN = List.of("wins", "streak", "best_streak", "daily_streak", "elo", "wlr", "playtime",
+            "ffa_kills", "ffa_deaths", "ffa_kdr", "ffa_streak", "ffa_best_streak", "ffa_daily_streak");
+
+    /** Today's best streaks: they start again from nothing every day. */
+    public static boolean isDaily(final String stat) {
+        final String s = canonical(stat);
+        return "daily_streak".equals(s) || "ffa_daily_streak".equals(s);
+    }
 
     /** The type's own name (kdr -> ffa_kdr), or null if it isn't one. */
     public static String canonical(final String stat) {
@@ -52,6 +58,8 @@ public final class BoardStats {
             case "ffa_kills" -> "ffa_kills";
             case "ffa_deaths" -> "ffa_deaths";
             case "ffa_best_streak" -> "ffa_best_streak";
+            case "daily_streak" -> StatsManager.DAILY_STREAK;
+            case "ffa_daily_streak" -> StatsManager.FFA_DAILY_STREAK;
             case "ffa_kdr" -> "kdr";
             case "playtime" -> "fight_seconds";
             case "wlr" -> "wlr";
@@ -70,6 +78,8 @@ public final class BoardStats {
             case "ffa_kdr" -> "FFA K/D";
             case "ffa_streak" -> "FFA Kill Streak";
             case "ffa_best_streak" -> "Best FFA Kill Streak";
+            case "daily_streak" -> "Best Win Streak Today";
+            case "ffa_daily_streak" -> "Best FFA Kill Streak Today";
             case "playtime" -> "Time Fighting";
             case "wlr" -> "W/L";
             default -> "Wins";

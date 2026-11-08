@@ -114,6 +114,9 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
     public @Nullable String onPlaceholderRequest(Player player, @NotNull String params) {
         if (params.startsWith("reward_"))
             return reward(player, params.substring("reward_".length()));
+        // When the daily boards start again (midnight, server time)
+        if (params.equals("daily_reset"))
+            return StatsManager.formatMinutes(StatsManager.minutesUntilDailyReset());
         if (params.startsWith("global_"))
             return global(player, params.substring("global_".length()));
         // The #1 Elo tag: " #1 CrystalPvP" (legacy & / &#hex colours), or "" if they're #1 nowhere

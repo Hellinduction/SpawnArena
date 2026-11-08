@@ -131,7 +131,8 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
         }
         final int limit = args.length >= 4 ? parseLimit(args[3], 10) : 10;
 
-        final LeaderboardHolograms.Placement placement = LeaderboardHolograms.correctPlacement(p.getLocation(), limit + LeaderboardHolograms.EXTRA_LINES);
+        final LeaderboardHolograms.Placement placement = LeaderboardHolograms.correctPlacement(p.getLocation(), limit + LeaderboardHolograms.EXTRA_LINES
+                + (me.zeronull.spawnarena.BoardStats.isDaily(stat) ? 1 : 0));
         final String name = LeaderboardHolograms.spawn(arena, stat, limit, placement.location());
         sender.sendMessage(String.format("§aCreated %s leaderboard hologram for §e%s§a named §e%s§a.", statLabel(stat), arena, name));
 
