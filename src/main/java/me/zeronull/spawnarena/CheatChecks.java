@@ -17,6 +17,10 @@ import java.util.UUID;
  * view turns in a mouse's fixed steps, sprinting backwards, and speed. Their aim at each swing, clicking and jump resets
  * are shown against other players too, but never count against them by themselves (good players stand out there).
  *
+ * <p>A sumo bot (something playing for them) shows as matches with several of: nearly every swing landing, W-tapping and
+ * switching strafe far more than anyone, jump resets, and hits landed exactly as the other player can be hit again (see
+ * {@link #botSigns}). Found from real recordings of one: no real player's match here shows four of these.
+ *
  * <p>Random sumo is allowed for: Spear lunges (no reach or speed), Archer, Snowball Fight and Rod (an item use swings
  * the arm: no clicking or aim; their hits aren't with a hand), Ice Rink (sliding: speed against other Ice Rink matches,
  * and knockback is only measured while they're in the air, where ice changes nothing), Moon Gravity (the same in the
@@ -65,6 +69,11 @@ public final class CheatChecks {
         public final List<Float> fastSeconds = new ArrayList<>();
         public int secondsChecked;
         public float topSpeed;
+        /** Bot signs: W-taps and strafe switches (a second), hits landed 10-11 ticks after the last, of all hit gaps */
+        public double wtapRate, strafeSwitchRate;
+        public int hitGapsExact, hitGaps;
+        /** Which of the bot signs this match shows (see botSigns) */
+        public final List<String> botSigns = new ArrayList<>();
 
         Match(final Recording rec, final Recording.Fighter f) {
             this.rec = rec;
@@ -107,6 +116,8 @@ public final class CheatChecks {
             sprintBack(m);
         if (v != SumoVariant.SPEAR && (rec.format >= 2 || !itemSwings))
             speed(m);
+        if (!opponents.isEmpty() && !itemSwings && v != SumoVariant.SPEAR)
+            botSigns(m);
         return m;
     }
 
@@ -374,6 +385,64 @@ public final class CheatChecks {
         }
     }
 
+    /** A match is bot-like with at least this many of the bot signs */
+    static final int BOT_SIGNS = 4;
+
+    /**
+     * Signs of a bot playing for them, from recordings of one against everyone else's: (1) nearly every swing near the
+     * other player lands (95%+, 10 swings or more: it only swings when the hit will land); (2) W-tapping, forward let go
+     * and pressed again within three ticks, half a second or more (real players: about 0.1 a second); (3) switching
+     * strafe direction 0.45 a second or more (real players: about 0.25); (4) jump resets on 10%+ of knockback (real
+     * players: almost never); (5) 8%+ of hits landed exactly 10 or 11 ticks after the last, the moment they can be hit
+     * again.
+     */
+    private static void botSigns(final Match m) {
+        final Recording.Fighter f = m.f;
+        int last = -1;
+        for (int i = 0; i < f.frames; i++)
+            if (f.has(i, Recording.LANDED)) {
+                if (last >= 0 && i - last <= 30) {
+                    m.hitGaps++;
+                    if (i - last == 10 || i - last == 11)
+                        m.hitGapsExact++;
+                }
+                last = i;
+            }
+        if (!f.bedrock()) {
+            int wtaps = 0, switches = 0, lastStrafe = 0;
+            for (int i = 1; i < f.frames; i++) {
+                if (!f.holding(i, Recording.FORWARD) && f.holding(i - 1, Recording.FORWARD))
+                    for (int k = i + 1; k <= Math.min(f.frames - 1, i + 3); k++)
+                        if (f.holding(k, Recording.FORWARD)) {
+                            wtaps++;
+                            break;
+                        }
+                final int strafe = f.holding(i, Recording.LEFT) ? -1 : f.holding(i, Recording.RIGHT) ? 1 : 0;
+                if (strafe != 0 && lastStrafe != 0 && strafe != lastStrafe)
+                    switches++;
+                if (strafe != 0)
+                    lastStrafe = strafe;
+            }
+            final double seconds = f.frames / 20.0;
+            m.wtapRate = wtaps / seconds;
+            m.strafeSwitchRate = switches / seconds;
+        }
+        if (m.swingsInRange >= 10 && m.landedInRange >= 0.95 * m.swingsInRange)
+            m.botSigns.add(Math.round(100.0 * m.landedInRange / m.swingsInRange) + "% of swings landed");
+        if (m.wtapRate >= 0.5)
+            m.botSigns.add(String.format("W-tapping %.1f a second", m.wtapRate));
+        if (m.strafeSwitchRate >= 0.45)
+            m.botSigns.add(String.format("switching strafe %.1f a second", m.strafeSwitchRate));
+        if (m.kbHits >= 5 && m.jumpResets >= 0.1 * m.kbHits)
+            m.botSigns.add(Math.round(100.0 * m.jumpResets / m.kbHits) + "% jump resets");
+        if (m.hitGaps >= 3 && m.hitGapsExact >= 0.08 * m.hitGaps)
+            m.botSigns.add(Math.round(100.0 * m.hitGapsExact / m.hitGaps) + "% of hits timed to the tick");
+    }
+
+    public static boolean botLike(final Match m) {
+        return m.botSigns.size() >= BOT_SIGNS;
+    }
+
     /** Sprinting while holding only back: vanilla stops sprinting as soon as you're not going forwards. */
     private static void sprintBack(final Match m) {
         final Recording.Fighter f = m.f;
@@ -536,6 +605,8 @@ public final class CheatChecks {
         public int ticksInRange, swingsInRange, landedInRange, bestSecond;
         public int sprintBackTicks, movingTicks;
         public int secondsChecked, tooFast;
+        /** Matches that look like a bot playing (see botSigns), and how many could be judged */
+        public int botLike, botChecked;
         public float topSpeed, maxReach;
         public boolean bedrock;
 
@@ -570,6 +641,11 @@ public final class CheatChecks {
                 this.secondsChecked += m.secondsChecked;
                 this.topSpeed = Math.max(this.topSpeed, m.topSpeed);
                 this.tooFast += tooFast(m, baseline);
+                if (m.swingsInRange >= 10) {
+                    this.botChecked++;
+                    if (botLike(m))
+                        this.botLike++;
+                }
                 this.bedrock |= m.f.bedrock();
             }
         }
@@ -616,6 +692,17 @@ public final class CheatChecks {
 
         public List<Line> lines() {
             final List<Line> lines = new ArrayList<>();
+            // A bot playing for them
+            if (this.botChecked == 0)
+                lines.add(new Line("Bot", Verdict.SKIPPED, "no matches with enough swings to judge", ""));
+            else {
+                final Verdict v = this.botLike >= 3 ? Verdict.SUSPICIOUS : this.botLike >= 1 ? Verdict.LOOK : Verdict.FINE;
+                lines.add(new Line("Bot", v, this.botLike == 0 ? "no match played like a bot (" + this.botChecked + " looked at)"
+                                : String.format("%d of %d matches played like a bot (%d%%)", this.botLike, this.botChecked, Math.round(100.0 * this.botLike / this.botChecked)),
+                        "A match is bot-like with " + BOT_SIGNS + " or more of: nearly every swing landing, W-tapping and switching strafe far"
+                                + " more than anyone, jump resets, hits timed to the tick. Found from real recordings of a sumo bot: no real player's"
+                                + " match here showed four. Someone using one now and then shows it only in those matches."));
+            }
             // Reach
             if (this.reach.isEmpty())
                 lines.add(new Line("Reach", Verdict.SKIPPED, "no hits landed to measure", ""));
@@ -713,6 +800,10 @@ public final class CheatChecks {
         public static Map.Entry<Integer, String> oddness(final Match m, final Baseline baseline) {
             int score = 0;
             final List<String> why = new ArrayList<>();
+            if (botLike(m)) {
+                score += 2 * m.botSigns.size();
+                why.add("bot-like: " + String.join(", ", m.botSigns));
+            }
             if (m.longHits > 0) {
                 score += m.longHits + 3 * m.veryLongHits;
                 float max = 0;

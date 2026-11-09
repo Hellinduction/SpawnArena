@@ -1291,7 +1291,8 @@ public class Fight {
      */
     /** From this win streak up, beating your best gets "(New Best!)" after it (not for someone's 1st or 2nd win ever) */
     static final int NEW_BEST_MIN = 3;
-    private static final String NEW_BEST = " <gold><bold>(New Best!)</bold></gold><dark_red>";
+    /** (no "!" of its own: the sentence ends with one) */
+    private static final String NEW_BEST = " <gold><bold>(New Best)</bold></gold><dark_red>";
 
     private static String streakPart(final List<Integer> streaks, final List<Player> winners, final List<Boolean> newBests) {
         if (streaks.size() == 1)
