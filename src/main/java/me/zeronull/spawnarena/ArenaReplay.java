@@ -46,6 +46,13 @@ public final class ArenaReplay {
     private double speed = 1;
     private boolean paused;
     private boolean over;
+    /** Ticks it's been over, or paused, for: it closes itself after a while (the players it shows would otherwise stand
+     * there frozen, the winner of a finished one especially, until they closed it) */
+    private int overTicks, pausedTicks;
+    /** A finished replay closes itself after this long (10 seconds); a paused one after 5 minutes */
+    private static final int CLOSE_WHEN_OVER = 200, CLOSE_WHEN_PAUSED = 6000;
+    /** Further than this from the arena, the replay closes */
+    private static final double MAX_AWAY = 100;
     private ScheduledTask task;
     private static Object sharedFlags, poseData, customisation, crouching, standing;
 
@@ -300,6 +307,22 @@ public final class ArenaReplay {
             this.stop(false);
             return;
         }
+        // Gone off elsewhere, finished a while ago, or left paused: closed (nothing of it left standing about)
+        final Location here = this.viewer.getLocation();
+        final double dx = here.getX() - this.cx, dz = here.getZ() - this.cz;
+        final String why = dx * dx + dz * dz > MAX_AWAY * MAX_AWAY ? "you went too far from the arena"
+                : this.over && ++this.overTicks > CLOSE_WHEN_OVER ? null
+                : this.paused && !this.over && ++this.pausedTicks > CLOSE_WHEN_PAUSED ? "it was paused for 5 minutes" : "";
+        if (why == null || !why.isEmpty()) {
+            if (why != null)
+                this.viewer.sendMessage(MiniMessage.miniMessage().deserialize("<gray>Replay closed: " + why + "."));
+            this.stop(false);
+            return;
+        }
+        if (!this.over)
+            this.overTicks = 0;
+        if (!this.paused)
+            this.pausedTicks = 0;
         try {
             if (!this.paused && !this.over) {
                 this.clock += 50 * this.speed;
@@ -412,8 +435,14 @@ public final class ArenaReplay {
             if (f.won)
                 won.add(f.name);
         this.viewer.sendMessage(MiniMessage.miniMessage().deserialize("<gold>Replay over:</gold> <white><won></white> <gray>won. "
-                        + "<click:run_command:/arenareplay restart><aqua>[Watch again]</aqua></click> <click:run_command:/arenareplay stop><red>[Close]</red></click>",
+                        + "<click:run_command:/arenareplay file " + this.fileArg() + "><aqua>[Watch again]</aqua></click> <click:run_command:/arenareplay stop><red>[Close]</red></click>",
                 Placeholder.unparsed("won", won.isEmpty() ? "nobody" : String.join(" & ", won))));
+    }
+
+    /** This recording as /arenareplay file takes it: its day folder and name. */
+    private String fileArg() {
+        final java.io.File f = this.rec.file;
+        return f == null ? "" : f.getParentFile().getName() + "/" + f.getName();
     }
 
     /** Takes the players away (and the ice), and, if asked and they were brought here, sends the viewer back. */
