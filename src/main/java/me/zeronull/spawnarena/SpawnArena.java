@@ -184,6 +184,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("arenamove", new ArenaMoveCommand());
         this.registerCommand("setarenaexit", new SetArenaExitCommand());
         this.registerCommand("arenatotems", new me.zeronull.spawnarena.commands.impl.ArenaTotemsCommand());
+        this.registerCommand("arenacheck", new me.zeronull.spawnarena.commands.impl.ArenaCheckCommand());
         this.registerCommand("arenaduel", new ArenaDuelCommand());
         this.registerCommand("arenawins", new ArenaWinsCommand());
         this.registerCommand("leavearena", new me.zeronull.spawnarena.commands.impl.LeaveArenaCommand());

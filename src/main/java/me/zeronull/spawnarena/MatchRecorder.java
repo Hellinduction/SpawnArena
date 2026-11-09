@@ -40,7 +40,7 @@ import java.util.zip.GZIPOutputStream;
  * Bot matches aren't recorded. The format: see {@link #write}.
  */
 public final class MatchRecorder implements Listener {
-    private static final int FORMAT = 1;
+    private static final int FORMAT = 2;
     /** The longest it records a match for (ten minutes); after that it stops taking frames */
     private static final int MAX_FRAMES = 20 * 60 * 10;
     private static final Map<Fight, MatchRecorder> RECORDING = new ConcurrentHashMap<>();
@@ -69,6 +69,15 @@ public final class MatchRecorder implements Listener {
         int frames;
         /** Swung, landed a hit, was hit, since the last frame */
         volatile boolean swung, landed, hurt;
+        /** Since the last frame: hit by a fighter's arrow, snowball or rod; teleported (e.g. an anticheat's setback) */
+        volatile boolean shot, teleported;
+        /** Holding the attack button on a block (each tick of it swings the arm too) */
+        volatile boolean digging;
+        /** The velocity the server last sent them since the last frame (knockback), or null; whether it was knockback */
+        volatile org.bukkit.util.Vector velocity;
+        volatile boolean knockedBack;
+        /** Which fighter (their place in the recording) they last landed a hit on since the last frame, or -1 */
+        volatile int landedOn = -1;
         volatile ScheduledTask task;
 
         Track(final Player player, final int team) {
@@ -178,7 +187,18 @@ public final class MatchRecorder implements Listener {
         if (t.swung) flags |= 8;
         if (t.landed) flags |= 16;
         if (t.hurt) flags |= 32;
-        t.swung = t.landed = t.hurt = false;
+        int extra = 0;
+        final org.bukkit.util.Vector velocity = t.velocity;
+        if (velocity != null) extra |= 1;
+        if (t.digging) extra |= 2;
+        if (t.shot) extra |= 4;
+        if (t.teleported) extra |= 8;
+        final int landedOn = t.landedOn;
+        if (landedOn >= 0) extra |= 16;
+        t.swung = t.landed = t.hurt = t.shot = t.teleported = false;
+        t.velocity = null;
+        t.knockedBack = false;
+        t.landedOn = -1;
         synchronized (t) {
             t.pingSum += p.getPing();
             try {
@@ -190,6 +210,15 @@ public final class MatchRecorder implements Listener {
                 t.out.writeFloat(at.getPitch());
                 t.out.writeByte(keys);
                 t.out.writeByte(flags);
+                t.out.writeShort(Math.min(p.getPing(), Short.MAX_VALUE));
+                t.out.writeByte(extra);
+                if (velocity != null) {
+                    t.out.writeFloat((float) velocity.getX());
+                    t.out.writeFloat((float) velocity.getY());
+                    t.out.writeFloat((float) velocity.getZ());
+                }
+                if (landedOn >= 0)
+                    t.out.writeByte(landedOn);
                 t.frames++;
             } catch (final IOException ignored) {
                 // (in memory: can't happen)
@@ -218,16 +247,79 @@ public final class MatchRecorder implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onHit(final EntityDamageByEntityEvent e) {
-        if (!(e.getEntity() instanceof Player victim) || !(e.getDamager() instanceof Player attacker))
+        if (!(e.getEntity() instanceof Player victim))
             return;
         final MatchRecorder rec = OF.get(victim.getUniqueId());
-        if (rec == null || OF.get(attacker.getUniqueId()) != rec)
+        if (rec == null)
             return;
-        final Track hurt = rec.track(victim), hitter = rec.track(attacker);
-        if (hurt != null)
-            hurt.hurt = true;
-        if (hitter != null)
+        final Track hurt = rec.track(victim);
+        if (hurt == null)
+            return;
+        // An arrow, snowball or rod from another fighter: knocked back, but not a hit with their hand
+        if (e.getDamager() instanceof org.bukkit.entity.Projectile projectile) {
+            if (projectile.getShooter() instanceof Player shooter && OF.get(shooter.getUniqueId()) == rec)
+                hurt.shot = true;
+            return;
+        }
+        if (!(e.getDamager() instanceof Player attacker) || OF.get(attacker.getUniqueId()) != rec)
+            return;
+        final Track hitter = rec.track(attacker);
+        hurt.hurt = true;
+        if (hitter != null) {
             hitter.landed = true;
+            hitter.landedOn = rec.tracks.indexOf(hurt);
+        }
+    }
+
+    /**
+     * The knockback a fighter is sent: the velocity they have plus the push, as it goes out to them (checked against
+     * how they moved after). PlayerVelocityEvent can't be used for this: for a hit it has the velocity from before it.
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onKnockback(final io.papermc.paper.event.entity.EntityKnockbackEvent e) {
+        if (!(e.getEntity() instanceof Player p))
+            return;
+        final Track t = trackOf(p);
+        if (t != null) {
+            t.velocity = p.getVelocity().add(e.getKnockback()); // a sprint hit's extra push comes after: the last one is what's sent
+            t.knockedBack = true;
+        }
+    }
+
+    /** Any other velocity a fighter is sent (a plugin's push): still marked, so it isn't taken for them moving. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onVelocity(final org.bukkit.event.player.PlayerVelocityEvent e) {
+        final Track t = trackOf(e.getPlayer());
+        if (t != null && !t.knockedBack)
+            t.velocity = e.getVelocity().clone();
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDig(final org.bukkit.event.player.PlayerInteractEvent e) {
+        if (e.getAction() != org.bukkit.event.block.Action.LEFT_CLICK_BLOCK)
+            return;
+        final Track t = trackOf(e.getPlayer());
+        if (t != null)
+            t.digging = true;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDigStop(final org.bukkit.event.block.BlockDamageAbortEvent e) {
+        final Track t = trackOf(e.getPlayer());
+        if (t != null)
+            t.digging = false;
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTeleport(final org.bukkit.event.player.PlayerTeleportEvent e) {
+        final Track t = trackOf(e.getPlayer());
+        if (t != null)
+            t.teleported = true;
+    }
+
+    private static Track trackOf(final Player p) {
+        final MatchRecorder rec = OF.get(p.getUniqueId());
+        return rec == null ? null : rec.track(p);
     }
 
     // ── Saving ──────────────────────────────────────────────────────────────
@@ -257,13 +349,18 @@ public final class MatchRecorder implements Listener {
      *   their stats in that arena as it started: Elo, wins, losses, win streak, best win streak, seconds spent
      *   fighting there (ints), bots beaten there (byte: how many levels, then each: level (text), how many (int)),
      *   ping as it started and on average (ints, ms), client (text: its brand, e.g. "vanilla", "fabric")
-     * then each fighter's frames, in the same order: count (int), then each frame (26 bytes):
+     * then each fighter's frames, in the same order: count (int), then each frame (26 bytes in format 1, 29 or more
+     *   in format 2):
      *   time since the start (int, ms), x, y, z (floats), yaw, pitch (floats),
      *   keys held (byte: 1 forward, 2 back, 4 left, 8 right, 16 jump, 32 sneak, 64 sprint),
-     *   state (byte: 1 on the ground, 2 sprinting, 4 sneaking, 8 swung, 16 landed a hit, 32 was hit; the last three:
-     *   since the frame before)
+     *   state (byte: 1 on the ground, 2 sprinting, 4 sneaking, 8 swung, 16 landed a hit, 32 was hit (by a fighter's
+     *   hand); the last three: since the frame before)
+     *   format 2 only: ping (short, ms), more (byte, since the frame before: 1 sent a velocity (knockback), 2 holding
+     *   the attack button on a block (each tick of it swings the arm), 4 hit by a fighter's arrow, snowball or rod,
+     *   8 teleported, 16 landed a hit on a fighter (their number, below)), then if 1: the velocity x, y, z (floats),
+     *   then if 16: which fighter (byte: their place in the list above, from 0)
      * </pre>
-     * A frame a tick (20 a second) while they're fighting.
+     * A frame a tick (20 a second) while they're fighting. Read back by {@link Recording}.
      */
     private void write(final File file) throws IOException {
         final List<Player> won = this.winners;

@@ -18,7 +18,10 @@ import uuid
 
 KEYS = ["forward", "back", "left", "right", "jump", "sneak", "sprint"]
 STATE = ["on_ground", "sprinting", "sneaking", "swung", "landed_hit", "was_hit"]
+# Format 2's "more" byte (the velocity and who they hit are read separately)
+MORE = ["sent_velocity", "digging", "shot", "teleported", "landed_on_fighter"]
 FRAME = struct.Struct(">ifffffBB")
+FRAME_2 = struct.Struct(">hB")
 
 
 class _Reader:
@@ -44,9 +47,9 @@ def read(path):
         raise ValueError("not a SpawnArena recording")
     r.at = 5
     version = r.take("i")
-    if version != 1:
+    if version not in (1, 2):
         raise ValueError("unknown recording format %d" % version)
-    match = {"started": r.take("q"), "arena": r.text(), "variant": r.text() or None,
+    match = {"format": version, "started": r.take("q"), "arena": r.text(), "variant": r.text() or None,
              "centre": [r.take("d"), r.take("d"), r.take("d")], "length_ms": r.take("i"),
              "duel": bool(r.take("b")), "winning_team": r.take("b"), "fighters": []}
     for _ in range(r.take("b")):
@@ -71,6 +74,14 @@ def read(path):
             frame = {"ms": ms, "x": x, "y": y, "z": z, "yaw": yaw, "pitch": pitch}
             frame.update({k: bool(keys >> i & 1) for i, k in enumerate(KEYS)})
             frame.update({k: bool(state >> i & 1) for i, k in enumerate(STATE)})
+            if version >= 2:
+                # Their ping, and what else happened since the frame before: the velocity sent (knockback), holding the
+                # attack button on a block, hit by an arrow/snowball/rod, teleported, and which fighter they hit
+                frame["ping"], more = FRAME_2.unpack_from(r.data, r.at)
+                r.at += FRAME_2.size
+                frame.update({k: bool(more >> i & 1) for i, k in enumerate(MORE)})
+                frame["velocity"] = [r.take("f"), r.take("f"), r.take("f")] if more & 1 else None
+                frame["hit_fighter"] = r.take("b") if more & 16 else None
             frames.append(frame)
         fighter["frames"] = frames
     return match
@@ -78,14 +89,15 @@ def read(path):
 
 def summary(match):
     out = {k: v for k, v in match.items() if k != "fighters"}
+    out["format"] = match.get("format", 1)
     out["winners"] = [f["name"] for f in match["fighters"] if f["won"]]
     out["fighters"] = []
     for f in match["fighters"]:
         frames = f["frames"]
         s = {k: v for k, v in f.items() if k != "frames"}
         s["frames"] = len(frames)
-        for k in KEYS + STATE:
-            s[k] = sum(fr[k] for fr in frames)
+        for k in KEYS + STATE + MORE:
+            s[k] = sum(fr.get(k, False) for fr in frames)
         s["furthest"] = round(max((abs(fr["x"]) + abs(fr["z"]) for fr in frames), default=0), 2)
         out["fighters"].append(s)
     return out

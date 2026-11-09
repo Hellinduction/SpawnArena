@@ -122,6 +122,12 @@ commands:
     permission: spawnarena.arenatotems
     permission-message: "§cYou don't have permission!"
 
+  arenacheck:
+    description: Look back over a player's recorded sumo matches for signs of cheating (reach, knockback, aim, sprinting, speed)
+    usage: "/arenacheck <player> [days]"
+    permission: spawnarena.arenacheck
+    permission-message: "§cYou don't have permission!"
+
   arenawatch:
     description: Watch a MULTI crystal arena's matches (the viewing arena, or one match up close) - for an NPC to run
     usage: "/arenawatch <arena>"
@@ -224,6 +230,8 @@ permissions:
   spawnarena.setarenaexit:
     default: op
   spawnarena.arenatotems:
+    default: op
+  spawnarena.arenacheck:
     default: op
   spawnarena.bypasskickout:
     description: Can stay inside arenas during other players' fights
