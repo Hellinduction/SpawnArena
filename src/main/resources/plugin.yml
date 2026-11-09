@@ -128,6 +128,12 @@ commands:
     permission: spawnarena.arenacheck
     permission-message: "§cYou don't have permission!"
 
+  arenareplay:
+    description: Watch a recorded sumo match back, shown to you alone
+    usage: "/arenareplay <player> [n] | list <player> [page] | file <day/file> | pause | play | skip <seconds> | speed <x> | restart | stop"
+    permission: spawnarena.arenareplay
+    permission-message: "§cYou don't have permission!"
+
   arenawatch:
     description: Watch a MULTI crystal arena's matches (the viewing arena, or one match up close) - for an NPC to run
     usage: "/arenawatch <arena>"
@@ -232,6 +238,8 @@ permissions:
   spawnarena.arenatotems:
     default: op
   spawnarena.arenacheck:
+    default: op
+  spawnarena.arenareplay:
     default: op
   spawnarena.bypasskickout:
     description: Can stay inside arenas during other players' fights

@@ -27,21 +27,21 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class BotPuppet {
     private static boolean broken;
-    private static Constructor<?> addPacket, dataPacket, syncPacket, removePacket, equipmentPacket, hurtPacket, animatePacket, headPacket,
+    static Constructor<?> addPacket, dataPacket, syncPacket, removePacket, equipmentPacket, hurtPacket, animatePacket, headPacket,
             infoPacket, infoEntry, infoRemovePacket, teamCtor, scoreboardCtor;
-    private static Method getHandle, packAll, getEntityData, positionOf, asNmsCopy, pairOf, sendPacket, dataId, authlibCopy,
+    static Method getHandle, packAll, getEntityData, positionOf, asNmsCopy, pairOf, sendPacket, dataId, authlibCopy,
             asVanilla, teamPacket, teamRemovePacket, setSuffix, setColour, teamPlayers, formattingByName, setNameTagVisibility, dataValue;
-    private static Constructor<?> positionCtor, vec3Ctor;
+    static Constructor<?> positionCtor, vec3Ctor;
     private static Object textDisplayType, hiddenTag, shownTag, textData, billboardData, interpolationData;
-    private static Field animateId, headId;
+    static Field animateId, headId;
     private static Constructor<?> bundlePacket;
     private static Class<?> addClass, dataClass, removeClass, bundleClass;
     private static Method addGetId, addGetType, addX, addY, addZ, addXRot, addYRot, addHeadRot, addMovement, dataGetId, dataItems,
             removeIds, bundleItems;
     private static Object mannequinType;
     private static Class<?> packetClass;
-    private static Object playerType, zero, addPlayer, survival;
-    private static Object[] slots;
+    static Object playerType, zero, addPlayer, survival;
+    static Object[] slots;
     /** The highest entity data id a player and a Mannequin share (Avatar's); the Mannequin's own ones would break a player. */
     private static int lastShared;
 
@@ -661,7 +661,8 @@ final class BotPuppet {
 
     // ── Reflection ──────────────────────────────────────────────────────────
 
-    private static boolean ready() {
+    /** Loads what drawing players by packets needs (shared with {@link ArenaReplay}); false if this server can't. */
+    static boolean ready() {
         if (addPacket != null)
             return true;
         if (broken)
@@ -774,19 +775,19 @@ final class BotPuppet {
         }
     }
 
-    private static Field field(final Class<?> type, final String name) throws NoSuchFieldException {
+    static Field field(final Class<?> type, final String name) throws NoSuchFieldException {
         final Field f = type.getDeclaredField(name);
         f.setAccessible(true);
         return f;
     }
 
-    private static Object handle(final Object bukkit) throws ReflectiveOperationException {
+    static Object handle(final Object bukkit) throws ReflectiveOperationException {
         if (getHandle == null || !getHandle.getDeclaringClass().isInstance(bukkit))
             getHandle = bukkit.getClass().getMethod("getHandle");
         return getHandle.invoke(bukkit);
     }
 
-    private static void send(final Player viewer, final Object packet) throws ReflectiveOperationException {
+    static void send(final Player viewer, final Object packet) throws ReflectiveOperationException {
         if (!viewer.isOnline())
             return;
         final Object player = handle(viewer);

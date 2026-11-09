@@ -371,9 +371,10 @@ public abstract class Arena extends ArenaOptions {
                 Threads.entity(p, () -> kickOutLingeringPlayer(p));
         }
 
-        /** Fighters, vanished players, spectator mode and spawnarena.bypasskickout may stay in arenas. */
+        /** Fighters, vanished players, spectator mode, spawnarena.bypasskickout and replay watchers may stay in arenas. */
         public static boolean isExemptFromKickOut(final Player p) {
             return isVanished(p)
+                    || me.zeronull.spawnarena.ArenaReplay.isWatching(p)
                     || p.getGameMode() == GameMode.SPECTATOR
                     || p.hasPermission("spawnarena.bypasskickout")
                     || SpawnArena.arenas.hasFighter(p)

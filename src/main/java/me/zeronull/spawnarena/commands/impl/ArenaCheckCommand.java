@@ -169,7 +169,8 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
                                 Placeholder.unparsed("opp", String.join(" & ", m.opponents())),
                                 Placeholder.unparsed("variant", m.variant == me.zeronull.spawnarena.SumoVariant.CLASSIC ? "" : " (" + m.variant.title + ")"),
                                 Placeholder.unparsed("why", e.getValue()))
-                        .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("recordings/" + m.rec.file.getParentFile().getName() + "/" + m.rec.file.getName()))));
+                        .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("Click to watch it\nrecordings/" + ArenaReplayCommand.path(m.rec.file))))
+                        .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/arenareplay file " + ArenaReplayCommand.path(m.rec.file))));
             }
         }
         out.add(mm.deserialize(switch (overall) {

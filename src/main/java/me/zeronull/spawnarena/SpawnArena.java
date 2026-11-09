@@ -91,6 +91,7 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaCommandEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new SumoBotListener(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new MatchRecorder(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new ArenaReplay.Events(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new BotMenu.Clicks(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new BotSkins(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.EgapCooldown(), this);
@@ -185,6 +186,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("setarenaexit", new SetArenaExitCommand());
         this.registerCommand("arenatotems", new me.zeronull.spawnarena.commands.impl.ArenaTotemsCommand());
         this.registerCommand("arenacheck", new me.zeronull.spawnarena.commands.impl.ArenaCheckCommand());
+        this.registerCommand("arenareplay", new me.zeronull.spawnarena.commands.impl.ArenaReplayCommand());
         this.registerCommand("arenaduel", new ArenaDuelCommand());
         this.registerCommand("arenawins", new ArenaWinsCommand());
         this.registerCommand("leavearena", new me.zeronull.spawnarena.commands.impl.LeaveArenaCommand());
@@ -211,6 +213,7 @@ public class SpawnArena extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        ArenaReplay.stopAll(); // the replays' players taken off everyone watching
         // Its menus close: once reloaded, this copy's menus aren't recognised as its own, so nothing would stop their
         // buttons being taken out
         for (final org.bukkit.entity.Player p : Bukkit.getOnlinePlayers())
