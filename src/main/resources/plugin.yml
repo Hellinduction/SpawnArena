@@ -124,7 +124,7 @@ commands:
 
   arenacheck:
     description: Look back over a player's recorded sumo matches for signs of cheating (reach, knockback, aim, sprinting, speed)
-    usage: "/arenacheck <player> [days]"
+    usage: "/arenacheck <player> [days]  or  /arenacheck top [days] (the most suspicious players)"
     permission: spawnarena.arenacheck
     permission-message: "§cYou don't have permission!"
 

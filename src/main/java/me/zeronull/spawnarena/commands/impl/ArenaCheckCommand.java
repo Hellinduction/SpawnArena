@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 
 /**
+ * /arenacheck top [days]: every player recorded (in the last few days, or ever), the most suspicious first.
  * /arenacheck &lt;player&gt; [days] — looks back over their recorded sumo matches (all of them, or the last few days')
  * for signs of cheating, against everyone else's ({@link CheatChecks}). Off the main thread; the result in chat (hover
  * a line for what it measures), and in full, every match, in plugins/SpawnArena/checks/.
@@ -47,7 +48,7 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
     @Override
     public boolean onCommand(final CommandSender sender, final Command command, final String label, final String[] args) {
         if (args.length < 1) {
-            sender.sendMessage("§cUsage: /arenacheck <player> [days]");
+            sender.sendMessage("§cUsage: /arenacheck <player> [days]  §7or  §c/arenacheck top [days]  §7(the most suspicious players)");
             return true;
         }
         int days = 0;
@@ -68,6 +69,21 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         final String name = args[0];
+        if (name.equalsIgnoreCase("top")) {
+            final int forDays = days;
+            sender.sendMessage("§7Checking every recorded player" + (days > 0 ? " from the last " + days + " day" + (days == 1 ? "" : "s") : "") + "...");
+            Threads.async(() -> {
+                try {
+                    this.top(sender, forDays);
+                } catch (final Throwable t) {
+                    SpawnArena.INSTANCE.getLogger().log(Level.WARNING, "/arenacheck top failed", t);
+                    tell(sender, MiniMessage.miniMessage().deserialize("<red>The check failed: <msg>", Placeholder.unparsed("msg", String.valueOf(t))));
+                } finally {
+                    RUNNING.set(false);
+                }
+            });
+            return true;
+        }
         final Player online = Bukkit.getPlayerExact(name);
         final UUID known = online == null ? null : online.getUniqueId();
         final int forDays = days;
@@ -185,6 +201,76 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
             tell(sender, c);
     }
 
+    /** How many players /arenacheck top lists, and how many matches they need to be ranked */
+    private static final int TOP_SHOWN = 10, TOP_MIN_MATCHES = 3;
+
+    /** Every player recorded (in the last few days, or ever), the most suspicious first: name, why, click for theirs. */
+    private void top(final CommandSender sender, final int days) {
+        final long started = System.currentTimeMillis();
+        final File root = new File(SpawnArena.INSTANCE.getDataFolder(), "recordings");
+        final List<File> files = CheatChecks.recordings(root, SCANNED_RECORDINGS);
+        final long since = days > 0 ? System.currentTimeMillis() - days * 86_400_000L : 0;
+        final List<CheatChecks.Match> all = new ArrayList<>();
+        final Map<UUID, List<CheatChecks.Match>> byPlayer = new java.util.HashMap<>();
+        final Map<UUID, String> names = new java.util.HashMap<>();
+        for (final File f : files) {
+            final List<CheatChecks.Match> in = analyseAll(f, null);
+            if (!in.isEmpty() && in.get(0).rec.started < since)
+                break; // newest first: the rest are older
+            all.addAll(in);
+            for (final CheatChecks.Match m : in) {
+                byPlayer.computeIfAbsent(m.f.uuid, x -> new ArrayList<>()).add(m);
+                names.putIfAbsent(m.f.uuid, m.f.name); // (their newest name)
+            }
+        }
+        if (all.isEmpty()) {
+            tell(sender, MiniMessage.miniMessage().deserialize("<red>No recorded matches" + (days > 0 ? " in that time" : " yet") + "."));
+            return;
+        }
+        // What's usual: from everyone's (as for one player), kept for later checks too if it's from everything
+        CheatChecks.Baseline usual = baseline;
+        if (usual == null || System.currentTimeMillis() - usual.builtAt > BASELINE_KEPT_MS) {
+            usual = CheatChecks.baseline(all);
+            if (days == 0)
+                baseline = usual;
+        }
+        final List<Object[]> ranked = new ArrayList<>(); // {name, matches, summary, score}
+        for (final Map.Entry<UUID, List<CheatChecks.Match>> e : byPlayer.entrySet()) {
+            if (e.getValue().size() < TOP_MIN_MATCHES)
+                continue;
+            final CheatChecks.Summary s = new CheatChecks.Summary(e.getValue(), usual);
+            final int score = s.suspicion();
+            if (score >= 5) // (one long hit or so is nothing)
+                ranked.add(new Object[]{names.get(e.getKey()), e.getValue().size(), s, score});
+        }
+        ranked.sort((a, b) -> Integer.compare((int) b[3], (int) a[3]));
+        final MiniMessage mm = MiniMessage.miniMessage();
+        tell(sender, mm.deserialize("<gold><bold>Most suspicious</bold> <gray>(<players> players with " + TOP_MIN_MATCHES + "+ of <matches> matches<when>)",
+                Placeholder.unparsed("players", String.valueOf(byPlayer.values().stream().filter(v -> v.size() >= TOP_MIN_MATCHES).count())),
+                Placeholder.unparsed("matches", String.format("%,d", usual.matches)),
+                Placeholder.unparsed("when", days > 0 ? ", last " + days + " day" + (days == 1 ? "" : "s") : "")));
+        if (ranked.isEmpty()) {
+            tell(sender, mm.deserialize("<green>Nobody stands out. <gray>(Some cheats can't be seen from a recording.)"));
+            return;
+        }
+        for (int i = 0; i < Math.min(TOP_SHOWN, ranked.size()); i++) {
+            final Object[] r = ranked.get(i);
+            final CheatChecks.Summary s = (CheatChecks.Summary) r[2];
+            final String who = (String) r[0];
+            final String reasons = s.reasons();
+            tell(sender, mm.deserialize("<gray><n>.</gray> <colour><who></colour> <dark_gray>(<count> matches)</dark_gray> <gray><why>",
+                            Placeholder.unparsed("n", String.valueOf(i + 1)),
+                            Placeholder.parsed("colour", colour(s.overall())),
+                            Placeholder.unparsed("who", who),
+                            Placeholder.unparsed("count", String.format("%,d", (int) r[1])),
+                            Placeholder.unparsed("why", reasons.isEmpty() ? "a few odd matches, nothing more" : reasons))
+                    .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("Click for " + who + "'s checks")))
+                    .clickEvent(net.kyori.adventure.text.event.ClickEvent.runCommand("/arenacheck " + who + (days > 0 ? " " + days : ""))));
+        }
+        tell(sender, mm.deserialize("<dark_gray>Click a name for their checks. <gray>(took <secs>s)",
+                Placeholder.unparsed("secs", String.format("%.1f", (System.currentTimeMillis() - started) / 1000.0))));
+    }
+
     /** Analyses one recording's fighters (just this one, if given), letting go of the frames after. */
     private static List<CheatChecks.Match> analyseAll(final File file, final UUID only) {
         final List<CheatChecks.Match> out = new ArrayList<>();
@@ -279,6 +365,8 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
     public List<String> onTabComplete(final CommandSender sender, final Command command, final String label, final String[] args) {
         if (args.length == 1) {
             final List<String> names = new ArrayList<>();
+            if ("top".startsWith(args[0].toLowerCase(Locale.ROOT)))
+                names.add("top");
             for (final Player p : Bukkit.getOnlinePlayers())
                 if (p.getName().toLowerCase(Locale.ROOT).startsWith(args[0].toLowerCase(Locale.ROOT)))
                     names.add(p.getName());

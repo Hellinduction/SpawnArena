@@ -786,6 +786,29 @@ public final class CheatChecks {
             return lines;
         }
 
+        /**
+         * How suspicious, for ranking players against each other (/arenacheck top): each suspicious line counts a lot, each
+         * one worth a closer look a little, and how much of it there is on top (bot-like matches, long hits...).
+         */
+        public int suspicion() {
+            int score = 0;
+            for (final Line l : this.lines())
+                score += l.verdict() == Verdict.SUSPICIOUS ? 100 : l.verdict() == Verdict.LOOK ? 20 : 0;
+            score += 3 * this.botLike + 2 * this.veryLongHits + this.longHits + 2 * this.rotationOff + this.sprintBackTicks / 10 + 2 * this.tooFast;
+            if (this.kbRatio.size() >= 15 && median(this.kbRatio) < KB_LOW)
+                score += 10;
+            return score;
+        }
+
+        /** What stands out ("Bot: 119 of 372 matches played like a bot; Reach: ..."), or "" for nothing. */
+        public String reasons() {
+            final List<String> out = new ArrayList<>();
+            for (final Line l : this.lines())
+                if (l.verdict() == Verdict.SUSPICIOUS || l.verdict() == Verdict.LOOK)
+                    out.add(l.check() + ": " + l.text());
+            return String.join("; ", out);
+        }
+
         public Verdict overall() {
             Verdict worst = Verdict.FINE;
             for (final Line l : this.lines())
