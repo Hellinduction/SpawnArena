@@ -258,9 +258,8 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
             final CheatChecks.Summary s = (CheatChecks.Summary) r[2];
             final String who = (String) r[0];
             final String reasons = s.reasons();
-            tell(sender, mm.deserialize("<gray><n>.</gray> <colour><who></colour> <dark_gray>(<count> matches)</dark_gray> <gray><why>",
+            tell(sender, mm.deserialize("<gray><n>.</gray> " + colour(s.overall()) + "<who><reset> <dark_gray>(<count> matches)</dark_gray> <gray><why>",
                             Placeholder.unparsed("n", String.valueOf(i + 1)),
-                            Placeholder.parsed("colour", colour(s.overall())),
                             Placeholder.unparsed("who", who),
                             Placeholder.unparsed("count", String.format("%,d", (int) r[1])),
                             Placeholder.unparsed("why", reasons.isEmpty() ? "a few odd matches, nothing more" : reasons))
