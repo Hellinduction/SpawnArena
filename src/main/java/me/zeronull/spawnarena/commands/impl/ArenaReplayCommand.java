@@ -203,7 +203,11 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
                 if (x.name.equalsIgnoreCase(name))
                     id = x.uuid;
         final SimpleDateFormat when = new SimpleDateFormat("d MMM HH:mm", Locale.ENGLISH);
-        tell(player, "<gold>" + esc(name) + "'s recorded matches</gold> <gray>(newest first; click one to watch it)");
+        // Which page this is, of how many (all their matches, from the match index once it's loaded)
+        final int total = id != null && me.zeronull.spawnarena.MatchIndex.ready() ? me.zeronull.spawnarena.MatchIndex.of(id, null).size() : -1;
+        final int pages = total < 0 ? -1 : Math.max(page, (total + PER_PAGE - 1) / PER_PAGE);
+        final String where = pages < 0 ? "page " + page : "page " + page + " of " + pages + ", " + total + " match" + (total == 1 ? "" : "es");
+        tell(player, "<gold>" + esc(name) + "'s recorded matches</gold> <gray>(" + where + "; newest first; click one to watch it)");
         for (int i = from; i < Math.min(theirs.size(), from + PER_PAGE); i++) {
             final Recording r = theirs.get(i);
             Recording.Fighter them = id == null ? null : r.fighter(id);
@@ -220,8 +224,12 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
                     + (v == SumoVariant.CLASSIC ? "" : " (" + v.title + ")") + ", " + (them.won ? "<green>won</green>" : "<red>lost</red>")
                     + " <gray>(" + s / 60 + ":" + String.format("%02d", s % 60) + ") <aqua>[Watch]</aqua></hover></click>");
         }
-        if (theirs.size() > from + PER_PAGE)
-            tell(player, "<click:run_command:/arenareplay list " + esc(name) + " " + (page + 1) + "><aqua>[More »]</aqua></click>");
+        // Back and on, with where they are between
+        final boolean more = theirs.size() > from + PER_PAGE;
+        if (page > 1 || more)
+            tell(player, (page > 1 ? "<click:run_command:/arenareplay list " + esc(name) + " " + (page - 1) + "><aqua>[« Back]</aqua></click> " : "")
+                    + "<gray>Page " + page + (pages < 0 ? "" : " of " + pages) + "</gray>"
+                    + (more ? " <click:run_command:/arenareplay list " + esc(name) + " " + (page + 1) + "><aqua>[More »]</aqua></click>" : ""));
     }
 
     /** day/file, as /arenareplay file takes it. */
