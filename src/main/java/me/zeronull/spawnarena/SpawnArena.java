@@ -82,6 +82,13 @@ public class SpawnArena extends JavaPlugin {
         CrystalPvp.restoreLeftovers();
         TopEloSuffix.start();
         CrystalPvp.startSaving();
+        // Plugins merged into SpawnArena (11 Nov), each with its own data folder as before: the arena guards
+        // (FightTeleportGuard, CrystalFfaLiquids, PearlBlock; each can be turned off in
+        // guards.yml) and the stats modules (ArenaWinRate, TournamentWins). Not on Folia: they use the Bukkit scheduler.
+        if (!Threads.FOLIA) {
+            net.bunnymc.arena.guards.ArenaGuards.start(this);
+            net.bunnymc.merged.ArenaStatsModules.start(this);
+        }
     }
 
     private void registerEvents() {
@@ -216,6 +223,8 @@ public class SpawnArena extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        net.bunnymc.merged.ArenaStatsModules.stop(this);
+        net.bunnymc.arena.guards.ArenaGuards.stop();
         ArenaReplay.stopAll(); // the replays' players taken off everyone watching
         // Its menus close: once reloaded, this copy's menus aren't recognised as its own, so nothing would stop their
         // buttons being taken out

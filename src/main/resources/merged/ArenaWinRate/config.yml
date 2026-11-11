@@ -1,0 +1,17 @@
+minimum-matches: 20
+locations:
+  sumo:
+    world: Spawn
+    x: 110.5
+    y: 107.5
+    z: -46.5
+  arena:
+    world: Spawn
+    x: -8.5
+    y: 102.62582397460938
+    z: -57.5
+  crystalpvp:
+    world: Spawn
+    x: 48.5
+    y: 121.13117218017578
+    z: -144.5

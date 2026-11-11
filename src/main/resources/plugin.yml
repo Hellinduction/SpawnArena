@@ -20,6 +20,19 @@ softdepend:
 folia-supported: true
 
 commands:
+  # Merged in from other plugins (11 Nov): see SpawnArena.onEnable
+  tournamentwins:
+    description: Recorded tournament championships and leaderboard
+    aliases: [tournamenttop, tourneytop]
+  arenawinrate:
+    description: Inspect arena win-rate leaderboards
+    permission: arenawinrate.admin
+  pearlblock:
+    description: PearlBlock management commands.
+    usage: /pearlblock <clear [radius]|reload>
+    aliases:
+      - pb
+    permission: pearlblock.admin
   joinarenaqueue:
     description: Join an arena's queue straight away (again to leave), or open the 1v1 / 2v2 / Auto menu
     usage: "/joinarenaqueue <arena> [1v1|2v2|auto|menu]"
@@ -188,6 +201,13 @@ commands:
     permission-message: "§cYou don't have permission!"
 
 permissions:
+  tournamentwins.admin:
+    default: op
+  arenawinrate.admin:
+    default: op
+  pearlblock.admin:
+    description: Access to /pearlblock administrative commands.
+    default: op
   spawnarena.arenawatch:
     description: Open the menu to watch a MULTI crystal arena's matches (/arenawatch)
     default: true
