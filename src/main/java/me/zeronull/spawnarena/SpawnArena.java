@@ -148,6 +148,7 @@ public class SpawnArena extends JavaPlugin {
             LeaderboardHolograms.startReadyEffects();
             Bukkit.getServer().getPluginManager().registerEvents(new LeaderboardHolograms.WorldChange(), this);
         }
+        Bukkit.getServer().getPluginManager().registerEvents(new Spleef(), this);
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaSpectatorGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaBoundaryGuard(), this);
@@ -160,6 +161,7 @@ public class SpawnArena extends JavaPlugin {
             // (fighters just see WorldGuard's "can't place" messages unless the region allows building)
             try {
                 Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.CrystalWorldGuardBypass(), this);
+                Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.SpleefWorldGuardBypass(), this);
             } catch (final LinkageError | RuntimeException e) {
                 getLogger().warning("Couldn't hook into WorldGuard's events for crystal arenas (" + e
                         + "). Set the build flag to allow in crystal arena regions instead.");

@@ -56,6 +56,17 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             return true;
         }
 
+        // Spleef on/off works from anywhere, the console included
+        if (args.length >= 2 && args[1].equalsIgnoreCase("spleef")) {
+            final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
+            if (!(found instanceof SavableArena savable)) {
+                sender.sendMessage(ChatColor.RED + "That arena was not found.");
+                return true;
+            }
+            toggleSpleef(sender, savable);
+            return true;
+        }
+
         // Free-for-all on/off works from anywhere, the console included
         if (args.length >= 2 && args[1].equalsIgnoreCase("ffa")) {
             final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
@@ -73,7 +84,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
         }
 
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa|random|combo]"));
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa|random|combo|spleef]"));
             return true;
         }
 
@@ -165,6 +176,35 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
      * or running, nobody in (or on their way into) a free-for-all, and no reset. Done under the arena's lock, which
      * joining also takes, so nobody can get in between the check and the change.
      */
+    /** Spleef on or off: fighters break the floor (see Spleef). Clearing fighters' inventories comes on with it. */
+    private static void toggleSpleef(final CommandSender sender, final SavableArena arena) {
+        if (arena.isCrystalPvp()) {
+            sender.sendMessage(ChatColor.RED + arena.getArenaName() + " is a crystal PvP arena: an arena can't be both.");
+            return;
+        }
+        final boolean nowSpleef;
+        synchronized (arena) {
+            final String busy = whyBusy(arena);
+            if (busy != null) {
+                sender.sendMessage(ChatColor.RED + busy + " Try again once it's empty.");
+                return;
+            }
+            nowSpleef = !arena.isSpleef();
+            arena.setSpleef(nowSpleef);
+            if (nowSpleef)
+                arena.setShouldClearItems(true);
+            arena.save(config -> {
+                config.spleef = nowSpleef;
+                if (nowSpleef)
+                    config.shouldClearItems = true;
+            });
+        }
+        sender.sendMessage(nowSpleef
+                ? ChatColor.GREEN + "Spleef is on for " + arena.getArenaName() + ": fighters get a shovel and break the floor ("
+                        + arena.getSpleefFloor() + ") to drop each other into the liquid at the bottom. It's put back after every match."
+                : ChatColor.YELLOW + "Spleef is off for " + arena.getArenaName() + ".");
+    }
+
     private static void toggleFfa(final CommandSender player, final SavableArena arena) {
         // A MULTI crystal arena's real arena is its viewing arena (put back whenever it's changed): back to SINGLE first
         if (!arena.isFfa() && arena.isCrystalPvp() && arena.getArenaMode() == ArenaMode.MULTI) {
@@ -221,7 +261,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             // "random" only for sumo arenas (or one that somehow has it on, to turn it off)
             final me.zeronull.spawnarena.Arena arena = SpawnArena.arenas.of(args[0]);
             final boolean sumo = arena != null && (arena.isDeathOnTouchLiquid() || arena.isRandomSumo());
-            return (sumo ? java.util.List.of("ffa", "random", "combo") : java.util.List.of("ffa", "combo")).stream()
+            return (sumo ? java.util.List.of("ffa", "random", "combo", "spleef") : java.util.List.of("ffa", "combo", "spleef")).stream()
                     .filter(o -> o.startsWith(args[1].toLowerCase())).toList();
         }
         return super.onTabComplete(sender, command, label, args);

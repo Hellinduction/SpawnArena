@@ -9,6 +9,8 @@ public abstract class ArenaOptions {
     private volatile boolean giveKnockBackStick;
     private volatile ArenaMode arenaMode;
     private volatile boolean crystalPvp;
+    private volatile boolean spleef;
+    private volatile java.util.Set<org.bukkit.Material> spleefFloor = java.util.EnumSet.of(org.bukkit.Material.SNOW_BLOCK);
     private volatile boolean ffa;
     private volatile boolean randomSumo;
 
@@ -221,7 +223,8 @@ public abstract class ArenaOptions {
      * then each match is fought in a copy of its own (CrystalCopies), each copy running one at a time.
      */
     public ArenaMode getArenaMode() {
-        if (this.ffa)
+        // (spleef: one match at a time in the arena itself, as its floor is broken; copies of their own to come)
+        if (this.ffa || this.spleef)
             return ArenaMode.SINGLE;
         if (this.crystalPvp)
             return this.arenaMode == ArenaMode.MULTI && CrystalCopies.supported() && !(this instanceof CrystalCopy)
@@ -240,6 +243,35 @@ public abstract class ArenaOptions {
 
     public boolean isCrystalPvp() {
         return this.crystalPvp;
+    }
+
+    /** Spleef: fighters break the floor under each other (see Spleef). */
+    public boolean isSpleef() {
+        return this.spleef;
+    }
+
+    public ArenaOptions setSpleef(final boolean value) {
+        this.spleef = value;
+        return this;
+    }
+
+    /** Spleef: what the floor is made of, the only blocks fighters can break. */
+    public java.util.Set<org.bukkit.Material> getSpleefFloor() {
+        return this.spleefFloor;
+    }
+
+    public ArenaOptions setSpleefFloor(final java.util.Collection<String> materials) {
+        final java.util.Set<org.bukkit.Material> floor = java.util.EnumSet.noneOf(org.bukkit.Material.class);
+        if (materials != null)
+            for (final String name : materials) {
+                final org.bukkit.Material m = org.bukkit.Material.matchMaterial(name);
+                if (m != null && m.isBlock())
+                    floor.add(m);
+            }
+        if (floor.isEmpty())
+            floor.add(org.bukkit.Material.SNOW_BLOCK);
+        this.spleefFloor = floor;
+        return this;
     }
 
     public ArenaOptions setCrystalPvp(final boolean value) {

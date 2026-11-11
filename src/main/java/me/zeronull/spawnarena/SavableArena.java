@@ -220,6 +220,8 @@ public final class SavableArena extends Arena {
         super.setGiveKnockBackStick(config.giveKnockBackStick);
         super.setArenaMode(config.arenaMode);
         super.setCrystalPvp(config.crystalPvp);
+        super.setSpleef(config.spleef);
+        super.setSpleefFloor(config.spleefFloor);
         super.setFfa(config.ffa);
         super.setRandomSumo(config.randomSumo);
         this.setWinReward(config.winReward, config.winRewardCooldownMinutes);

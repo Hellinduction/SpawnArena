@@ -73,7 +73,7 @@ public final class LiquidListener implements Listener, Runnable {
             return;
         }
 
-        if (!arena.isDeathOnTouchLiquid()) {
+        if (!arena.isDeathOnTouchLiquid() && !arena.isSpleef()) { // (spleef: out in the liquid at the bottom too)
             return;
         }
 

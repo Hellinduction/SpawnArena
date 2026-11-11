@@ -187,7 +187,9 @@ public class Fight {
 
     /** Hands out the arena's fight items: the random sumo variant's, or the Slap Fish. */
     protected void giveKit(final Player fighter) {
-        if (this.variant != null)
+        if (this.arena.isSpleef())
+            fighter.getInventory().addItem(Spleef.shovel());
+        else if (this.variant != null)
             this.variant.equip(fighter, this.arena);
         else if (this.arena.isGiveKnockBackStick() && !this.arena.isCombo()) // combo arenas: fists
             fighter.getInventory().addItem(SlapFish.create());
@@ -397,7 +399,8 @@ public class Fight {
         BotPuppet.hideFrom(this); // other matches' bots in this arena, from now on
         // Crystal arenas: the snapshot is taken while everyone waits for the countdown (nobody can be in the
         // arena then: it's empty, and a new match only starts once the last one's reset is done)
-        if (arena.isCrystalPvp())
+        // (spleef too: its broken floor is put back the same way)
+        if (arena.isCrystalPvp() || arena.isSpleef())
             this.arenaReady = CrystalPvp.takeSnapshot(this);
         this.pickVariant();
         if (this.variant != null)
@@ -974,7 +977,7 @@ public class Fight {
             });
             // A crystal arena is pasted back in full: nobody fights in it until that's done (its reward
             // hologram says it's resetting meanwhile)
-            if (this.arena.isCrystalPvp() && !reset.isDone()) {
+            if ((this.arena.isCrystalPvp() || this.arena.isSpleef()) && !reset.isDone()) {
                 this.arena.setResetting(true);
                 reset.orTimeout(2, java.util.concurrent.TimeUnit.MINUTES).whenComplete((ok, error) -> {
                     if (error != null)
