@@ -153,6 +153,33 @@ public final class CrystalArenaListener implements Listener {
         e.setExpToDrop(0); // the block itself drops, as a match item (see onItemSpawn)
     }
 
+    /**
+     * A placement in or by a crystal arena that ended up refused (by this plugin or any other): the player's game is
+     * sent the real blocks again a tick later. A Java client gets them back by itself, but a Bedrock one (through
+     * Geyser) can keep showing what it put down - a shulker that isn't there, a ghost block.
+     */
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void resendRefused(final BlockPlaceEvent e) {
+        if (!e.isCancelled())
+            return;
+        final Block placed = e.getBlockPlaced();
+        final Player player = e.getPlayer();
+        if (CrystalPvp.arenaAt(placed) == null && CrystalPvp.arenaAt(e.getBlockAgainst()) == null)
+            return;
+        final List<Block> spots = new ArrayList<>();
+        spots.add(placed);
+        spots.add(e.getBlockAgainst());
+        spots.add(placed.getRelative(org.bukkit.block.BlockFace.UP)); // a two-high block's top half
+        Threads.entityLater(player, () -> {
+            if (!player.isOnline() || !player.getWorld().equals(placed.getWorld()))
+                return;
+            final java.util.Map<Location, org.bukkit.block.data.BlockData> real = new java.util.HashMap<>();
+            for (final Block b : spots)
+                real.put(b.getLocation(), b.getBlockData());
+            player.sendMultiBlockChange(real);
+        }, 1L);
+    }
+
     /** A charged anchor blows up when used outside the nether, unless it's being charged further with glowstone. */
     private static boolean anchorWillExplode(final Block anchor, final org.bukkit.inventory.ItemStack inHand) {
         if (!(anchor.getBlockData() instanceof org.bukkit.block.data.type.RespawnAnchor data) || data.getCharges() == 0)
