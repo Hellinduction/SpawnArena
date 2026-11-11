@@ -236,7 +236,7 @@ final class BotPuppet {
             should.add(this.opponent);
         final org.bukkit.Location bodyAt = body.getLocation();
         for (final Player p : body.getWorld().getNearbyPlayers(bodyAt, VIEW_DISTANCE))
-            if (!p.equals(this.opponent) && !this.inOtherMatchHere(p) && withinView(p, bodyAt))
+            if (!p.equals(this.opponent) && !this.inOtherMatchHere(p) && withinView(p, bodyAt) && !ArenaReplay.watchingIn(p, this.bot.getMatch().arena()))
                 should.add(p);
         // Watchers: shown its body (see watchers)
         final java.util.Set<Player> watch = new java.util.HashSet<>(should);
@@ -334,6 +334,8 @@ final class BotPuppet {
                         why = "further than " + (int) VIEW_DISTANCE + " blocks";
                     else if (puppet.inOtherMatchHere(p))
                         why = "in another match in this arena";
+                    else if (ArenaReplay.watchingIn(p, puppet.bot.getMatch().arena()))
+                        why = "watching a replay here";
                     else if (!withinView(p, at))
                         why = "past their view distance (server " + p.getViewDistance() + ", their game " + p.getClientViewDistance() + " chunks: "
                                 + (int) Math.max(16, (chunks - 1) * 16) + " blocks)";

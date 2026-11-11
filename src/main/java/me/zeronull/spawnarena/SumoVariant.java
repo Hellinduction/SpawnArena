@@ -211,31 +211,47 @@ public enum SumoVariant {
                     player.addPotionEffect(new PotionEffect(PotionEffectType.JUMP_BOOST, 20 * 60 * 20, jump, false, false, true));
                 player.addPotionEffect(new PotionEffect(PotionEffectType.SLOW_FALLING, 20 * 60 * 20, 0, false, false, true));
             }
+            case ARCHER -> player.getInventory().addItem(SlapFish.tag(this.heldItem()), SlapFish.tag(new ItemStack(Material.ARROW)));
+            case SNOWBALL -> player.getInventory().addItem(SlapFish.tag(this.heldItem())); // never runs out
+            case COMBO -> { } // fists only
+            case SPEAR -> {
+                player.getInventory().addItem(SlapFish.tag(this.heldItem()));
+                // Lunging costs hunger, and can't be done once it's low: kept full for the whole match
+                player.addPotionEffect(new PotionEffect(PotionEffectType.SATURATION, 20 * 60 * 20, 0, false, false, false));
+            }
+            case ROD -> player.getInventory().addItem(SlapFish.tag(this.heldItem()));
+        }
+    }
+
+    /**
+     * The item this variant's fighters hold (enchanted as they're given it), or null when it's the arena's own (the Slap
+     * Fish) or fists. The kit and replays both use it, so what a replay shows is what they had.
+     */
+    public ItemStack heldItem() {
+        return switch (this) {
             case ARCHER -> {
                 final ItemStack bow = new ItemStack(Material.BOW);
                 enchant(bow, "punch", 2);
                 enchant(bow, "infinity", 1);
                 bow.editMeta(meta -> meta.setUnbreakable(true));
-                player.getInventory().addItem(SlapFish.tag(bow), SlapFish.tag(new ItemStack(Material.ARROW)));
+                yield bow;
             }
-            case SNOWBALL -> player.getInventory().addItem(SlapFish.tag(new ItemStack(Material.SNOWBALL, 16))); // never runs out
-            case COMBO -> { } // fists only
+            case SNOWBALL -> new ItemStack(Material.SNOWBALL, 16);
             case SPEAR -> {
                 final ItemStack spear = new ItemStack(Material.IRON_SPEAR);
                 enchant(spear, "lunge", 3);
                 enchant(spear, "knockback", 1); // a jab only pushes them back with Knockback on it
                 spear.editMeta(meta -> meta.setUnbreakable(true));
-                player.getInventory().addItem(SlapFish.tag(spear));
-                // Lunging costs hunger, and can't be done once it's low: kept full for the whole match
-                player.addPotionEffect(new PotionEffect(PotionEffectType.SATURATION, 20 * 60 * 20, 0, false, false, false));
+                yield spear;
             }
             case ROD -> {
                 final ItemStack rod = new ItemStack(Material.FISHING_ROD);
                 enchant(rod, "knockback", 1);
                 rod.editMeta(meta -> meta.setUnbreakable(true));
-                player.getInventory().addItem(SlapFish.tag(rod));
+                yield rod;
             }
-        }
+            default -> null;
+        };
     }
 
     private static void enchant(final ItemStack item, final String key, final int level) {

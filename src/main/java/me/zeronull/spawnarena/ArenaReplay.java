@@ -54,6 +54,13 @@ public final class ArenaReplay {
     /** Further than this from the arena, the replay closes */
     private static final double MAX_AWAY = 100;
     private ScheduledTask task;
+    /**
+     * Live fighters in this arena hidden from the viewer while they watch (so the replay isn't mixed up with matches being
+     * played): looked at again every few ticks, and shown again as they stop fighting or the replay ends. On the viewer's
+     * thread only.
+     */
+    private final java.util.Set<UUID> hiddenFighters = new java.util.HashSet<>();
+    private int ticks;
     private static Object sharedFlags, poseData, customisation, crouching, standing;
 
     /** One fighter, as drawn for the viewer. */
@@ -209,14 +216,10 @@ public final class ArenaReplay {
 
     /** What the match's fighters held: the random sumo variant's item, or the Slap Fish (fists in a combo arena). */
     private static ItemStack handItem(final SumoVariant v, final Arena arena) {
-        return switch (v) {
-            case ARCHER -> new ItemStack(Material.BOW);
-            case SNOWBALL -> new ItemStack(Material.SNOWBALL);
-            case ROD -> new ItemStack(Material.FISHING_ROD);
-            case SPEAR -> new ItemStack(Material.IRON_SPEAR);
-            case COMBO -> new ItemStack(Material.AIR);
-            default -> arena.isCombo() ? new ItemStack(Material.AIR) : SlapFish.create();
-        };
+        final ItemStack held = v.heldItem(); // (enchanted as they had it)
+        if (held != null)
+            return held;
+        return v == SumoVariant.COMBO || arena.isCombo() ? new ItemStack(Material.AIR) : SlapFish.create();
     }
 
     private void begin(final boolean moved) {
@@ -326,6 +329,8 @@ public final class ArenaReplay {
             this.overTicks = 0;
         if (!this.paused)
             this.pausedTicks = 0;
+        if (this.ticks++ % 5 == 0)
+            this.hideFighters();
         try {
             if (!this.paused && !this.over) {
                 this.clock += 50 * this.speed;
@@ -448,6 +453,70 @@ public final class ArenaReplay {
         return f == null ? "" : f.getParentFile().getName() + "/" + f.getName();
     }
 
+    /** The players fighting in the replay's arena now (any match there). */
+    private java.util.Set<Player> liveFighters() {
+        final java.util.Set<Player> out = new java.util.HashSet<>();
+        final Arena arena = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(this.rec.arena);
+        if (arena != null)
+            for (final Fight fight : arena.getFights())
+                out.addAll(fight.getFighters());
+        out.remove(this.viewer);
+        return out;
+    }
+
+    /** Hides the arena's live fighters from the viewer, and shows again those that have stopped fighting. */
+    private void hideFighters() {
+        final java.util.Set<Player> live = this.liveFighters();
+        for (final java.util.Iterator<UUID> it = this.hiddenFighters.iterator(); it.hasNext(); ) {
+            final Player p = Bukkit.getPlayer(it.next());
+            if (p == null) {
+                it.remove();
+            } else if (!live.contains(p)) {
+                it.remove();
+                this.showAgain(p);
+            }
+        }
+        for (final Player p : live)
+            if (this.viewer.canSee(p) && p.getWorld() == this.viewer.getWorld()) {
+                this.viewer.hidePlayer(SpawnArena.INSTANCE, p);
+                this.hiddenFighters.add(p.getUniqueId());
+            }
+    }
+
+    /** Every fighter the replay hid, shown again. */
+    private void showFighters() {
+        for (final UUID id : this.hiddenFighters) {
+            final Player p = Bukkit.getPlayer(id);
+            if (p != null)
+                this.showAgain(p);
+        }
+        this.hiddenFighters.clear();
+    }
+
+    /**
+     * Shows {@code p} to the viewer again, unless a match hides them from each other (the viewer has since started
+     * fighting in another match in the same arena: MULTI arenas hide other matches, with the same hiding).
+     */
+    private void showAgain(final Player p) {
+        if (!p.isOnline())
+            return;
+        final Arena mine = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(this.viewer);
+        final Fight myFight = mine == null ? null : mine.getFight(this.viewer);
+        if (myFight != null) {
+            final Arena theirs = SpawnArena.arenas.of(p);
+            final Fight theirFight = theirs == null ? null : theirs.getFight(p);
+            if (theirFight != null && theirFight != myFight && theirs.getArenaName().equalsIgnoreCase(mine.getArenaName()))
+                return;
+        }
+        this.viewer.showPlayer(SpawnArena.INSTANCE, p);
+    }
+
+    /** Whether {@code p} is watching a replay of a match in this arena (its live bots aren't drawn for them). */
+    public static boolean watchingIn(final Player p, final Arena arena) {
+        final ArenaReplay r = WATCHING.get(p.getUniqueId());
+        return r != null && arena != null && r.rec.arena.equalsIgnoreCase(arena.getArenaName());
+    }
+
     /** Takes the players away (and the ice), and, if asked and they were brought here, sends the viewer back. */
     public void stop(final boolean sendBack) {
         if (!WATCHING.remove(this.viewer.getUniqueId(), this))
@@ -457,6 +526,7 @@ public final class ArenaReplay {
             t.cancel();
         if (!this.viewer.isOnline())
             return;
+        this.showFighters();
         for (final Puppet p : this.puppets)
             if (p.shown)
                 this.despawn(p);
