@@ -128,7 +128,10 @@ public final class CrystalView implements Listener {
         private final Set<UUID> viewers = new HashSet<>();
         /** The fighters, shown to the watchers on spawn */
         private final CrystalViewPlayers fightersShown = new CrystalViewPlayers();
-        /** The real arena was changed (no match is fought in it, so nothing else puts it back) */
+        /**
+         * The real arena was changed while no match was fought in it (staff, or something left over), so nothing else
+         * puts it back. A match fought in the real arena itself (a tournament's) puts its own changes back as it ends.
+         */
         volatile boolean realTouched;
         /** What changed it first since the last putting back (for the log) */
         volatile String touchedBy;
@@ -166,8 +169,9 @@ public final class CrystalView implements Listener {
                     it.remove();
                 }
             }
-            // The real arena was built in or blown up (staff, or something left over): put back as soon as no match is on
-            if (this.realTouched && !this.real.isResetting()
+            // The real arena was built in or blown up (staff, or something left over): put back as soon as no match is on,
+            // in a copy or in the real arena itself (a tournament's, which puts its own blocks back when it ends)
+            if (this.realTouched && !this.real.isResetting() && this.real.getFights().isEmpty()
                     && CrystalCopies.of(this.real).stream().allMatch(c -> c.getFights().isEmpty())) {
                 this.realTouched = false;
                 SpawnArena.INSTANCE.getLogger().info("Putting back the viewing arena of " + this.real.getArenaName() + " (changed by "
@@ -637,6 +641,9 @@ public final class CrystalView implements Listener {
         if (arena == null)
             return;
         final View view = VIEWS.get(arena.getArenaName().toLowerCase(Locale.ROOT));
+        // A match fought in the real arena (a tournament's) changes it on purpose, and puts it back itself as it ends
+        if (view != null && !arena.getFights().isEmpty())
+            return;
         if (view != null) {
             if (!view.realTouched || view.touchedBy == null)
                 view.touchedBy = (by == null ? "a change" : by) + " at " + at.getBlockX() + " " + at.getBlockY() + " " + at.getBlockZ();
