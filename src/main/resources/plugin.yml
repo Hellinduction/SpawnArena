@@ -134,6 +134,13 @@ commands:
     permission: spawnarena.arenareplay
     permission-message: "§cYou don't have permission!"
 
+  matches:
+    description: Your recorded matches, to watch back (opens on the arena you are at)
+    aliases: [matchhistory, replays]
+    usage: "/matches"
+    permission: spawnarena.matches
+    permission-message: "§cYou don't have permission!"
+
   arenawatch:
     description: Watch a MULTI crystal arena's matches (the viewing arena, or one match up close) - for an NPC to run
     usage: "/arenawatch <arena>"
@@ -239,7 +246,14 @@ permissions:
     default: op
   spawnarena.arenacheck:
     default: op
+  spawnarena.matches:
+    description: Can open /matches and watch their own recorded matches back
+    default: true
   spawnarena.arenareplay:
+    description: Can work the controls of a replay (everyone, for /matches); watching others' needs spawnarena.arenareplay.others
+    default: true
+  spawnarena.arenareplay.others:
+    description: Can watch anyone's recorded matches (/arenareplay <player>, list, file)
     default: op
   spawnarena.bypasskickout:
     description: Can stay inside arenas during other players' fights

@@ -49,6 +49,13 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
         final String sub = args[0].toLowerCase(Locale.ROOT);
         if (CONTROLS.contains(sub))
             return this.control(player, sub, args);
+        // Anyone can work the controls of a replay they're watching (/matches); watching others' matches is for staff,
+        // and a player may only open a recording by file if they fought in it (the "Watch again" button)
+        final boolean staff = player.hasPermission("spawnarena.arenareplay.others");
+        if (!staff && !sub.equals("file")) {
+            player.sendMessage("§cUse /matches to watch your own matches back.");
+            return true;
+        }
         if (sub.equals("list")) {
             if (args.length < 2) {
                 player.sendMessage("§cUsage: /arenareplay list <player> [page]");
@@ -74,7 +81,22 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
                 player.sendMessage("§cNo recording " + args[1] + ".");
                 return true;
             }
-            Threads.async(() -> watch(player, file));
+            Threads.async(() -> {
+                if (!staff) {
+                    final Recording header;
+                    try {
+                        header = Recording.header(file);
+                    } catch (final IOException e) {
+                        tell(player, "<red>No recording " + esc(args[1]) + ".");
+                        return;
+                    }
+                    if (header.fighter(player.getUniqueId()) == null) {
+                        tell(player, "<red>You can only watch your own matches. <gray>(/matches)");
+                        return;
+                    }
+                }
+                watch(player, file);
+            });
             return true;
         }
         final int n = args.length >= 2 ? number(args[1], 1) : 1;
@@ -215,7 +237,15 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
             tell(player, "<red>Couldn't read that recording (" + esc(e.getMessage()) + ").");
             return;
         }
-        Threads.entity(player, () -> ArenaReplay.start(player, rec));
+        Threads.entity(player, () -> {
+            // A player watching their own: not mid-fight, in a queue or away from spawn
+            final String problem = player.hasPermission("spawnarena.arenareplay.others") ? null
+                    : me.zeronull.spawnarena.MatchHistoryMenu.cantWatch(player, rec.arena);
+            if (problem != null)
+                player.sendMessage("§c" + problem);
+            else
+                ArenaReplay.start(player, rec);
+        });
     }
 
     private static String esc(final String s) {

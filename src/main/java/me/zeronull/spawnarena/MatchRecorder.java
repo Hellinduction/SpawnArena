@@ -331,7 +331,9 @@ public final class MatchRecorder implements Listener {
                 return;
             final String name = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HHmmss")) + "_" + this.fight.getArena().getArenaName()
                     + "_" + String.join("-", this.tracks.stream().map(t -> t.player.getName()).toList()) + ".sarec.gz";
-            this.write(new File(dir, name.replaceAll("[^A-Za-z0-9_.-]", "")));
+            final File file = new File(dir, name.replaceAll("[^A-Za-z0-9_.-]", ""));
+            this.write(file);
+            MatchIndex.added(file); // for its fighters' /matches
             prune();
         } catch (final Exception e) {
             SpawnArena.INSTANCE.getLogger().log(Level.WARNING, "Couldn't save a match recording", e);
@@ -410,7 +412,7 @@ public final class MatchRecorder implements Listener {
         }
     }
 
-    /** Past recordingMaxMb in all, the oldest recordings go (and any day folder left empty). */
+    /** Past recordingMaxMb in all, the oldest recordings go (and any day folder left empty), but never a favourited one. */
     private static void prune() throws IOException {
         final long max = (SpawnArena.settings == null ? 2048L : SpawnArena.settings.recordingMaxMb) * 1024L * 1024L;
         if (max <= 0)
@@ -424,9 +426,12 @@ public final class MatchRecorder implements Listener {
         if (total <= max)
             return;
         files.sort(Comparator.comparingLong(File::lastModified));
+        final java.util.Set<String> favourites = MatchFavourites.all(); // kept: someone favourited them in /matches
         for (final File f : files) {
             if (total <= max)
                 break;
+            if (favourites.contains(MatchFavourites.key(f)))
+                continue;
             final long size = f.length();
             if (f.delete())
                 total -= size;

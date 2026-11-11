@@ -93,6 +93,8 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new MatchRecorder(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaReplay.Events(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new BotMenu.Clicks(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new MatchHistoryMenu.Clicks(), this);
+        MatchIndex.load();
         Bukkit.getServer().getPluginManager().registerEvents(new BotSkins(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.EgapCooldown(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.FightStatsListener(), this);
@@ -187,6 +189,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("arenatotems", new me.zeronull.spawnarena.commands.impl.ArenaTotemsCommand());
         this.registerCommand("arenacheck", new me.zeronull.spawnarena.commands.impl.ArenaCheckCommand());
         this.registerCommand("arenareplay", new me.zeronull.spawnarena.commands.impl.ArenaReplayCommand());
+        this.registerCommand("matches", new me.zeronull.spawnarena.commands.impl.MatchesCommand());
         this.registerCommand("arenaduel", new ArenaDuelCommand());
         this.registerCommand("arenawins", new ArenaWinsCommand());
         this.registerCommand("leavearena", new me.zeronull.spawnarena.commands.impl.LeaveArenaCommand());

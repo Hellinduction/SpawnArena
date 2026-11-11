@@ -231,6 +231,9 @@ public final class ArenaReplay {
                 Placeholder.unparsed("length", time(this.endMs))));
         if (moved)
             this.viewer.sendMessage(MiniMessage.miniMessage().deserialize("<gray>Brought you to the arena: <click:run_command:/arenareplay back><aqua>[back]</aqua></click> takes you back."));
+        // Its command, to copy or put in chat (and to favourite it, if it's one of theirs)
+        if (this.rec.file != null)
+            MatchHistoryMenu.sendCommand(this.viewer, this.rec.file, this.rec.fighter(this.viewer.getUniqueId()) != null);
         this.controls();
         this.task = this.viewer.getScheduler().runAtFixedRate(SpawnArena.INSTANCE, t -> this.tick(), () -> this.stop(false), 1L, 1L);
     }
