@@ -47,7 +47,7 @@ public final class CoreProtectSkip {
             plugin.getLogger().warning("Couldn't keep CoreProtect out of crystal arenas (" + e + ").");
             return;
         }
-        Threads.globalTimer(task -> refresh(), 100L, 600L);
+        Threads.globalTimer(task -> refresh(), 20L, 100L); // (every 5 seconds: a new arena or copy is covered soon after)
     }
 
     private static boolean skip(final Event event) {
