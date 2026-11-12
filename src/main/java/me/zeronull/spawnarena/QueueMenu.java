@@ -16,13 +16,18 @@ import org.jetbrains.annotations.NotNull;
 import java.util.ArrayList;
 import java.util.List;
 
-/** The per-arena "1v1 / Auto / 2v2" queue picker opened by /joinarenaqueue <arena> menu. */
+/** The per-arena "1v1 / Auto / 2v2" queue picker opened by /joinarenaqueue <arena> menu (spleef arenas: and free-for-all rounds). */
 public final class QueueMenu implements InventoryHolder {
     public static final int SLOT_1V1 = 11;
     public static final int SLOT_AUTO = 13;
     public static final int SLOT_2V2 = 15;
     /** Sumo arenas: practice against a bot. */
     public static final int SLOT_BOT = 22;
+
+    /** Spleef arenas: their free-for-all rounds' button, under the others (above them where the bot's button is there). */
+    public static int ffaSlot(final Arena arena) {
+        return BotFight.available(arena) ? 4 : 22;
+    }
 
     private final String arenaName;
     private final Inventory inventory;
@@ -96,6 +101,21 @@ public final class QueueMenu implements InventoryHolder {
 
         if (BotFight.available(arena))
             this.inventory.setItem(SLOT_BOT, BotMenu.menuItem());
+
+        // Spleef: free-for-all rounds (everyone waiting goes in together)
+        if (arena.isSpleef()) {
+            final int waiting = arena.queue.size(FightMode.FREE_FOR_ALL), left = arena.queue.ffaSecondsLeft();
+            final ItemStack ffa = item(Material.SNOWBALL, "<light_purple><bold>Free-for-all</bold>", List.of(
+                    "<gray>Players waiting: <white>" + waiting + "/" + ArenaQueue.ffaMaxPlayers(),
+                    left >= 0 ? "<gray>Starts in <white>" + left + "s" : waiting >= 2 ? "<gray>Starts once the arena's free" : "<gray>Starts once 2 are in",
+                    "<gray>Rounds in progress: <white>" + matches(arena, FightMode.FREE_FOR_ALL),
+                    "<gray>Everyone against everyone;",
+                    "<gray>the last one standing wins.",
+                    "",
+                    action(current == FightMode.FREE_FOR_ALL)));
+            ffa.setAmount(Math.max(1, Math.min(64, waiting)));
+            this.inventory.setItem(ffaSlot(arena), ffa);
+        }
     }
 
     private static String action(final boolean inThisQueue) {

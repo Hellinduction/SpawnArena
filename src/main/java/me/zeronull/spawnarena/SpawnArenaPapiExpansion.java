@@ -35,8 +35,9 @@ import java.util.UUID;
  *       they're on right now in that free-for-all, 0 when not in it; best_streak: their best ever)
  *   Leaderboards take any type from BoardStats (wins, streak, best_streak, elo, wlr, playtime, ffa_kills, ffa_deaths,
  *       ffa_kdr, ffa_streak (live), ffa_best_streak) in top_player_ / top_value_ and my_rank_ / my_value_
- *   %spawnarena_queue_<1v1|2v2|total>_<arena>%    players waiting
- *   %spawnarena_matches_<1v1|2v2|total>_<arena>%  matches in progress
+ *   %spawnarena_queue_<1v1|2v2|ffa|total>_<arena>%    players waiting (ffa: a spleef arena's free-for-all rounds)
+ *   %spawnarena_matches_<1v1|2v2|ffa|total>_<arena>%  matches (ffa: free-for-all rounds) in progress
+ *   %spawnarena_queue_ffastarts_<arena>%  seconds until the waiting free-for-all round starts (empty while it isn't counting down)
  */
 public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
 
@@ -210,7 +211,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         return null;
     }
 
-    /** queue_<1v1|2v2|total>_<arena> (players waiting), matches_<1v1|2v2|total>_<arena> (matches in progress) */
+    /** queue_<1v1|2v2|ffa|total>_<arena> (players waiting), matches_<1v1|2v2|ffa|total>_<arena> (matches in progress), queue_ffastarts_<arena> */
     private static String queue(final String params) {
         final String[] parts = params.split("_", 3);
         if (parts.length < 3 || SpawnArena.arenas == null)
@@ -219,6 +220,11 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         if (arena == null)
             return null;
 
+        // A spleef arena's free-for-all round: the seconds until it starts (empty while it isn't counting down)
+        if (parts[0].equals("queue") && parts[1].equals("ffastarts")) {
+            final int left = arena.queue.ffaSecondsLeft();
+            return left < 0 ? "" : String.valueOf(left);
+        }
         final FightMode mode = FightMode.fromLabel(parts[1]);
         if (mode == null && !parts[1].equals("total"))
             return null;

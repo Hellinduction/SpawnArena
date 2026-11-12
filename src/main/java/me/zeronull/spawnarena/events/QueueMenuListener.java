@@ -46,24 +46,27 @@ public final class QueueMenuListener implements Listener {
         if (!(e.getWhoClicked() instanceof Player player) || e.getClickedInventory() != e.getView().getTopInventory())
             return;
 
+        // Spleef: its free-for-all rounds (open to everyone, like 1v1)
+        final Arena here = SpawnArena.arenas.of(menu.getArenaName());
+        final boolean ffa = here != null && here.isSpleef() && e.getSlot() == QueueMenu.ffaSlot(here);
+
         // Sumo: the bot menu
-        if (e.getSlot() == QueueMenu.SLOT_BOT) {
-            final Arena arena = SpawnArena.arenas.of(menu.getArenaName());
-            if (me.zeronull.spawnarena.BotFight.available(arena))
-                me.zeronull.spawnarena.Threads.entityLater(player, () -> me.zeronull.spawnarena.BotMenu.open(player, arena), 1L);
+        if (!ffa && e.getSlot() == QueueMenu.SLOT_BOT) {
+            if (me.zeronull.spawnarena.BotFight.available(here))
+                me.zeronull.spawnarena.Threads.entityLater(player, () -> me.zeronull.spawnarena.BotMenu.open(player, here), 1L);
             return;
         }
 
-        final FightMode mode = switch (e.getSlot()) {
+        final FightMode mode = ffa ? FightMode.FREE_FOR_ALL : switch (e.getSlot()) {
             case QueueMenu.SLOT_1V1 -> FightMode.ONE_V_ONE;
             case QueueMenu.SLOT_2V2 -> FightMode.TWO_V_TWO;
             case QueueMenu.SLOT_AUTO -> null;
             default -> FightMode.ONE_V_ONE; // never used: filtered below
         };
-        if (e.getSlot() != QueueMenu.SLOT_1V1 && e.getSlot() != QueueMenu.SLOT_2V2 && e.getSlot() != QueueMenu.SLOT_AUTO)
+        if (!ffa && e.getSlot() != QueueMenu.SLOT_1V1 && e.getSlot() != QueueMenu.SLOT_2V2 && e.getSlot() != QueueMenu.SLOT_AUTO)
             return;
         // The permission could have been taken away while the menu was open
-        if (e.getSlot() != QueueMenu.SLOT_1V1 && !player.hasPermission(me.zeronull.spawnarena.commands.impl.JoinArenaQueueCommand.MODES_PERMISSION)) {
+        if (!ffa && e.getSlot() != QueueMenu.SLOT_1V1 && !player.hasPermission(me.zeronull.spawnarena.commands.impl.JoinArenaQueueCommand.MODES_PERMISSION)) {
             closeLater(player);
             player.sendMessage(ChatColor.RED + "You can only queue 1v1.");
             return;
