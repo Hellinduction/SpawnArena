@@ -39,16 +39,17 @@ import java.util.zip.GZIPOutputStream;
  * recordings/&lt;date&gt;/ in the plugin's folder (about 10 KB for a 30-second 1v1); past recordingMaxMb, the oldest go.
  * Bot matches aren't recorded. Spleef: every floor block broken too, when, by whom and how (to be shown in replays and
  * checked). Crystal PvP too: blocks placed, broken and blown up, crystals placed, hit and gone, totems popped, and each
- * fighter's health and what they wear and hold as it changes. The format: see {@link #write}.
+ * fighter's health and what they wear and hold as it changes. A crystal free-for-all is recorded in parts (people come
+ * and go): see {@link #ffaJoined}. The format: see {@link #write}.
  */
 public final class MatchRecorder implements Listener {
-    private static final int FORMAT = 4;
+    private static final int FORMAT = 5;
     /** The most events kept for one match (a long crystal match: a few thousand) */
     private static final int MAX_EVENTS = 50_000;
     /** The most block changes kept for one match (a long spleef free-for-all breaks a few hundred) */
     private static final int MAX_BLOCKS = 20_000;
     /** Header flags (format 3): a spleef match; a free-for-all round (each fighter on a team of their own); (format 4) crystal PvP */
-    static final int SPLEEF = 1, FREE_FOR_ALL = 2, CRYSTAL = 4;
+    static final int SPLEEF = 1, FREE_FOR_ALL = 2, CRYSTAL = 4, SESSION = 8;
     /** The longest it records a match for (ten minutes); after that it stops taking frames */
     private static final int MAX_FRAMES = 20 * 60 * 10;
     private static final Map<Fight, MatchRecorder> RECORDING = new ConcurrentHashMap<>();
@@ -60,7 +61,10 @@ public final class MatchRecorder implements Listener {
     private final Fight fight;
     private final long startedAt = System.currentTimeMillis();
     private final Location centre;
-    private final List<Track> tracks = new ArrayList<>();
+    // (a free-for-all's part gets fighters as they come in, while others' frames are being taken)
+    private final List<Track> tracks = new java.util.concurrent.CopyOnWriteArrayList<>();
+    /** A part of a free-for-all session (people come and go): see {@link #ffaJoined} */
+    private final boolean session;
     private volatile List<Player> winners;
     /** Blocks changed during the match (spleef's floor broken), in order */
     private final List<BlockChange> blocks = new ArrayList<>();
@@ -76,7 +80,7 @@ public final class MatchRecorder implements Listener {
     private final List<Event> events = new ArrayList<>();
 
     /** Event kinds: see {@link #write} */
-    static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6;
+    static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6, KILL = 7, DEATH = 8;
     /** The equipment slots EQUIP numbers (0 to 5) */
     private static final org.bukkit.inventory.EquipmentSlot[] GEAR = {org.bukkit.inventory.EquipmentSlot.HAND,
             org.bukkit.inventory.EquipmentSlot.OFF_HAND, org.bukkit.inventory.EquipmentSlot.FEET, org.bukkit.inventory.EquipmentSlot.LEGS,
@@ -103,7 +107,12 @@ public final class MatchRecorder implements Listener {
 
     /** One fighter's frames. */
     private static final class Track {
-        final Player player;
+        /** (a free-for-all: the one who came back in, after leaving the server and joining again) */
+        volatile Player player;
+        /** A free-for-all: in the arena now (frames are only taken then); kills and deaths in this part */
+        volatile boolean in = true;
+        final java.util.concurrent.atomic.AtomicInteger kills = new java.util.concurrent.atomic.AtomicInteger(),
+                deaths = new java.util.concurrent.atomic.AtomicInteger();
         final int team;
         /** Their stats there as the match started (filled in shortly after, off the main thread) */
         volatile int elo = StatsManager.START_ELO, wins, losses, winStreak, bestWinStreak, fightSeconds;
@@ -141,14 +150,20 @@ public final class MatchRecorder implements Listener {
     }
 
     private MatchRecorder(final Fight fight, final Location centre) {
+        this(fight, centre, false);
+    }
+
+    private MatchRecorder(final Fight fight, final Location centre, final boolean session) {
         this.fight = fight;
         this.centre = centre;
+        this.session = session;
     }
 
     /** Only listens (swings and hits); recordings are made by {@link #start}. */
     public MatchRecorder() {
         this.fight = null;
         this.centre = null;
+        this.session = false;
     }
 
     private static boolean enabled() {
@@ -178,12 +193,16 @@ public final class MatchRecorder implements Listener {
             OF.put(t.player.getUniqueId(), rec);
             t.task = t.player.getScheduler().runAtFixedRate(SpawnArena.INSTANCE, task -> rec.frame(t), null, 1L, 1L);
         }
-        // Their stats there as it starts, for picking out matches later (the good players', the close ones...)
+        rec.loadStats(rec.tracks);
+    }
+
+    /** Their stats there as it starts, for picking out matches later (the good players', the close ones...). */
+    private void loadStats(final List<Track> tracks) {
         if (SpawnArena.statsManager != null)
             Threads.async(() -> {
                 final StatsManager stats = SpawnArena.statsManager;
-                final String name = arena.getArenaName();
-                for (final Track t : rec.tracks) {
+                final String name = this.fight.getArena().getArenaName();
+                for (final Track t : tracks) {
                     final UUID id = t.player.getUniqueId();
                     t.elo = stats.getElo(id, name);
                     t.wins = stats.getWins(id, name);
@@ -194,6 +213,129 @@ public final class MatchRecorder implements Listener {
                     t.botsBeaten = stats.botWins(id, name);
                 }
             });
+    }
+
+    // ── A crystal free-for-all: recorded in parts ───────────────────────────
+
+    /**
+     * A crystal free-for-all session is recorded in parts, each of crystalFfaRecordingSeconds (and one ends whenever the
+     * arena's put back, and when the session ends): each has everyone who was in at the time (on a team of their own),
+     * from when they came in to when they went out, again if they came back; with their kills and deaths. A part is kept
+     * if at least two of them were in it for 5 seconds or more.
+     */
+    private static boolean recordsSession(final Fight fight) {
+        final Arena arena = fight.getArena();
+        return enabled() && arena.isFfa() && arena.isCrystalPvp() && arena.spawnPoint1 != null && arena.spawnPoint2 != null;
+    }
+
+    private static MatchRecorder newPart(final Fight fight) {
+        final Location a = fight.getArena().spawnPoint1, b = fight.getArena().spawnPoint2;
+        return new MatchRecorder(fight, a.clone().add(b).multiply(0.5), true);
+    }
+
+    private static long partMillis() {
+        return Math.max(30, SpawnArena.settings == null ? 180 : SpawnArena.settings.crystalFfaRecordingSeconds) * 1000L;
+    }
+
+    /** A free-for-all: {@code p} has just come in (any thread). */
+    public static void ffaJoined(final Fight fight, final Player p) {
+        if (!recordsSession(fight))
+            return;
+        RECORDING.computeIfAbsent(fight, MatchRecorder::newPart).admit(p);
+    }
+
+    private void admit(final Player p) {
+        Track t = this.track(p);
+        if (t == null) {
+            synchronized (this.tracks) {
+                if (this.tracks.size() >= 100)
+                    return; // (a fighter's number is a byte)
+                t = new Track(p, this.tracks.size());
+                this.tracks.add(t);
+            }
+            this.loadStats(List.of(t));
+        } else {
+            t.player = p;
+            t.teleported = true; // (back in: not drawn gliding over from where they went out)
+        }
+        t.in = true;
+        OF.put(p.getUniqueId(), this);
+        final Track track = t;
+        final ScheduledTask running = track.task;
+        if (running == null || running.isCancelled())
+            track.task = p.getScheduler().runAtFixedRate(SpawnArena.INSTANCE, task -> this.frame(track), null, 1L, 1L);
+    }
+
+    /** A free-for-all: {@code p} is out (died: with whoever gets the kill), any thread. */
+    public static void ffaOut(final Fight fight, final Player p, final boolean died, final List<UUID> killers) {
+        final MatchRecorder rec = RECORDING.get(fight);
+        final Track t = rec == null || !rec.session ? null : rec.track(p);
+        if (t == null)
+            return;
+        t.in = false;
+        final ScheduledTask task = t.task;
+        if (task != null)
+            task.cancel();
+        t.task = null;
+        OF.remove(p.getUniqueId(), rec);
+        if (!died)
+            return;
+        t.deaths.incrementAndGet();
+        final int victim = rec.tracks.indexOf(t);
+        for (final UUID killer : killers) {
+            Track k = null;
+            for (final Track x : rec.tracks)
+                if (x.player.getUniqueId().equals(killer))
+                    k = x;
+            if (k == null || k == t)
+                continue;
+            k.kills.incrementAndGet();
+            rec.event(rec.tracks.indexOf(k), KILL, out -> out.writeByte(victim));
+        }
+        rec.event(victim, DEATH, out -> {});
+    }
+
+    /** A free-for-all, every second: a part that's run its time is finished, and the next begun. */
+    public static void ffaTick(final Fight fight) {
+        final MatchRecorder rec = RECORDING.get(fight);
+        if (rec != null && rec.session && System.currentTimeMillis() - rec.startedAt >= partMillis())
+            ffaNextPart(fight);
+    }
+
+    /** A free-for-all: this part is finished (the arena's being put back, say), and the next begun with everyone in now. */
+    public static void ffaNextPart(final Fight fight) {
+        final MatchRecorder old = RECORDING.get(fight);
+        if (old == null || !old.session)
+            return;
+        final MatchRecorder next = newPart(fight);
+        if (!RECORDING.replace(fight, old, next))
+            return;
+        old.finishPart();
+        for (final Player p : fight.getFighters())
+            next.admit(p);
+    }
+
+    /** Stops taking this part's frames, and keeps it if at least two were in it for 5 seconds or more. */
+    private void finishPart() {
+        for (final Track t : this.tracks) {
+            final ScheduledTask task = t.task;
+            if (task != null)
+                task.cancel();
+            OF.remove(t.player.getUniqueId(), this);
+        }
+        CRYSTALS.values().removeIf(r -> r == this);
+        if (!SpawnArena.INSTANCE.isEnabled())
+            return;
+        int fought = 0;
+        for (final Track t : this.tracks)
+            synchronized (t) {
+                if (t.frames >= 100)
+                    fought++;
+            }
+        if (fought >= 2) {
+            this.winners = List.of();
+            Threads.async(this::save);
+        }
     }
 
     /**
@@ -262,6 +404,10 @@ public final class MatchRecorder implements Listener {
         final MatchRecorder rec = RECORDING.remove(fight);
         if (rec == null)
             return;
+        if (rec.session) {
+            rec.finishPart();
+            return;
+        }
         for (final Track t : rec.tracks) {
             final ScheduledTask task = t.task;
             if (task != null)
@@ -277,7 +423,7 @@ public final class MatchRecorder implements Listener {
     /** On the fighter's thread, each tick. */
     private void frame(final Track t) {
         final Player p = t.player;
-        if (!p.isOnline() || t.frames >= MAX_FRAMES || this.fight.getState() != FightState.IN_FIGHT)
+        if (!t.in || !p.isOnline() || t.frames >= MAX_FRAMES || this.fight.getState() != FightState.IN_FIGHT)
             return;
         final Location at = p.getLocation();
         // What they wear and hold, and their health, as it changes (the first frame: all of it)
@@ -547,7 +693,8 @@ public final class MatchRecorder implements Listener {
             if (!dir.isDirectory() && !dir.mkdirs())
                 return;
             final String name = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HHmmss")) + "_" + this.fight.getArena().getArenaName()
-                    + "_" + String.join("-", this.tracks.stream().map(t -> t.player.getName()).toList()) + ".sarec.gz";
+                    + "_" + String.join("-", this.tracks.stream().limit(4).map(t -> t.player.getName()).toList())
+                    + (this.tracks.size() > 4 ? "-and" + (this.tracks.size() - 4) : "") + ".sarec.gz";
             final File file = new File(dir, name.replaceAll("[^A-Za-z0-9_.-]", ""));
             this.write(file);
             MatchIndex.added(file); // for its fighters' /matches
@@ -565,11 +712,13 @@ public final class MatchRecorder implements Listener {
      *   the two spawn points; positions below are from it), length (int, ms), a duel (byte, 0/1: not from the
      *   queue), the winning team (byte, 0 or 1; a free-for-all round: the winner's)
      * format 3 on: flags (byte: 1 spleef, 2 a free-for-all round, where each fighter is a team of their own, 0, 1, 2...;
-     *   format 4: 4 crystal PvP)
+     *   format 4: 4 crystal PvP; format 5: 8 a part of a free-for-all session, where people come and go: their frames
+     *   start when they come in and stop while they're out, and "won" is more kills than deaths)
      * fighters (byte), then each: UUID (2 longs), name (text), team (byte, 0 or 1), won (byte, 0/1),
      *   their stats in that arena as it started: Elo, wins, losses, win streak, best win streak, seconds spent
      *   fighting there (ints), bots beaten there (byte: how many levels, then each: level (text), how many (int)),
-     *   ping as it started and on average (ints, ms), client (text: its brand, e.g. "vanilla", "fabric")
+     *   ping as it started and on average (ints, ms), client (text: its brand, e.g. "vanilla", "fabric"), format 5 on:
+     *   kills and deaths (ints: a free-for-all's part only, 0 otherwise)
      * then each fighter's frames, in the same order: count (int), then each frame (26 bytes in format 1, 29 or more
      *   in format 2):
      *   time since the start (int, ms), x, y, z (floats), yaw, pitch (floats),
@@ -593,6 +742,8 @@ public final class MatchRecorder implements Listener {
      *   4 hit (popped) a crystal: its entity id (int)
      *   5 a crystal gone (blown up): its entity id (int)
      *   6 their health changed: health and absorption together (float); also in their first frame
+     *   7 (a free-for-all) got a kill: whom (byte: their place in the list)
+     *   8 (a free-for-all) died (no details)
      * A frame a tick (20 a second) while they're fighting. Read back by {@link Recording}.
      */
     private void write(final File file) throws IOException {
@@ -611,18 +762,18 @@ public final class MatchRecorder implements Listener {
             out.writeByte(this.fight.isDuel() ? 1 : 0);
             int winningTeam = 0;
             for (final Track t : this.tracks)
-                if (won != null && won.contains(t.player))
+                if (this.won(t, won))
                     winningTeam = t.team;
             out.writeByte(winningTeam);
-            out.writeByte((this.fight.getArena().isSpleef() ? SPLEEF : 0) | (this.fight.getMode() == FightMode.FREE_FOR_ALL ? FREE_FOR_ALL : 0)
-                    | (this.fight.getArena().isCrystalPvp() ? CRYSTAL : 0));
+            out.writeByte((this.fight.getArena().isSpleef() ? SPLEEF : 0) | (this.fight.getMode() == FightMode.FREE_FOR_ALL || this.session ? FREE_FOR_ALL : 0)
+                    | (this.fight.getArena().isCrystalPvp() ? CRYSTAL : 0) | (this.session ? SESSION : 0));
             out.writeByte(this.tracks.size());
             for (final Track t : this.tracks) {
                 out.writeLong(t.player.getUniqueId().getMostSignificantBits());
                 out.writeLong(t.player.getUniqueId().getLeastSignificantBits());
                 out.writeUTF(t.player.getName());
                 out.writeByte(t.team);
-                out.writeByte(won != null && won.contains(t.player) ? 1 : 0);
+                out.writeByte(this.won(t, won) ? 1 : 0);
                 for (final int stat : new int[]{t.elo, t.wins, t.losses, t.winStreak, t.bestWinStreak, t.fightSeconds})
                     out.writeInt(stat);
                 final Map<String, Integer> bots = t.botsBeaten;
@@ -636,6 +787,8 @@ public final class MatchRecorder implements Listener {
                     out.writeInt(t.frames == 0 ? t.pingAtStart : (int) (t.pingSum / t.frames));
                 }
                 out.writeUTF(t.client);
+                out.writeInt(t.kills.get());
+                out.writeInt(t.deaths.get());
             }
             for (final Track t : this.tracks)
                 synchronized (t) {
@@ -665,6 +818,11 @@ public final class MatchRecorder implements Listener {
                 }
             }
         }
+    }
+
+    /** Whether they won: in a free-for-all's part, more kills than deaths. */
+    private boolean won(final Track t, final List<Player> winners) {
+        return this.session ? t.kills.get() > t.deaths.get() : winners != null && winners.contains(t.player);
     }
 
     /** Past recordingMaxMb in all, the oldest recordings go (and any day folder left empty), but never a favourited one. */

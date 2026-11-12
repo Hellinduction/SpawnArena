@@ -220,6 +220,10 @@ public final class SettingsConfig {
     @Comment("LuckPerms priority of that suffix: high, so it shows over any suffix a rank or other plugin gives")
     public int topEloSuffixPriority = 1000;
 
+    @Comment({"A crystal free-for-all is recorded (recordSumoMatches) in parts of this many seconds, each with everyone in",
+            "at the time (a part also ends when the arena's put back, and when everyone's gone). 30 at least."})
+    public int crystalFfaRecordingSeconds = 180;
+
     @Comment({"Spleef arenas' free-for-all queue (/joinarenaqueue <arena> ffa): once 2 are waiting, how many seconds more",
             "players get to join before the round starts with everyone waiting (straight away once it's full)."})
     public int spleefFfaWaitSeconds = 15;

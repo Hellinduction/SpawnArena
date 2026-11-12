@@ -658,6 +658,8 @@ public final class CheatChecks {
             return true;
         if (i == 0)
             return false;
+        if (f.time[i] - f.time[i - 1] > 1000)
+            return true; // (out of a free-for-all for a while, and back in)
         final double dx = f.x[i] - f.x[i - 1], dy = f.y[i] - f.y[i - 1], dz = f.z[i] - f.z[i - 1];
         return dx * dx + dy * dy + dz * dz > 2.5 * 2.5;
     }

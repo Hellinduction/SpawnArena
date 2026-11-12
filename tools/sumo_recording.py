@@ -22,7 +22,7 @@ STATE = ["on_ground", "sprinting", "sneaking", "swung", "landed_hit", "was_hit"]
 MORE = ["sent_velocity", "digging", "shot", "teleported", "landed_on_fighter"]
 # Format 3's block changes, and format 4's events
 HOW = {0: "hand", 1: "snowball", 2: "placed", 3: "exploded"}
-EVENTS = {1: "equip", 2: "totem", 3: "crystal_placed", 4: "crystal_hit", 5: "crystal_gone", 6: "health"}
+EVENTS = {1: "equip", 2: "totem", 3: "crystal_placed", 4: "crystal_hit", 5: "crystal_gone", 6: "health", 7: "kill", 8: "death"}
 SLOTS = ["main_hand", "off_hand", "feet", "legs", "chest", "head"]
 FRAME = struct.Struct(">ifffffBB")
 FRAME_2 = struct.Struct(">hB")
@@ -51,7 +51,7 @@ def read(path):
         raise ValueError("not a SpawnArena recording")
     r.at = 5
     version = r.take("i")
-    if version not in (1, 2, 3, 4):
+    if version not in (1, 2, 3, 4, 5):
         raise ValueError("unknown recording format %d" % version)
     match = {"format": version, "started": r.take("q"), "arena": r.text(), "variant": r.text() or None,
              "centre": [r.take("d"), r.take("d"), r.take("d")], "length_ms": r.take("i"),
@@ -59,6 +59,7 @@ def read(path):
     # Format 3: a spleef match, a free-for-all round (each fighter a team of their own)
     flags = r.take("B") if version >= 3 else 0
     match["spleef"], match["free_for_all"], match["crystal"] = bool(flags & 1), bool(flags & 2), bool(flags & 4)
+    match["session"] = bool(flags & 8)  # format 5: a part of a free-for-all session (people come and go)
     for _ in range(r.take("b")):
         most, least = r.take("q"), r.take("q")
         fighter = {"uuid": str(uuid.UUID(int=((most & (2**64 - 1)) << 64) | (least & (2**64 - 1)))),
@@ -72,6 +73,8 @@ def read(path):
             fighter["bots_beaten"][level] = r.take("i")
         fighter["ping_at_start"], fighter["ping_average"] = r.take("i"), r.take("i")
         fighter["client"] = r.text()
+        if version >= 5:
+            fighter["kills"], fighter["deaths"] = r.take("i"), r.take("i")
         match["fighters"].append(fighter)
     for fighter in match["fighters"]:
         frames = []
@@ -115,6 +118,8 @@ def read(path):
                 event["crystal"] = d.take("i")
             elif kind == 6:
                 event["health"] = d.take("f")
+            elif kind == 7:
+                event["victim"] = d.take("b")
             match["events"].append(event)
     return match
 

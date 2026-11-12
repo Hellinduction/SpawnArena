@@ -428,18 +428,22 @@ public final class ArenaReplay {
         // Out of the match (in the water, or eliminated): gone a moment after their last frame. Everyone's frames end with
         // the match, so at the end only the losers go: the winners stay standing
         final long last = f.time[f.frames - 1];
-        final boolean out = !f.won || last < this.lastFrameMs - 1000;
-        final boolean gone = (out && this.clock > last + 400) || this.clock < f.time[0] - 50;
+        // (a free-for-all's part: only those who'd gone by the end go; everyone in at the end stays)
+        final boolean out = (!f.won && !this.rec.session) || last < this.lastFrameMs - 1000;
+        final double[] at = p.at(this.clock);
+        // A free-for-all: out for a while (died or left, then back in), gone in between
+        final int at0 = (int) at[0];
+        final boolean away = at0 + 1 < f.frames && f.time[at0 + 1] - f.time[at0] > 1000 && this.clock > f.time[at0] + 400;
+        final boolean gone = (out && this.clock > last + 400) || this.clock < f.time[0] - 50 || away;
         if (gone) {
             if (p.shown) {
-                // Out at the end of their frames (into the water, playing on): the splash
-                if (this.clock > last && p.frame >= f.frames - 3)
-                    this.sound(p, org.bukkit.Sound.ENTITY_PLAYER_SPLASH);
+                // Out at the end of their frames (playing on): into the water's splash, or (a crystal match) dying
+                if ((this.clock > last && p.frame >= f.frames - 3) || (away && p.frame >= at0 - 2))
+                    this.sound(p, this.rec.crystal ? org.bukkit.Sound.ENTITY_PLAYER_DEATH : org.bukkit.Sound.ENTITY_PLAYER_SPLASH);
                 this.despawn(p);
             }
             return;
         }
-        final double[] at = p.at(this.clock);
         final int frame = (int) at[0];
         final double x = this.cx + at[1], y = this.cy + at[2], z = this.cz + at[3];
         final float yaw = (float) at[4], pitch = (float) at[5];
@@ -585,6 +589,17 @@ public final class ArenaReplay {
                     final Float was = health.put(e.fighter(), value);
                     if (e.ms() > before && was != null && value < was - 0.01f)
                         this.hurt(e.fighter());
+                } else if (e.kind() == Recording.KILL && e.ms() > before) {
+                    // A free-for-all: who killed whom, in chat
+                    try {
+                        final int victim = e.details().readByte();
+                        if (e.fighter() >= 0 && e.fighter() < this.rec.fighters.size() && victim >= 0 && victim < this.rec.fighters.size())
+                            this.viewer.sendMessage(MiniMessage.miniMessage().deserialize("<dark_gray>[Replay]</dark_gray> <gray><killer> killed <victim>",
+                                    Placeholder.unparsed("killer", this.rec.fighters.get(e.fighter()).name),
+                                    Placeholder.unparsed("victim", this.rec.fighters.get(victim).name)));
+                    } catch (final java.io.IOException ignored) {
+                        // a short one
+                    }
                 } else if (e.kind() == Recording.TOTEM && e.ms() > before) {
                     final Puppet p = this.puppet(e.fighter());
                     if (p != null && p.shown) {
@@ -727,6 +742,16 @@ public final class ArenaReplay {
 
     private void finished() {
         this.over = true;
+        if (this.rec.session) {
+            Recording.Fighter best = null;
+            for (final Recording.Fighter f : this.rec.fighters)
+                if (f.kills > 0 && (best == null || f.kills > best.kills))
+                    best = f;
+            this.viewer.sendMessage(MiniMessage.miniMessage().deserialize("<gold>Replay over:</gold> <gray><most> "
+                            + "<click:run_command:/arenareplay file " + this.fileArg() + "><aqua>[Watch again]</aqua></click> <click:run_command:/arenareplay stop><red>[Close]</red></click>",
+                    Placeholder.unparsed("most", best == null ? "nobody got a kill." : "most kills: " + best.name + " (" + best.kills + ").")));
+            return;
+        }
         final List<String> won = new ArrayList<>();
         for (final Recording.Fighter f : this.rec.fighters)
             if (f.won)

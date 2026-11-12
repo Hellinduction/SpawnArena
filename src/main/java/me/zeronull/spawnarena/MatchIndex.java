@@ -17,7 +17,7 @@ import java.util.logging.Level;
  */
 public final class MatchIndex {
     /** One recorded match, as the history menu shows it. */
-    public record Match(File file, String arena, long started, int lengthMs, String variant, boolean duel, List<Side> fighters) {
+    public record Match(File file, String arena, long started, int lengthMs, String variant, boolean duel, List<Side> fighters, boolean session) {
         /** The fighter with this UUID, or null. */
         public Side side(final UUID uuid) {
             for (final Side s : this.fighters)
@@ -41,7 +41,8 @@ public final class MatchIndex {
         }
     }
 
-    public record Side(UUID uuid, String name, int team, boolean won) {}
+    /** One fighter (kills and deaths: a free-for-all session's part only). */
+    public record Side(UUID uuid, String name, int team, boolean won, int kills, int deaths) {}
 
     /** Player -> their matches, newest first. */
     private static final Map<UUID, List<Match>> BY_PLAYER = new ConcurrentHashMap<>();
@@ -87,8 +88,8 @@ public final class MatchIndex {
         }
         final List<Side> sides = new ArrayList<>(r.fighters.size());
         for (final Recording.Fighter f : r.fighters)
-            sides.add(new Side(f.uuid, f.name, f.team, f.won));
-        final Match m = new Match(file, r.arena, r.started, r.lengthMs, r.variant, r.duel, List.copyOf(sides));
+            sides.add(new Side(f.uuid, f.name, f.team, f.won, f.kills, f.deaths));
+        final Match m = new Match(file, r.arena, r.started, r.lengthMs, r.variant, r.duel, List.copyOf(sides), r.session);
         for (final Side s : sides) {
             final List<Match> list = BY_PLAYER.computeIfAbsent(s.uuid(), u -> new ArrayList<>());
             synchronized (list) {

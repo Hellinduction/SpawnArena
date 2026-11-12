@@ -25,8 +25,11 @@ public final class Recording {
     public final int lengthMs;
     public final boolean duel;
     public final List<Fighter> fighters;
-    /** Format 3: a spleef match; a free-for-all round (each fighter a team of their own); format 4: crystal PvP */
-    public final boolean spleef, freeForAll, crystal;
+    /**
+     * Format 3: a spleef match; a free-for-all round (each fighter a team of their own); format 4: crystal PvP; format 5:
+     * a part of a free-for-all session (people come and go: frames stop while they're out)
+     */
+    public final boolean spleef, freeForAll, crystal, session;
     /** The centre positions are from (the middle of the two spawn points), as it was then */
     public final double centreX, centreY, centreZ;
     /** Format 3: blocks changed during the match, in order (empty unless frames were read) */
@@ -51,7 +54,7 @@ public final class Recording {
     }
 
     /** Event kinds */
-    public static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6;
+    public static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6, KILL = 7, DEATH = 8;
 
     /** A crystal placed during the match: its entity id, where (from the centre), who placed it (-1 not known), when it went. */
     public record Crystal(int id, float x, float y, float z, int placedBy, int placedMs, int goneMs) {}
@@ -86,6 +89,8 @@ public final class Recording {
         public boolean won;
         public int elo, wins, losses, winStreak, bestWinStreak, fightSeconds;
         public int pingAtStart, pingAverage;
+        /** Format 5, a free-for-all's part: their kills and deaths in it */
+        public int kills, deaths;
         public String client;
         public int frames;
         public int[] time;
@@ -137,6 +142,7 @@ public final class Recording {
         this.spleef = (flags & 1) != 0;
         this.freeForAll = (flags & 2) != 0;
         this.crystal = (flags & 4) != 0;
+        this.session = (flags & 8) != 0;
         this.centreX = centre[0];
         this.centreY = centre[1];
         this.centreZ = centre[2];
@@ -158,7 +164,7 @@ public final class Recording {
             if (!"SAREC".equals(new String(magic, java.nio.charset.StandardCharsets.US_ASCII)))
                 throw new IOException("not a recording");
             final int format = in.readInt();
-            if (format < 1 || format > 4)
+            if (format < 1 || format > 5)
                 throw new IOException("unknown format " + format);
             final long started = in.readLong();
             final String arena = in.readUTF();
@@ -190,6 +196,10 @@ public final class Recording {
                 f.pingAtStart = in.readInt();
                 f.pingAverage = in.readInt();
                 f.client = in.readUTF();
+                if (format >= 5) {
+                    f.kills = in.readInt();
+                    f.deaths = in.readInt();
+                }
                 fighters.add(f);
             }
             final Recording rec = new Recording(file, format, started, arena, variant, length, duel, fighters, flags, centre);
@@ -285,8 +295,14 @@ public final class Recording {
         }
     }
 
-    /** Who fought whom: "A vs B", "A & B vs C & D", or a free-for-all's "A vs B vs C". */
+    /** Who fought whom: "A vs B", "A & B vs C & D", a free-for-all round's "A vs B vs C", a free-for-all session's "A, B, C". */
     public String versus() {
+        if (this.session) {
+            final List<String> names = new ArrayList<>();
+            for (final Fighter f : this.fighters)
+                names.add(f.name);
+            return names.size() <= 6 ? String.join(", ", names) : String.join(", ", names.subList(0, 6)) + " and " + (names.size() - 6) + " more";
+        }
         final java.util.Map<Integer, List<String>> teams = new java.util.TreeMap<>();
         for (final Fighter f : this.fighters)
             teams.computeIfAbsent(f.team, t -> new ArrayList<>()).add(f.name);

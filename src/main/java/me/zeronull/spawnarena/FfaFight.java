@@ -287,6 +287,7 @@ public final class FfaFight extends Fight {
                 // Their stats (for the hover on kill messages) count from now: each time in is a new life
                 this.stats().reset(player);
                 this.cameInAt.put(player.getUniqueId(), System.currentTimeMillis());
+                MatchRecorder.ffaJoined(this, player);
                 if (SpawnArena.statsManager != null) {
                     final UUID who = player.getUniqueId();
                     final String name = this.arena.getArenaName();
@@ -685,6 +686,7 @@ public final class FfaFight extends Fight {
         });
 
         final boolean death = why == Out.DIED || (why != Out.LEFT && inCombat);
+        MatchRecorder.ffaOut(this, player, death, credit);
         if (death)
             this.death(player, why, credit, lostStreak);
         else if (why == Out.LEFT) {
@@ -1126,6 +1128,7 @@ public final class FfaFight extends Fight {
         if (now < this.nextReset)
             return;
         this.resetting = true;
+        MatchRecorder.ffaNextPart(this); // (a recording's part ends with the arena as it was)
         CrystalPvp.cleanup(this)
                 .thenCompose(ignored -> {
                     final List<java.util.concurrent.CompletableFuture<Boolean>> moved = new ArrayList<>();
@@ -1221,6 +1224,7 @@ public final class FfaFight extends Fight {
         if (this.getState() != FightState.IN_FIGHT)
             return;
         this.resetIfDue();
+        MatchRecorder.ffaTick(this);
         final List<Player> fighting = this.getFighters();
         final int count = fighting.size();
         // MULTI Ice Rink: the fake ice again, in case anything showed them the real floor

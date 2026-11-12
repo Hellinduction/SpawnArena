@@ -116,8 +116,13 @@ public final class MatchHistoryMenu implements InventoryHolder {
             lore.add("<green>Left-click to watch it back");
             lore.add("<yellow>Right-click to " + (favourite ? "unfavourite" : "favourite"));
             lore.add("<aqua>Shift-click for its command in chat");
-            final String vs = against.isEmpty() ? "?" : Recording.opponents(against, m.freeForAll());
-            final ItemStack item = item(side.won() ? Material.LIME_DYE : Material.RED_DYE,
+            final String vs = against.isEmpty() ? "?" : Recording.opponents(against.size() > 5 ? against.subList(0, 5) : against, m.freeForAll())
+                    + (against.size() > 5 ? " and " + (against.size() - 5) + " more" : "");
+            // (a free-for-all session's part: their kills and deaths in it, with those who were in it too)
+            final ItemStack item = m.session()
+                    ? item(side.won() ? Material.LIME_DYE : Material.RED_DYE, "<gold><bold>" + side.kills() + " kill" + (side.kills() == 1 ? "" : "s")
+                            + ", " + side.deaths() + " death" + (side.deaths() == 1 ? "" : "s") + "</bold> <gray>with <white>" + esc(vs), lore)
+                    : item(side.won() ? Material.LIME_DYE : Material.RED_DYE,
                     (side.won() ? "<green><bold>Won</bold>" : "<red><bold>Lost</bold>") + " <gray>vs <white>" + esc(vs), lore);
             if (favourite)
                 item.editMeta(meta -> meta.setEnchantmentGlintOverride(true));

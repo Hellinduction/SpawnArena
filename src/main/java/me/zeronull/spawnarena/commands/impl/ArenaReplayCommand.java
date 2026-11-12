@@ -221,7 +221,7 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
             final int s = r.lengthMs / 1000;
             tell(player, "<click:run_command:/arenareplay file " + path(r.file) + "><hover:show_text:'<gray>Watch it'>"
                     + "<dark_gray>#" + (i + 1) + "</dark_gray> <white>" + when.format(new Date(r.started)) + "</white> <gray>vs " + esc(me.zeronull.spawnarena.Recording.opponents(against, r.freeForAll))
-                    + (v == SumoVariant.CLASSIC ? "" : " (" + v.title + ")") + ", " + (them.won ? "<green>won</green>" : "<red>lost</red>")
+                    + (v == SumoVariant.CLASSIC ? "" : " (" + v.title + ")") + ", " + (r.session ? "<gold>" + them.kills + " kills, " + them.deaths + " deaths</gold>" : them.won ? "<green>won</green>" : "<red>lost</red>")
                     + " <gray>(" + s / 60 + ":" + String.format("%02d", s % 60) + ") <aqua>[Watch]</aqua></hover></click>");
         }
         // Back and on, with where they are between
