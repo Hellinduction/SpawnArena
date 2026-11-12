@@ -17,6 +17,10 @@ import java.util.*;
  * list and their name tag from the teams that name is on (TAB's rank prefix and suffix, the fight outline colour), and
  * it swings, gets hurt and pops totems like a player. Nothing exists on the server: it can't be hit, pushed or shot.
  * A fake goes before the real player can arrive in that world (two entities with one UUID wouldn't both show).
+ *
+ * <p>What's shown of each player comes from a {@link Seen}: the player read as they are (Paper), or as captured on their
+ * own thread a tick or two before (Folia, where the viewing arena's global thread mayn't read them). Everything here runs
+ * on the global thread (the main thread on Paper).
  */
 final class CrystalViewPlayers {
     private static boolean broken;
@@ -37,6 +41,93 @@ final class CrystalViewPlayers {
         double x, y, z;
         float yaw, pitch;
         ItemStack[] gear = new ItemStack[GEAR.length];
+    }
+
+    /**
+     * What's needed of a player to show them: read straight from them ({@link #live}: Paper, on the main thread), or all
+     * captured at once on their own thread ({@link #capture}: Folia), so it's one consistent moment of theirs.
+     */
+    static final class Seen {
+        final Player player;
+        private final boolean live;
+        private final Location at;
+        private final org.bukkit.GameMode mode;
+        private final boolean dead, vanished, onGround;
+        private final Object position, data;
+        private final ItemStack[] gear;
+
+        private Seen(final Player player, final boolean live, final Location at, final org.bukkit.GameMode mode, final boolean dead,
+                     final boolean vanished, final boolean onGround, final Object position, final Object data, final ItemStack[] gear) {
+            this.player = player;
+            this.live = live;
+            this.at = at;
+            this.mode = mode;
+            this.dead = dead;
+            this.vanished = vanished;
+            this.onGround = onGround;
+            this.position = position;
+            this.data = data;
+            this.gear = gear;
+        }
+
+        static Seen live(final Player player) {
+            return new Seen(player, true, null, null, false, false, false, null, null, null);
+        }
+
+        /** Everything about them now. On their own thread. */
+        static Seen capture(final Player player) {
+            Object position = null, data = null;
+            if (ready())
+                try {
+                    final Object nms = handle(player);
+                    position = positionOf.invoke(null, nms);
+                    data = packAll.invoke(getEntityData.invoke(nms));
+                } catch (final ReflectiveOperationException | RuntimeException ignored) {
+                    // shown without them (update gives up on its own if it can't make the packets)
+                }
+            final ItemStack[] gear = new ItemStack[GEAR.length];
+            final EntityEquipment equipment = player.getEquipment();
+            for (int i = 0; i < GEAR.length; i++)
+                gear[i] = equipment.getItem(GEAR[i]).clone();
+            return new Seen(player, false, player.getLocation(), player.getGameMode(), player.isDead(), CrystalView.isVanished(player),
+                    player.isOnGround(), position, data, gear);
+        }
+
+        Location at() {
+            return this.live ? this.player.getLocation() : this.at.clone();
+        }
+
+        org.bukkit.World world() {
+            return this.live ? this.player.getWorld() : this.at.getWorld();
+        }
+
+        org.bukkit.GameMode mode() {
+            return this.live ? this.player.getGameMode() : this.mode;
+        }
+
+        boolean dead() {
+            return this.live ? this.player.isDead() : this.dead;
+        }
+
+        boolean vanished() {
+            return this.live ? CrystalView.isVanished(this.player) : this.vanished;
+        }
+
+        boolean onGround() {
+            return this.live ? this.player.isOnGround() : this.onGround;
+        }
+
+        Object position() throws ReflectiveOperationException {
+            return this.live || this.position == null ? positionOf.invoke(null, handle(this.player)) : this.position;
+        }
+
+        Object data() throws ReflectiveOperationException {
+            return this.live || this.data == null ? packAll.invoke(getEntityData.invoke(handle(this.player))) : this.data;
+        }
+
+        ItemStack gear(final int slot) {
+            return this.live ? this.player.getEquipment().getItem(GEAR[slot]) : this.gear[slot];
+        }
     }
 
     /** Real player -> their fake here */
@@ -124,14 +215,14 @@ final class CrystalViewPlayers {
     }
 
     /** Every tick: {@code shown} appear (at the same coordinates) to {@code to}, and only them. */
-    void update(final List<Player> shown, final List<Player> to) {
+    void update(final List<Seen> shown, final List<Player> to) {
         if (!ready())
             return;
         this.ticks++;
         try {
-            final Map<UUID, Player> now = new HashMap<>();
-            for (final Player player : shown)
-                now.put(player.getUniqueId(), player);
+            final Map<UUID, Seen> now = new HashMap<>();
+            for (final Seen seen : shown)
+                now.put(seen.player.getUniqueId(), seen);
             // Gone: away from everyone who has them
             final List<Integer> gone = new ArrayList<>();
             this.fakes.entrySet().removeIf(e -> {
@@ -158,37 +249,38 @@ final class CrystalViewPlayers {
             this.viewers.clear();
             this.viewers.addAll(viewing);
 
-            for (final Player player : shown) {
+            for (final Seen seen : shown) {
+                final Player player = seen.player;
                 Fake fake = this.fakes.get(player.getUniqueId());
                 final boolean isNew = fake == null;
                 if (isNew) {
                     fake = new Fake();
                     this.fakes.put(player.getUniqueId(), fake);
                 }
-                final Location at = player.getLocation();
+                final Location at = seen.at();
                 final boolean moved = at.getX() != fake.x || at.getY() != fake.y || at.getZ() != fake.z || at.getYaw() != fake.yaw || at.getPitch() != fake.pitch;
                 fake.x = at.getX();
                 fake.y = at.getY();
                 fake.z = at.getZ();
                 fake.yaw = at.getYaw();
                 fake.pitch = at.getPitch();
-                final boolean gearChanged = this.gearChanged(player, fake);
+                final boolean gearChanged = this.gearChanged(seen, fake);
                 for (final Player viewer : to) {
                     if (viewer.getUniqueId().equals(player.getUniqueId()))
                         continue; // never yourself
                     if (isNew || fresh.contains(viewer.getUniqueId())) {
-                        for (final Object packet : this.spawnPackets(player, fake))
+                        for (final Object packet : this.spawnPackets(seen, fake))
                             send(viewer, packet);
                         continue;
                     }
                     if (moved) {
-                        send(viewer, this.sync(player, fake));
-                        send(viewer, this.head(player, fake));
+                        send(viewer, this.sync(seen, fake));
+                        send(viewer, this.head(seen, fake));
                     }
                     if (gearChanged)
                         send(viewer, this.equipment(fake));
                     if (this.ticks % 5 == 0) // sneaking, glowing, pose...
-                        send(viewer, this.data(player, fake));
+                        send(viewer, this.data(seen, fake));
                 }
             }
         } catch (final ReflectiveOperationException | RuntimeException e) {
@@ -198,11 +290,10 @@ final class CrystalViewPlayers {
         }
     }
 
-    private boolean gearChanged(final Player player, final Fake fake) {
-        final EntityEquipment equipment = player.getEquipment();
+    private boolean gearChanged(final Seen seen, final Fake fake) {
         boolean changed = false;
         for (int i = 0; i < GEAR.length; i++) {
-            final ItemStack item = equipment.getItem(GEAR[i]);
+            final ItemStack item = seen.gear(i);
             if (!Objects.equals(item, fake.gear[i])) {
                 fake.gear[i] = item.clone();
                 changed = true;
@@ -211,26 +302,27 @@ final class CrystalViewPlayers {
         return changed;
     }
 
-    private List<Object> spawnPackets(final Player player, final Fake fake) throws ReflectiveOperationException {
-        final Location at = player.getLocation();
+    private List<Object> spawnPackets(final Seen seen, final Fake fake) throws ReflectiveOperationException {
+        final Location at = seen.at();
         return List.of(
-                addPacket.newInstance(fake.id, player.getUniqueId(), at.getX(), at.getY(), at.getZ(), at.getPitch(), at.getYaw(),
+                addPacket.newInstance(fake.id, seen.player.getUniqueId(), at.getX(), at.getY(), at.getZ(), at.getPitch(), at.getYaw(),
                         playerType, 0, zero, (double) at.getYaw()),
-                this.data(player, fake),
+                this.data(seen, fake),
                 this.equipment(fake),
-                this.head(player, fake));
+                this.head(seen, fake));
     }
 
-    private Object data(final Player player, final Fake fake) throws ReflectiveOperationException {
-        return dataPacket.newInstance(fake.id, packAll.invoke(getEntityData.invoke(handle(player))));
+    private Object data(final Seen seen, final Fake fake) throws ReflectiveOperationException {
+        return dataPacket.newInstance(fake.id, seen.data());
     }
 
-    private Object sync(final Player player, final Fake fake) throws ReflectiveOperationException {
-        return syncPacket.newInstance(fake.id, positionOf.invoke(null, handle(player)), player.isOnGround());
+    private Object sync(final Seen seen, final Fake fake) throws ReflectiveOperationException {
+        return syncPacket.newInstance(fake.id, seen.position(), seen.onGround());
     }
 
-    private Object head(final Player player, final Fake fake) throws ReflectiveOperationException {
-        final Object packet = headPacket.newInstance(handle(player), (byte) Math.floor(player.getLocation().getYaw() * 256f / 360f));
+    private Object head(final Seen seen, final Fake fake) throws ReflectiveOperationException {
+        // (made for the real player, as the packet only takes an entity, then pointed at the fake: only its id is read)
+        final Object packet = headPacket.newInstance(handle(seen.player), (byte) Math.floor(seen.at().getYaw() * 256f / 360f));
         headId.setInt(packet, fake.id);
         return packet;
     }
@@ -260,12 +352,13 @@ final class CrystalViewPlayers {
         }
     }
 
-    void hurt(final Player player) {
+    /** The red flash, facing {@code yaw} (read where they are: on their thread on Folia). */
+    void hurt(final Player player, final float yaw) {
         final Fake fake = this.fakes.get(player.getUniqueId());
         if (fake == null || addPacket == null)
             return;
         try {
-            this.sendAll(hurtPacket.newInstance(fake.id, player.getLocation().getYaw()));
+            this.sendAll(hurtPacket.newInstance(fake.id, yaw));
         } catch (final ReflectiveOperationException | RuntimeException ignored) {
             // just no red flash
         }

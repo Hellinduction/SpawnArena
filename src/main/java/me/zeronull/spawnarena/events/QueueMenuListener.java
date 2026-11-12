@@ -15,10 +15,11 @@ import org.bukkit.event.inventory.InventoryDragEvent;
 public final class QueueMenuListener implements Listener {
 
     public QueueMenuListener() {
-        // Keep open menus' player counts live
+        // Keep open menus' player counts live. What someone has open is only read on their own thread: on Folia that
+        // isn't this one, so each player is looked at on theirs (on Paper it's all the main thread: checked here first)
         me.zeronull.spawnarena.Threads.globalTimer(task -> {
             for (final Player p : org.bukkit.Bukkit.getOnlinePlayers()) {
-                if (p.getOpenInventory().getTopInventory().getHolder() instanceof QueueMenu)
+                if (me.zeronull.spawnarena.Threads.FOLIA || p.getOpenInventory().getTopInventory().getHolder() instanceof QueueMenu)
                     me.zeronull.spawnarena.Threads.entity(p, () -> {
                         if (p.getOpenInventory().getTopInventory().getHolder() instanceof QueueMenu menu)
                             menu.refresh(p);

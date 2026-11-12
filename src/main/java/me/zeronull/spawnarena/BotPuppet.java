@@ -30,7 +30,7 @@ final class BotPuppet {
     static Constructor<?> addPacket, dataPacket, syncPacket, removePacket, equipmentPacket, hurtPacket, animatePacket, headPacket,
             infoPacket, infoEntry, infoRemovePacket, teamCtor, scoreboardCtor;
     static Method getHandle, packAll, getEntityData, positionOf, asNmsCopy, pairOf, sendPacket, dataId, authlibCopy,
-            asVanilla, teamPacket, teamRemovePacket, setSuffix, setColour, teamPlayers, formattingByName, setNameTagVisibility, dataValue;
+            asVanilla, teamPacket, teamRemovePacket, setSuffix, setPrefix, setColour, teamPlayers, formattingByName, setNameTagVisibility, dataValue;
     static Constructor<?> positionCtor, vec3Ctor;
     private static Object textDisplayType, hiddenTag, shownTag, textData, billboardData, interpolationData;
     static Field animateId, headId;
@@ -697,6 +697,7 @@ final class BotPuppet {
             scoreboardCtor = scoreboard.getConstructor();
             teamCtor = playerTeam.getConstructor(scoreboard, String.class);
             setSuffix = playerTeam.getMethod("setPlayerSuffix", component);
+            setPrefix = playerTeam.getMethod("setPlayerPrefix", component);
             setColour = playerTeam.getMethod("setColor", formatting);
             teamPlayers = playerTeam.getMethod("getPlayers");
             formattingByName = formatting.getMethod("getByName", String.class);
@@ -794,8 +795,12 @@ final class BotPuppet {
             return;
         final Object player = handle(viewer);
         final Object connection = player.getClass().getField("connection").get(player);
-        if (sendPacket == null)
+        if (sendPacket == null) {
+            // (also used with no bot ever made, e.g. relaying a copy's sounds: the packet type may not be looked up yet)
+            if (packetClass == null)
+                packetClass = Class.forName("net.minecraft.network.protocol.Packet", true, connection.getClass().getClassLoader());
             sendPacket = connection.getClass().getMethod("send", packetClass);
+        }
         sendPacket.invoke(connection, packet);
     }
 }

@@ -15,6 +15,9 @@ import java.util.*;
  * to the watchers on spawn, as packets only. Each gets an id of its own and is sent to the watchers' games alone, so
  * nothing on spawn can touch it (a fake crystal can't be set off, a fake item can't be picked up). They move with the
  * real ones and go when they do.
+ *
+ * <p>What's shown of each comes from a {@link Thing}: read straight from it (Paper), or captured on the thread of the
+ * region it's in (Folia, see {@link CrystalView}). Everything here runs on the global thread (the main thread on Paper).
  */
 final class CrystalViewEntities {
     private static boolean broken;
@@ -24,19 +27,89 @@ final class CrystalViewEntities {
     private static Object zero;
 
     /**
+     * What's needed of a match entity to show it: read straight from it ({@link #live}: Paper), or captured all at once
+     * on its own thread ({@link #capture}: Folia).
+     */
+    static final class Thing {
+        final UUID uuid;
+        private final Entity live;
+        private final Location at;
+        private final boolean onGround;
+        private final Object type, position, data;
+
+        private Thing(final UUID uuid, final Entity live, final Location at, final boolean onGround, final Object type,
+                      final Object position, final Object data) {
+            this.uuid = uuid;
+            this.live = live;
+            this.at = at;
+            this.onGround = onGround;
+            this.type = type;
+            this.position = position;
+            this.data = data;
+        }
+
+        static Thing live(final Entity entity) {
+            return new Thing(entity.getUniqueId(), entity, null, false, null, null, null);
+        }
+
+        /** Everything about it now, or null if it isn't one that's shown (or it can't be read). On its own thread. */
+        static Thing capture(final Entity entity) {
+            if (!shown(entity) || !ready())
+                return null;
+            try {
+                final Object nms = handle(entity);
+                return new Thing(entity.getUniqueId(), null, entity.getLocation(), entity.isOnGround(), getType.invoke(nms),
+                        positionOf.invoke(null, nms), packAll.invoke(getEntityData.invoke(nms)));
+            } catch (final ReflectiveOperationException | RuntimeException e) {
+                return null;
+            }
+        }
+
+        Location at() {
+            return this.live != null ? this.live.getLocation() : this.at;
+        }
+
+        boolean onGround() {
+            return this.live != null ? this.live.isOnGround() : this.onGround;
+        }
+
+        Object type() throws ReflectiveOperationException {
+            return this.live != null ? getType.invoke(handle(this.live)) : this.type;
+        }
+
+        Object position() throws ReflectiveOperationException {
+            return this.live != null ? positionOf.invoke(null, handle(this.live)) : this.position;
+        }
+
+        Object data() throws ReflectiveOperationException {
+            return this.live != null ? packAll.invoke(getEntityData.invoke(handle(this.live))) : this.data;
+        }
+    }
+
+    /** Paper: what's in these copies now, read straight from them (on the main thread). */
+    static List<Thing> liveIn(final Collection<CrystalCopy> copies) {
+        final List<Thing> out = new ArrayList<>();
+        for (final CrystalCopy copy : copies)
+            for (final Entity entity : copy.world().getEntities())
+                if (shown(entity))
+                    out.add(Thing.live(entity));
+        return out;
+    }
+
+    /**
      * A match entity shown on spawn: its own id there, and where it was last sent to. Its UUID is the real one's (which
      * a watcher's game never has: it's in another world), so a glowing projectile's team colours the fake too.
      */
     private static final class Fake {
         final int id = Bukkit.getUnsafe().nextEntityId();
         final UUID uuid;
-        final Entity real;
+        Thing real;
         double x, y, z;
         float yaw, pitch;
 
-        Fake(final Entity real) {
+        Fake(final Thing real) {
             this.real = real;
-            this.uuid = real.getUniqueId();
+            this.uuid = real.uuid;
         }
     }
 
@@ -45,7 +118,7 @@ final class CrystalViewEntities {
     /** Who has them */
     private final Set<UUID> viewers = new HashSet<>();
 
-    private static boolean ready() {
+    static boolean ready() {
         if (addPacket != null)
             return true;
         if (broken)
@@ -94,38 +167,38 @@ final class CrystalViewEntities {
         sendPacket.invoke(connection, packet);
     }
 
-    private static boolean shown(final Entity entity) {
+    static boolean shown(final Entity entity) {
         return !(entity instanceof Player) && !(entity instanceof Mannequin) && entity.isValid();
     }
 
-    /** Every tick: what's in the live copies now, sent to the watchers. */
-    void tick(final Collection<CrystalCopy> live, final List<Player> watchers) {
+    /** Every tick: what's in the live copies now ({@code things}), sent to the watchers. */
+    void tick(final List<Thing> things, final List<Player> watchers) {
         if (!ready())
             return;
         try {
             final List<Object> spawn = new ArrayList<>(), move = new ArrayList<>();
             final List<Integer> gone = new ArrayList<>();
             final Set<UUID> present = new HashSet<>();
-            for (final CrystalCopy copy : live)
-                for (final Entity entity : copy.world().getEntities()) {
-                    if (!shown(entity))
-                        continue;
-                    present.add(entity.getUniqueId());
-                    Fake fake = this.fakes.get(entity.getUniqueId());
-                    final Location at = entity.getLocation();
-                    if (fake == null) {
-                        fake = new Fake(entity);
-                        this.fakes.put(entity.getUniqueId(), fake);
-                        spawn.addAll(spawnPackets(fake));
-                    } else if (at.getX() != fake.x || at.getY() != fake.y || at.getZ() != fake.z || at.getYaw() != fake.yaw || at.getPitch() != fake.pitch) {
-                        move.add(syncPacket.newInstance(fake.id, positionOf.invoke(null, handle(entity)), entity.isOnGround()));
-                    }
-                    fake.x = at.getX();
-                    fake.y = at.getY();
-                    fake.z = at.getZ();
-                    fake.yaw = at.getYaw();
-                    fake.pitch = at.getPitch();
+            for (final Thing thing : things) {
+                if (!present.add(thing.uuid))
+                    continue; // (captured twice: once is enough)
+                Fake fake = this.fakes.get(thing.uuid);
+                final Location at = thing.at();
+                if (fake == null) {
+                    fake = new Fake(thing);
+                    this.fakes.put(thing.uuid, fake);
+                    spawn.addAll(spawnPackets(fake));
+                } else {
+                    fake.real = thing;
+                    if (at.getX() != fake.x || at.getY() != fake.y || at.getZ() != fake.z || at.getYaw() != fake.yaw || at.getPitch() != fake.pitch)
+                        move.add(syncPacket.newInstance(fake.id, thing.position(), thing.onGround()));
                 }
+                fake.x = at.getX();
+                fake.y = at.getY();
+                fake.z = at.getZ();
+                fake.yaw = at.getYaw();
+                fake.pitch = at.getPitch();
+            }
             for (final Iterator<Map.Entry<UUID, Fake>> it = this.fakes.entrySet().iterator(); it.hasNext(); ) {
                 final Map.Entry<UUID, Fake> e = it.next();
                 if (!present.contains(e.getKey())) {
@@ -170,15 +243,14 @@ final class CrystalViewEntities {
     }
 
     private List<Object> spawnPackets(final Fake fake) throws ReflectiveOperationException {
-        final Object nms = handle(fake.real);
-        final Location at = fake.real.getLocation();
+        final Location at = fake.real.at();
         final List<Object> out = new ArrayList<>(3);
         out.add(addPacket.newInstance(fake.id, fake.uuid, at.getX(), at.getY(), at.getZ(), at.getPitch(), at.getYaw(),
-                getType.invoke(nms), 0, zero, (double) at.getYaw()));
-        final Object data = packAll.invoke(getEntityData.invoke(nms));
+                fake.real.type(), 0, zero, (double) at.getYaw()));
+        final Object data = fake.real.data();
         if (data instanceof List<?> list && !list.isEmpty())
             out.add(dataPacket.newInstance(fake.id, list));
-        out.add(syncPacket.newInstance(fake.id, positionOf.invoke(null, nms), fake.real.isOnGround()));
+        out.add(syncPacket.newInstance(fake.id, fake.real.position(), fake.real.onGround()));
         return out;
     }
 

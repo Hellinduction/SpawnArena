@@ -37,7 +37,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * </ul>
  * The other way round, fighters see everyone watching in their copy, the same way (nothing there to hit or shoot),
  * and with Simple Voice Chat watchers and fighters hear each other (see {@link #voiceRoute}).
- * Paper only, like the copies themselves.
+ *
+ * <p>All of it runs on the global thread (the main thread on Paper). On Folia that thread mayn't read blocks, players or
+ * entities, so what it needs is read where it's allowed and handed to it: blocks through {@link Blocks} (read on the
+ * thread of the region they're in, kept, and read again when used), players captured on their own thread and the
+ * matches' entities on their region's thread every update ({@link #captureForNext}), at most a couple of ticks old; and
+ * what the events (on the region threads) tell it is passed to the global thread. Block changes go to each viewer on
+ * their own thread. It updates every other tick there instead of every tick. On Paper everything is read as it is.
  */
 public final class CrystalView implements Listener {
     private static final Map<String, View> VIEWS = new ConcurrentHashMap<>();
@@ -56,11 +62,19 @@ public final class CrystalView implements Listener {
     /** How long a spot put back to the real block is sent again with the regular resend. */
     private static final long PUT_BACK_RESEND_MILLIS = 30_000;
 
+    /** Whether the merged viewing arena runs here: wherever there are copies. */
+    public static boolean supported() {
+        return CrystalCopies.supported();
+    }
+
+    /** Ticks between updates: every tick on Paper, every other on Folia (where reads are handed over, see the class). */
+    private static final int EVERY = Threads.FOLIA ? 2 : 1;
+
     /** Every tick: the players and entities shown follow the real ones; every other tick, the blocks. */
     public static void start() {
-        if (!CrystalCopies.supported())
+        if (!supported())
             return;
-        Threads.globalTimer(task -> tick(), 1L, 1L);
+        Threads.globalTimer(task -> tick(), 1L, EVERY);
     }
 
     /** On shutdown: viewers get the real blocks back, and everything shown goes. */
@@ -68,12 +82,15 @@ public final class CrystalView implements Listener {
         for (final View view : VIEWS.values())
             view.close();
         VIEWS.clear();
+        Blocks.clear();
+        SEEN.clear();
+        THINGS.clear();
     }
 
     private static void tick() {
         if (SpawnArena.arenas == null)
             return;
-        clock++;
+        clock += EVERY; // (in ticks, so what's done every so many ticks is on Folia too)
         final Set<String> active = new HashSet<>();
         for (final Arena arena : SpawnArena.arenas) {
             if (!(arena instanceof SavableArena real) || CrystalCopies.of(real).isEmpty())
@@ -88,6 +105,190 @@ public final class CrystalView implements Listener {
             e.getValue().close();
             return true;
         });
+        captureForNext();
+    }
+
+    // ── Folia: what the global thread mayn't read, read where it may ───────────
+
+    /** Folia: players near a viewing arena or in a copy, as captured on their own thread for the next update. */
+    private static final Map<UUID, CrystalViewPlayers.Seen> SEEN = new ConcurrentHashMap<>();
+
+    /** Folia: the entities in a live copy, as captured on their region's thread (by chunk, or {@link #WHOLE} at once), and when. */
+    private record Captured(List<CrystalViewEntities.Thing> things, long at) {}
+    private static final Map<CrystalCopy, Map<Long, Captured>> THINGS = new ConcurrentHashMap<>();
+    private static final long WHOLE = Long.MIN_VALUE;
+    /** Captures older than this are left out (a chunk that unloaded, a copy whose match ended). */
+    private static final long CAPTURED_MILLIS = 1_000;
+
+    /** How this player is now: read straight away on Paper; on Folia as last captured (null until they first are). */
+    private static CrystalViewPlayers.Seen seen(final Player player) {
+        return Threads.FOLIA ? SEEN.get(player.getUniqueId()) : CrystalViewPlayers.Seen.live(player);
+    }
+
+    /**
+     * Folia: after each update, what the next one needs is captured where it may be read. Players in a copy, or near a
+     * viewing arena (who's where is only used here to pick them: their state is read on their own thread), and every
+     * live copy's entities.
+     */
+    private static void captureForNext() {
+        if (!Threads.FOLIA)
+            return;
+        final int range = (SpawnArena.settings == null ? 96 : SpawnArena.settings.crystalViewDistance) + 16;
+        for (final Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
+            final World world = player.getWorld();
+            boolean wanted = CrystalCopies.at(world) != null;
+            if (!wanted)
+                for (final View view : VIEWS.values())
+                    if (world.equals(view.world()) && view.real.distanceFrom(player.getLocation()) <= range) {
+                        wanted = true;
+                        break;
+                    }
+            if (!wanted) {
+                SEEN.remove(player.getUniqueId());
+                continue;
+            }
+            player.getScheduler().run(SpawnArena.INSTANCE, task -> SEEN.put(player.getUniqueId(), CrystalViewPlayers.Seen.capture(player)), null);
+        }
+        SEEN.keySet().removeIf(id -> org.bukkit.Bukkit.getPlayer(id) == null);
+        for (final View view : VIEWS.values())
+            for (final CrystalCopy copy : CrystalCopies.of(view.real))
+                if (copy.getFights().isEmpty())
+                    THINGS.remove(copy);
+                else
+                    captureThings(copy);
+    }
+
+    /**
+     * Folia: the copy's entities around its arena (the arena's region and a chunk round it), captured on the thread of
+     * the region it's in; chunk by chunk, each on its own region's thread, if it lies across more than one.
+     */
+    private static void captureThings(final CrystalCopy copy) {
+        final com.sk89q.worldedit.math.BlockVector3[] box = arenaBox(copy.real(), 16);
+        if (box == null)
+            return;
+        final World world = copy.world();
+        final org.bukkit.util.BoundingBox area = new org.bukkit.util.BoundingBox(box[0].x(), box[0].y(), box[0].z(), box[1].x() + 1, box[1].y() + 1, box[1].z() + 1);
+        final int midX = ((box[0].x() + box[1].x()) / 2) >> 4, midZ = ((box[0].z() + box[1].z()) / 2) >> 4;
+        org.bukkit.Bukkit.getRegionScheduler().execute(SpawnArena.INSTANCE, world, midX, midZ, () -> {
+            final List<CrystalViewEntities.Thing> things = new ArrayList<>();
+            try {
+                for (final Entity entity : world.getNearbyEntities(area)) {
+                    final CrystalViewEntities.Thing thing = CrystalViewEntities.Thing.capture(entity);
+                    if (thing != null)
+                        things.add(thing);
+                }
+            } catch (final RuntimeException acrossRegions) {
+                for (int cx = box[0].x() >> 4; cx <= box[1].x() >> 4; cx++)
+                    for (int cz = box[0].z() >> 4; cz <= box[1].z() >> 4; cz++) {
+                        final int x = cx, z = cz;
+                        org.bukkit.Bukkit.getRegionScheduler().execute(SpawnArena.INSTANCE, world, x, z, () -> {
+                            if (!world.isChunkLoaded(x, z))
+                                return;
+                            final List<CrystalViewEntities.Thing> inChunk = new ArrayList<>();
+                            for (final Entity entity : world.getChunkAt(x, z).getEntities()) {
+                                final CrystalViewEntities.Thing thing = CrystalViewEntities.Thing.capture(entity);
+                                if (thing != null)
+                                    inChunk.add(thing);
+                            }
+                            final Map<Long, Captured> byChunk = THINGS.computeIfAbsent(copy, c -> new ConcurrentHashMap<>());
+                            byChunk.remove(WHOLE);
+                            byChunk.put(((long) x << 32) | (z & 0xFFFFFFFFL), new Captured(inChunk, System.currentTimeMillis()));
+                        });
+                    }
+                return;
+            }
+            final Map<Long, Captured> whole = new ConcurrentHashMap<>();
+            whole.put(WHOLE, new Captured(things, System.currentTimeMillis()));
+            THINGS.put(copy, whole);
+        });
+    }
+
+    /** The live copies' entities now: read straight away on Paper, as last captured on Folia. */
+    private static List<CrystalViewEntities.Thing> things(final Collection<CrystalCopy> live) {
+        if (!Threads.FOLIA)
+            return CrystalViewEntities.liveIn(live);
+        final long oldest = System.currentTimeMillis() - CAPTURED_MILLIS;
+        final List<CrystalViewEntities.Thing> out = new ArrayList<>();
+        for (final CrystalCopy copy : live) {
+            final Map<Long, Captured> captured = THINGS.get(copy);
+            if (captured != null)
+                for (final Captured part : captured.values())
+                    if (part.at() >= oldest)
+                        out.addAll(part.things());
+        }
+        return out;
+    }
+
+    /** The real arena's WorldGuard region, widened by {@code margin} each way (null if it has none). */
+    private static com.sk89q.worldedit.math.BlockVector3[] arenaBox(final SavableArena real, final int margin) {
+        final World world = real.spawnPoint1 == null ? null : real.spawnPoint1.getWorld();
+        if (world == null || Arena.ArenaUtils.REGION_CONTAINER == null)
+            return null;
+        final com.sk89q.worldguard.protection.managers.RegionManager manager =
+                Arena.ArenaUtils.REGION_CONTAINER.get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(world));
+        final com.sk89q.worldguard.protection.regions.ProtectedRegion region = manager == null ? null : manager.getRegion(real.getArenaName());
+        if (region == null)
+            return null;
+        return new com.sk89q.worldedit.math.BlockVector3[]{
+                region.getMinimumPoint().subtract(margin, margin, margin).withY(Math.max(world.getMinHeight(), region.getMinimumPoint().y() - margin)),
+                region.getMaximumPoint().add(margin, margin, margin).withY(Math.min(world.getMaxHeight() - 1, region.getMaximumPoint().y() + margin))};
+    }
+
+    /**
+     * Block reads for the views. On Paper straight from the world. On Folia the global thread mayn't read blocks: each
+     * asked for is read a tick later on the thread of the region it's in and kept; until then (the first time) it's
+     * unknown, and whenever a read finds it different from what was kept, the views showing that spot work it out again.
+     */
+    private static final class Blocks {
+        private record Key(UUID world, int x, int y, int z) {}
+        private record ChunkKey(UUID world, int x, int z) {}
+        private static final Map<Key, BlockData> KEPT = new ConcurrentHashMap<>();
+        private static final Map<ChunkKey, Set<Key>> ASKED = new ConcurrentHashMap<>();
+
+        /** The block there: now on Paper; on Folia as last read (null if it never has been yet), and read again. */
+        static BlockData get(final World world, final int x, final int y, final int z) {
+            if (!Threads.FOLIA)
+                return world.getBlockData(x, y, z);
+            final Key key = new Key(world.getUID(), x, y, z);
+            ASKED.compute(new ChunkKey(world.getUID(), x >> 4, z >> 4), (chunk, keys) -> {
+                if (keys == null) {
+                    keys = ConcurrentHashMap.newKeySet();
+                    org.bukkit.Bukkit.getRegionScheduler().runDelayed(SpawnArena.INSTANCE, world, chunk.x(), chunk.z(), task -> read(world, chunk), 1L);
+                }
+                keys.add(key);
+                return keys;
+            });
+            return KEPT.get(key);
+        }
+
+        /** On the chunk's thread: everything asked for in it read, and the views told what's different. */
+        private static void read(final World world, final ChunkKey chunk) {
+            final Set<Key> keys = ASKED.remove(chunk); // (nothing more is added to it after this)
+            if (keys == null || !world.isChunkLoaded(chunk.x(), chunk.z()))
+                return;
+            final List<Key> changed = new ArrayList<>();
+            for (final Key key : keys) {
+                final BlockData now = world.getBlockData(key.x(), key.y(), key.z());
+                if (!now.equals(KEPT.put(key, now)))
+                    changed.add(key);
+            }
+            if (!changed.isEmpty())
+                Threads.global(() -> {
+                    for (final View view : VIEWS.values())
+                        view.read(world, changed);
+                });
+        }
+
+        /** What was kept of this world goes (a copy whose match is over: it's put back). */
+        static void forget(final World world) {
+            final UUID id = world.getUID();
+            KEPT.keySet().removeIf(key -> key.world().equals(id));
+        }
+
+        static void clear() {
+            KEPT.clear();
+            ASKED.clear();
+        }
     }
 
     private static View viewOf(final CrystalCopy copy) {
@@ -126,6 +327,8 @@ public final class CrystalView implements Listener {
         /** Spots that went back to the real block (a match ended, a bubble moved on) -> when; sent again for a while, as one lost packet would leave a viewer seeing the copy's block there for good. */
         private final Map<Long, Long> putBack = new HashMap<>();
         private final Set<UUID> viewers = new HashSet<>();
+        /** The same, readable from any thread (the network threads relay sounds to them) */
+        private volatile Set<UUID> viewersNow = Set.of();
         /** The fighters, shown to the watchers on spawn */
         private final CrystalViewPlayers fightersShown = new CrystalViewPlayers();
         /**
@@ -150,6 +353,15 @@ public final class CrystalView implements Listener {
             return this.real.spawnPoint1 == null ? null : this.real.spawnPoint1.getWorld();
         }
 
+        /** Folia: these blocks were read and are different from before: if they're this view's, worked out again. */
+        void read(final World world, final List<Blocks.Key> blocks) {
+            final World real = this.world();
+            final boolean ours = world.equals(real) || CrystalCopies.of(this.real).stream().anyMatch(c -> c.world().equals(world));
+            if (ours)
+                for (final Blocks.Key key : blocks)
+                    this.dirty.add(pack(key.x(), key.y(), key.z()));
+        }
+
         /** A block changed in this copy (or is about to, this tick). */
         void changed(final CrystalCopy copy, final int x, final int y, final int z) {
             final long p = pack(x, y, z);
@@ -167,6 +379,8 @@ public final class CrystalView implements Listener {
                 if (layer.getKey().getFights().isEmpty() || !CrystalCopies.of(this.real).contains(layer.getKey())) {
                     this.dirty.addAll(layer.getValue().keySet());
                     it.remove();
+                    if (Threads.FOLIA)
+                        Blocks.forget(layer.getKey().world()); // put back after its match: read afresh next time
                 }
             }
             // The real arena was built in or blown up (staff, or something left over): put back as soon as no match is on,
@@ -179,18 +393,21 @@ public final class CrystalView implements Listener {
                 this.touchedBy = null;
                 this.resetReal(world);
             }
-            final List<Player> nowViewing = this.viewersIn(world);
+            final List<CrystalViewPlayers.Seen> nowViewing = this.viewersIn(world);
+            final List<Player> viewing = new ArrayList<>(nowViewing.size());
+            for (final CrystalViewPlayers.Seen viewer : nowViewing)
+                viewing.add(viewer.player);
             final List<Fighter> fighters = this.fighters();
-            final List<Player> fighting = new ArrayList<>(fighters.size());
+            final List<CrystalViewPlayers.Seen> fighting = new ArrayList<>(fighters.size());
             for (final Fighter fighter : fighters)
-                fighting.add(fighter.player);
-            this.fightersShown.update(fighting, nowViewing);
+                fighting.add(fighter.seen);
+            this.fightersShown.update(fighting, viewing);
             this.showWatchers(fighters, nowViewing);
             final Set<CrystalCopy> live = new HashSet<>();
             for (final CrystalCopy copy : CrystalCopies.of(this.real))
                 if (!copy.getFights().isEmpty())
                     live.add(copy);
-            this.entities.tick(live, nowViewing);
+            this.entities.tick(things(live), viewing);
             if (clock % 2 != 0)
                 return;
             this.routeVoices(fighters, nowViewing);
@@ -202,14 +419,14 @@ public final class CrystalView implements Listener {
             final int below = Math.max(0, SpawnArena.settings == null ? 2 : SpawnArena.settings.crystalViewBubbleBelow);
             final int above = Math.max(0, SpawnArena.settings == null ? 2 : SpawnArena.settings.crystalViewBubbleAbove);
             for (final Fighter fighter : fighters) {
-                final Location at = fighter.player.getLocation();
+                final Location at = fighter.at;
                 final int fx = at.getBlockX(), fy = at.getBlockY(), fz = at.getBlockZ();
                 // A little thinner while a fighter of another match is close, so the two don't swallow each other's
                 // surroundings (never under 2 around them: they're never seen standing on air)
                 int r = radius;
                 for (final Fighter other : fighters)
                     if (other.copy != fighter.copy) {
-                        final double d = Math.hypot(other.player.getLocation().getX() - at.getX(), other.player.getLocation().getZ() - at.getZ());
+                        final double d = Math.hypot(other.at.getX() - at.getX(), other.at.getZ() - at.getZ());
                         if (d < 2 * radius + 1)
                             r = Math.min(r, Math.max(Math.min(2, radius), (int) Math.floor(d / 2)));
                     }
@@ -260,8 +477,16 @@ public final class CrystalView implements Listener {
                         }
                     }
                 }
-                final BlockData realData = world.getBlockData(x, y, z);
-                BlockData want = from == null ? null : from.world().getBlockData(x, y, z);
+                // (Folia: a block not read yet is left until it has been: the views are told then)
+                final BlockData realData = Blocks.get(world, x, y, z);
+                if (realData == null)
+                    continue;
+                BlockData want = null;
+                if (from != null) {
+                    want = Blocks.get(from.world(), x, y, z);
+                    if (want == null)
+                        continue;
+                }
                 if (want != null && want.equals(realData))
                     want = null;
                 final BlockData had = this.shown.get(p);
@@ -287,10 +512,13 @@ public final class CrystalView implements Listener {
             if (resend && !this.putBack.isEmpty()) {
                 this.putBack.values().removeIf(when -> millis - when > PUT_BACK_RESEND_MILLIS);
                 again = new HashMap<>(this.shown);
-                for (final long p : this.putBack.keySet())
-                    again.put(p, world.getBlockData(unpackX(p), unpackY(p), unpackZ(p)));
+                for (final long p : this.putBack.keySet()) {
+                    final BlockData real = Blocks.get(world, unpackX(p), unpackY(p), unpackZ(p));
+                    if (real != null)
+                        again.put(p, real);
+                }
             }
-            for (final Player viewer : nowViewing) {
+            for (final Player viewer : viewing) {
                 now.add(viewer.getUniqueId());
                 final Long clicking = CLICKING.get(viewer.getUniqueId());
                 final boolean clicked = clicking != null && clicking > millis && clock % 20 == 0;
@@ -310,14 +538,23 @@ public final class CrystalView implements Listener {
             }
             this.viewers.clear();
             this.viewers.addAll(now);
+            this.viewersNow = Set.copyOf(now);
         }
 
-        private List<Player> viewersIn(final World world) {
+        private List<CrystalViewPlayers.Seen> viewersIn(final World world) {
             final int range = SpawnArena.settings == null ? 96 : SpawnArena.settings.crystalViewDistance;
-            final List<Player> out = new ArrayList<>();
-            for (final Player player : world.getPlayers())
-                if (this.real.distanceFrom(player.getLocation()) <= range)
-                    out.add(player);
+            final List<CrystalViewPlayers.Seen> out = new ArrayList<>();
+            if (!Threads.FOLIA) {
+                for (final Player player : world.getPlayers())
+                    if (this.real.distanceFrom(player.getLocation()) <= range)
+                        out.add(CrystalViewPlayers.Seen.live(player));
+                return out;
+            }
+            for (final Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
+                final CrystalViewPlayers.Seen seen = seen(player);
+                if (seen != null && world.equals(seen.world()) && this.real.distanceFrom(seen.at()) <= range)
+                    out.add(seen);
+            }
             return out;
         }
 
@@ -325,13 +562,13 @@ public final class CrystalView implements Listener {
          * Each copy with a match on shows the watchers (not anyone in spectator mode or vanished) to its fighters, and
          * only to them: those watching that match up close in the copy see just its own fighters and watchers.
          */
-        private void showWatchers(final List<Fighter> fighters, final List<Player> viewers) {
+        private void showWatchers(final List<Fighter> fighters, final List<CrystalViewPlayers.Seen> viewers) {
             final Map<CrystalCopy, List<Player>> live = new HashMap<>();
             for (final Fighter fighter : fighters)
-                live.computeIfAbsent(fighter.copy, c -> new ArrayList<>()).add(fighter.player);
-            final List<Player> watching = new ArrayList<>(viewers.size());
-            for (final Player viewer : viewers)
-                if (viewer.getGameMode() != GameMode.SPECTATOR && !isVanished(viewer))
+                live.computeIfAbsent(fighter.copy, c -> new ArrayList<>()).add(fighter.seen.player);
+            final List<CrystalViewPlayers.Seen> watching = new ArrayList<>(viewers.size());
+            for (final CrystalViewPlayers.Seen viewer : viewers)
+                if (viewer.mode() != GameMode.SPECTATOR && !viewer.vanished())
                     watching.add(viewer);
             live.forEach((copy, itsFighters) ->
                     this.watchersShown.computeIfAbsent(copy, c -> new CrystalViewPlayers()).update(watching, itsFighters));
@@ -344,7 +581,7 @@ public final class CrystalView implements Listener {
         }
 
         /** Who hears whom across the worlds: watchers hear the fighters near them, fighters the watchers near them. */
-        private void routeVoices(final List<Fighter> fighters, final List<Player> viewers) {
+        private void routeVoices(final List<Fighter> fighters, final List<CrystalViewPlayers.Seen> viewers) {
             if (!voiceOn) {
                 this.routes = Map.of();
                 return;
@@ -352,33 +589,34 @@ public final class CrystalView implements Listener {
             final double range = voiceDistance;
             final Map<UUID, VoiceRoute> routes = new HashMap<>();
             for (final Fighter fighter : fighters) {
-                final Location from = fighter.player.getLocation();
+                final Location from = fighter.at;
                 final List<VoiceRoute.Ear> ears = new ArrayList<>();
-                for (final Player viewer : viewers) {
-                    final double d = distance(from, viewer.getLocation());
+                for (final CrystalViewPlayers.Seen viewer : viewers) {
+                    final double d = distance(from, viewer.at());
                     if (d <= range)
-                        ears.add(new VoiceRoute.Ear(viewer.getUniqueId(), d));
+                        ears.add(new VoiceRoute.Ear(viewer.player.getUniqueId(), d));
                 }
                 if (!ears.isEmpty())
-                    routes.put(fighter.player.getUniqueId(), new VoiceRoute(from.getX(), from.getY(), from.getZ(), ears));
+                    routes.put(fighter.seen.player.getUniqueId(), new VoiceRoute(from.getX(), from.getY(), from.getZ(), ears));
             }
-            for (final Player viewer : viewers) {
-                if (viewer.getGameMode() == GameMode.SPECTATOR || isVanished(viewer))
+            for (final CrystalViewPlayers.Seen viewer : viewers) {
+                if (viewer.mode() == GameMode.SPECTATOR || viewer.vanished())
                     continue;
-                final Location from = viewer.getLocation();
+                final Location from = viewer.at();
                 final List<VoiceRoute.Ear> ears = new ArrayList<>();
                 for (final Fighter fighter : fighters) {
-                    final double d = distance(from, fighter.player.getLocation());
+                    final double d = distance(from, fighter.at);
                     if (d <= range)
-                        ears.add(new VoiceRoute.Ear(fighter.player.getUniqueId(), d));
+                        ears.add(new VoiceRoute.Ear(fighter.seen.player.getUniqueId(), d));
                 }
                 if (!ears.isEmpty())
-                    routes.put(viewer.getUniqueId(), new VoiceRoute(from.getX(), from.getY(), from.getZ(), ears));
+                    routes.put(viewer.player.getUniqueId(), new VoiceRoute(from.getX(), from.getY(), from.getZ(), ears));
             }
             this.routes = routes;
         }
 
-        private record Fighter(Player player, CrystalCopy copy) {}
+        /** A fighter, how they are, where (read once per update), and which copy they're fighting in. */
+        private record Fighter(CrystalViewPlayers.Seen seen, Location at, CrystalCopy copy) {}
 
         /** Everyone still fighting in a copy, there and alive. */
         private List<Fighter> fighters() {
@@ -388,10 +626,11 @@ public final class CrystalView implements Listener {
                     if (fight.getState() != FightState.IN_FIGHT && fight.getState() != FightState.PRE_FIGHT_START
                             && fight.getState() != FightState.ENDING)
                         continue;
-                    for (final Player player : fight.getFighters())
-                        if (player.isOnline() && !player.isDead() && player.getGameMode() != GameMode.SPECTATOR
-                                && player.getWorld().equals(copy.world()))
-                            out.add(new Fighter(player, copy));
+                    for (final Player player : fight.getFighters()) {
+                        final CrystalViewPlayers.Seen seen = player.isOnline() ? seen(player) : null;
+                        if (seen != null && !seen.dead() && seen.mode() != GameMode.SPECTATOR && copy.world().equals(seen.world()))
+                            out.add(new Fighter(seen, seen.at(), copy));
+                    }
                 }
             return out;
         }
@@ -422,15 +661,36 @@ public final class CrystalView implements Listener {
 
         /** The real arena's schematic pasted back, and end crystals or lit TNT left in it removed. */
         private void resetReal(final World world) {
-            for (final Entity entity : world.getEntities())
-                if ((entity instanceof org.bukkit.entity.EnderCrystal || entity instanceof org.bukkit.entity.TNTPrimed
-                        || entity instanceof org.bukkit.entity.FallingBlock) && this.real.equals(SpawnArena.arenas.of(entity.getLocation())))
-                    entity.remove();
+            if (!Threads.FOLIA) {
+                for (final Entity entity : world.getEntities())
+                    if (leftOver(entity))
+                        entity.remove();
+            } else {
+                // Folia: each chunk of the arena on its own region's thread
+                final com.sk89q.worldedit.math.BlockVector3[] box = arenaBox(this.real, 0);
+                if (box != null)
+                    for (int cx = box[0].x() >> 4; cx <= box[1].x() >> 4; cx++)
+                        for (int cz = box[0].z() >> 4; cz <= box[1].z() >> 4; cz++) {
+                            final int x = cx, z = cz;
+                            org.bukkit.Bukkit.getRegionScheduler().execute(SpawnArena.INSTANCE, world, x, z, () -> {
+                                if (world.isChunkLoaded(x, z))
+                                    for (final Entity entity : world.getChunkAt(x, z).getEntities())
+                                        if (leftOver(entity))
+                                            entity.remove();
+                            });
+                        }
+            }
             try {
                 this.real.resetArena();
             } catch (final RuntimeException e) {
                 SpawnArena.INSTANCE.getLogger().warning("Couldn't put back the real arena of " + this.real.getArenaName() + ": " + e.getMessage());
             }
+        }
+
+        /** An end crystal, lit TNT or falling block left in the real arena. */
+        private boolean leftOver(final Entity entity) {
+            return (entity instanceof org.bukkit.entity.EnderCrystal || entity instanceof org.bukkit.entity.TNTPrimed
+                    || entity instanceof org.bukkit.entity.FallingBlock) && this.real.equals(SpawnArena.arenas.of(entity.getLocation()));
         }
 
         /** Shows the watchers an explosion that happened at this spot in one of the copies (particles and sound only). */
@@ -443,9 +703,11 @@ public final class CrystalView implements Listener {
                 final Player viewer = org.bukkit.Bukkit.getPlayer(id);
                 if (viewer == null || !viewer.getWorld().equals(world))
                     continue;
-                viewer.spawnParticle(power >= 2 ? org.bukkit.Particle.EXPLOSION_EMITTER : org.bukkit.Particle.EXPLOSION, at, 1);
-                viewer.playSound(at, org.bukkit.Sound.ENTITY_GENERIC_EXPLODE, org.bukkit.SoundCategory.BLOCKS, 4f,
-                        (float) (0.7 + Math.random() * 0.2));
+                final float pitch = (float) (0.7 + Math.random() * 0.2);
+                Threads.entity(viewer, () -> { // (on their own thread on Folia)
+                    viewer.spawnParticle(power >= 2 ? org.bukkit.Particle.EXPLOSION_EMITTER : org.bukkit.Particle.EXPLOSION, at, 1);
+                    viewer.playSound(at, org.bukkit.Sound.ENTITY_GENERIC_EXPLODE, org.bukkit.SoundCategory.BLOCKS, 4f, pitch);
+                });
             }
         }
 
@@ -491,13 +753,16 @@ public final class CrystalView implements Listener {
 
         private void revert(final Player player, final World world) {
             final Map<Long, BlockData> back = new HashMap<>();
-            for (final long p : this.shown.keySet())
-                back.put(p, world.getBlockData(unpackX(p), unpackY(p), unpackZ(p)));
+            for (final long p : this.shown.keySet()) {
+                final BlockData real = Blocks.get(world, unpackX(p), unpackY(p), unpackZ(p));
+                if (real != null)
+                    back.put(p, real);
+            }
             send(player, world, back);
         }
     }
 
-    private static boolean isVanished(final Player player) {
+    static boolean isVanished(final Player player) {
         for (final org.bukkit.metadata.MetadataValue value : player.getMetadata("vanished"))
             if (value.asBoolean())
                 return true;
@@ -505,6 +770,37 @@ public final class CrystalView implements Listener {
     }
 
     /** Same coordinates, different worlds (a copy and the real arena) */
+    /** Sounds relayed lately (key -> when), so one heard by both fighters is played to watchers once */
+    private static final Map<Long, Long> RELAYED = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * A sound a player in a crystal copy was sent (any thread: the network's): the viewing arena's watchers on spawn are
+     * sent it too, at the same spot (the copy has the arena at the same coordinates), once however many in the copy
+     * heard it: hits, crystals, blocks, eating... (explosions are shown with their particles already, see explosion).
+     */
+    static void relaySound(final World from, final Object packet, final double x, final double y, final double z, final long seed) {
+        final CrystalCopy copy = CrystalCopies.at(from);
+        final View view = copy == null ? null : viewOf(copy);
+        if (view == null || view.viewersNow.isEmpty())
+            return;
+        final long key = seed * 31 + ((long) Math.floor(x * 8) * 73856093L ^ (long) Math.floor(y * 8) * 19349663L ^ (long) Math.floor(z * 8) * 83492791L);
+        final long now = System.currentTimeMillis();
+        if (RELAYED.putIfAbsent(key, now) != null)
+            return;
+        if (RELAYED.size() > 512)
+            RELAYED.values().removeIf(when -> now - when > 1000);
+        for (final UUID id : view.viewersNow) {
+            final Player viewer = org.bukkit.Bukkit.getPlayer(id);
+            if (viewer == null || !viewer.isOnline() || CrystalCopies.at(viewer.getWorld()) != null)
+                continue;
+            try {
+                BotPuppet.send(viewer, packet);
+            } catch (final ReflectiveOperationException | RuntimeException ignored) {
+                // they've left
+            }
+        }
+    }
+
     private static double distance(final Location a, final Location b) {
         final double dx = a.getX() - b.getX(), dy = a.getY() - b.getY(), dz = a.getZ() - b.getZ();
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
@@ -531,13 +827,21 @@ public final class CrystalView implements Listener {
         return null;
     }
 
+    /** The blocks shown to this viewer (on their own thread on Folia: still there and in that world by then). */
     private static void send(final Player player, final World world, final Map<Long, BlockData> blocks) {
         if (blocks.isEmpty())
             return;
         final Map<Location, BlockData> out = new HashMap<>(blocks.size() * 2);
         for (final Map.Entry<Long, BlockData> e : blocks.entrySet())
             out.put(new Location(world, unpackX(e.getKey()), unpackY(e.getKey()), unpackZ(e.getKey())), e.getValue());
-        player.sendMultiBlockChange(out);
+        if (!Threads.FOLIA) {
+            player.sendMultiBlockChange(out);
+            return;
+        }
+        player.getScheduler().run(SpawnArena.INSTANCE, task -> {
+            if (player.isOnline() && player.getWorld().equals(world))
+                player.sendMultiBlockChange(out);
+        }, null);
     }
 
     // ── Viewers clicking the blocks they're shown ───────────────────────────
@@ -598,9 +902,12 @@ public final class CrystalView implements Listener {
         final CrystalCopy copy = CrystalCopies.at(block.getWorld());
         if (copy == null || copy.getFights().isEmpty())
             return;
-        final View view = viewOf(copy);
-        if (view != null)
-            view.changed(copy, block.getX(), block.getY(), block.getZ());
+        final int x = block.getX(), y = block.getY(), z = block.getZ();
+        Threads.global(() -> { // (the views are the global thread's; this is right away on Paper)
+            final View view = viewOf(copy);
+            if (view != null)
+                view.changed(copy, x, y, z);
+        });
     }
 
     /**
@@ -695,18 +1002,25 @@ public final class CrystalView implements Listener {
 
     private static void explosionAt(final Location at, final float yield) {
         final CrystalCopy copy = CrystalCopies.at(at.getWorld());
-        final View view = copy == null ? null : viewOf(copy);
-        if (view != null)
-            view.explosion(at.getX(), at.getY(), at.getZ(), 2f);
+        if (copy == null)
+            return;
+        final double x = at.getX(), y = at.getY(), z = at.getZ();
+        Threads.global(() -> {
+            final View view = viewOf(copy);
+            if (view != null)
+                view.explosion(x, y, z, 2f);
+        });
     }
 
     /** A fighter's totem pops: where they're shown, too. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onTotem(final org.bukkit.event.entity.EntityResurrectEvent e) {
-        if (e.getEntity() instanceof Player player)
-            for (final View view : VIEWS.values())
-                for (final CrystalViewPlayers shown : view.shownPlayers())
-                    shown.totem(player);
+        if (e.getEntity() instanceof Player player && !VIEWS.isEmpty())
+            Threads.global(() -> {
+                for (final View view : VIEWS.values())
+                    for (final CrystalViewPlayers shown : view.shownPlayers())
+                        shown.totem(player);
+            });
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -784,18 +1098,27 @@ public final class CrystalView implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onSwing(final PlayerAnimationEvent e) {
+        if (VIEWS.isEmpty())
+            return;
         final boolean offHand = e.getAnimationType() == org.bukkit.event.player.PlayerAnimationType.OFF_ARM_SWING;
-        for (final View view : VIEWS.values())
-            for (final CrystalViewPlayers shown : view.shownPlayers())
-                shown.swing(e.getPlayer(), offHand);
+        final Player player = e.getPlayer();
+        Threads.global(() -> {
+            for (final View view : VIEWS.values())
+                for (final CrystalViewPlayers shown : view.shownPlayers())
+                    shown.swing(player, offHand);
+        });
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onHurt(final EntityDamageEvent e) {
-        if (e.getEntity() instanceof Player player)
+        if (!(e.getEntity() instanceof Player player) || VIEWS.isEmpty())
+            return;
+        final float yaw = player.getLocation().getYaw();
+        Threads.global(() -> {
             for (final View view : VIEWS.values())
                 for (final CrystalViewPlayers shown : view.shownPlayers())
-                    shown.hurt(player);
+                    shown.hurt(player, yaw);
+        });
     }
 
     /**
@@ -819,19 +1142,22 @@ public final class CrystalView implements Listener {
         // Only into or out of a MULTI arena's copy: that's where fakes of them are shown
         if (CrystalCopies.at(e.getFrom()) == null && CrystalCopies.at(arrived.getWorld()) == null)
             return;
+        // Each of them on their own thread (Folia); only those who could see them are shown them again
         Threads.globalLater(() -> {
             if (!arrived.isOnline())
                 return;
-            final List<Player> others = new ArrayList<>(arrived.getWorld().getPlayers());
-            others.remove(arrived);
-            for (final Player other : others)
-                if (other.canSee(arrived))
-                    other.hidePlayer(SpawnArena.INSTANCE, arrived);
-            Threads.globalLater(() -> {
-                for (final Player other : others)
-                    if (other.isOnline())
-                        other.showPlayer(SpawnArena.INSTANCE, arrived);
-            }, 2L);
+            final World there = arrived.getWorld();
+            for (final Player other : org.bukkit.Bukkit.getOnlinePlayers())
+                if (!other.equals(arrived) && other.getWorld().equals(there))
+                    Threads.entity(other, () -> {
+                        if (!other.canSee(arrived))
+                            return;
+                        other.hidePlayer(SpawnArena.INSTANCE, arrived);
+                        Threads.entityLater(other, () -> {
+                            if (arrived.isOnline())
+                                other.showPlayer(SpawnArena.INSTANCE, arrived);
+                        }, 2L);
+                    });
         }, 5L);
     }
 
@@ -843,13 +1169,31 @@ public final class CrystalView implements Listener {
     /** A chunk sent to someone's game: the matches' blocks in it go to them again (see View#chunkSent). */
     @EventHandler(priority = EventPriority.MONITOR)
     public void onChunkSent(final io.papermc.paper.event.packet.PlayerChunkLoadEvent e) {
-        for (final View view : VIEWS.values())
-            view.chunkSent(e.getPlayer(), e.getChunk());
+        if (VIEWS.isEmpty())
+            return;
+        final Player player = e.getPlayer();
+        final org.bukkit.Chunk chunk = e.getChunk();
+        Threads.global(() -> {
+            for (final View view : VIEWS.values())
+                view.chunkSent(player, chunk);
+        });
     }
 
     private static void forget(final Player player) {
-        for (final View view : VIEWS.values())
-            for (final CrystalViewPlayers shown : view.shownPlayers())
-                shown.forget(player.getUniqueId());
+        if (VIEWS.isEmpty())
+            return;
+        Threads.global(() -> {
+            for (final View view : VIEWS.values())
+                for (final CrystalViewPlayers shown : view.shownPlayers())
+                    shown.forget(player.getUniqueId());
+        });
+    }
+
+    /**
+     * A player is about to be taken into another world by SpawnArena (on Folia, a tick on): their fakes go first, as no
+     * teleport event tells this class there (see {@link #onTeleport}).
+     */
+    public static void beforeWorldChange(final Player player) {
+        forget(player);
     }
 }

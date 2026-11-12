@@ -37,7 +37,7 @@ Don't add `shade:shade` to the command: shading already runs during `package`, a
 2. `spawnWorlds` in `settings.yml`: the worlds players must be in to queue, duel and set up arenas. Empty (the default) means every world.
 3. Build the arena, stand in it and run `/arenasetup`: the wizard asks for the type (normal, sumo, crystal PvP...), the spawn points, the region and the options, and saves a copy of the build to paste back after fights.
 4. `/setarenaexit <arena>` where people should be sent if they're in the arena during a fight.
-5. Players join with `/joinarenaqueue <arena>` (an NPC can run it for them). `/togglearenamode <arena>` switches between one fight at a time (SINGLE) and several at once (MULTI; for crystal PvP each match is fought in its own copy of the arena, on Paper/Leaf only), and `/togglearenamode <arena> ffa` makes it a free-for-all. A free-for-all has no wins: kill streaks of 5, 15, 25... and 10, 20, 30... pay instead (`ffaStreakReward` and `ffaStreakRewardTens` in the arena's file), each streak once in a while per player, with each player killed counting once per streak.
+5. Players join with `/joinarenaqueue <arena>` (an NPC can run it for them). `/togglearenamode <arena>` switches between one fight at a time (SINGLE) and several at once (MULTI; for crystal PvP each match is fought in its own copy of the arena: on Folia see below), and `/togglearenamode <arena> ffa` makes it a free-for-all. A free-for-all has no wins: kill streaks of 5, 15, 25... and 10, 20, 30... pay instead (`ffaStreakReward` and `ffaStreakRewardTens` in the arena's file), each streak once in a while per player, with each player killed counting once per streak.
 6. Sumo arenas' menu (`/joinarenaqueue <arena> menu`) also has **Practice vs Bot**: a match against a bot only that player sees (Easy, Medium, Hard, Cheater or Combo), with real player knockback and movement. It counts for nothing but a "bots beaten" count. `/arenatotems <arena> <n>` limits how many totems can save each fighter per fight (0 = no limit).
 7. Leaderboards: `/arenaleaderboard spawn <arena> <stat>` where you're standing. Stats: `wins`, `streak` (current win streak), `best_streak`, `daily_streak` (the best win streak each player reached today: it starts again at midnight), `elo`, `wlr` (W/L), `playtime`, and for free-for-alls `ffa_kills`, `ffa_deaths`, `ffa_kdr`, `ffa_streak` (the kill streaks people are on right now, live) `ffa_best_streak` and `ffa_daily_streak` (today's best kill streaks). Also `reward` (each player's countdown to their next win reward, or in a free-for-all the kill streak that pays next) and `stats` (the arena's totals).
 
@@ -49,13 +49,27 @@ Stats are kept in an H2 file in the plugin folder by default; `database.yml` swi
 
 # Running on Folia
 
-Everything works on Folia, with these differences:
+Everything works on Folia, MULTI crystal arenas and their viewing arena included. **Canvas** (a Folia fork) is the
+recommended Folia server: according to its project it fires the teleport and respawn events and can create worlds while
+running, both of which plain Folia can't. SpawnArena finds out by itself what the server can do and only works round
+what's missing, so nothing needs setting either way (`foliaPatchedTeleportEvent: true` in `settings.yml` just stops it
+watching for teleports, on a server you know fires the event for every one). What differs on plain Folia:
 
-- **No teleport events.** Folia never fires `PlayerTeleportEvent`, so these do nothing there:
-  - teleporting while queued doesn't take you out of the queue;
-  - a command or plugin teleport out of the arena mid-fight doesn't count as a loss (leaving the arena on foot or by pearl is still stopped);
-  - an anticheat setback into or over lava (or a sumo arena's water) can't be redirected as it happens. Instead it's spotted from the player's steps, and touching the lava or water right after still puts them back where they were.
-- **No FastAsyncWorldEdit.** FAWE doesn't support Folia, so arenas are pasted with plain WorldEdit on the arena's own region thread. A crystal arena's reset after each fight then takes a few seconds, during which that part of the world is busy.
+- **No teleport events.** Plain Folia never fires `PlayerTeleportEvent`. SpawnArena notices teleports itself, just after
+  they happen (from the teleport the server sends the player), and handles them as it would the event: teleporting while
+  queued takes you out of the queue, a teleport out of a fight counts, someone teleported into a running fight is put back.
+  Where it would have stopped a teleport, the player is moved back straight away instead (it can't be stopped beforehand).
+  If the server does fire the event for a teleport, that one isn't handled twice.
+- **No new worlds while running.** A MULTI crystal arena's copies are made through the
+  Worlds plugin (by TheNextLvl) if it's installed (it can make worlds on Folia), or must be made
+  beforehand (`spawnarena_<arena>_<n>`, any terrain); missing ones are waited for for a minute after starting.
+  `/crystalcopies` shows each copy (ready, a match on, being put back, or still waited for), looks for their worlds again,
+  or copies the arena into one again.
+- **No FastAsyncWorldEdit.** FAWE doesn't support Folia, so arenas are pasted and copied with plain WorldEdit, a chunk at a
+  time on each chunk's own region thread (an arena can lie across regions). A crystal arena's reset after each fight then
+  takes a few seconds, during which it isn't used.
+- **The viewing arena** (MULTI crystal matches merged into the real arena) updates every other tick instead of every tick:
+  what it shows is read on the threads that own it and handed over.
 - **No `/reload`.** Restart the server to update the plugin.
 
 LeafMC isn't Folia: it fires teleport events and runs FAWE, so none of the above applies there.

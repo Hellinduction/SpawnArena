@@ -155,8 +155,9 @@ public final class SettingsConfig {
             "which some anticheats may flag. Set to false and Ice Rink is never picked in MULTI arenas (SINGLE arenas use real ice)."})
     public boolean sumoIceInMulti = true;
 
-    @Comment({"Crystal arenas in MULTI mode (Paper/Leaf, not Folia): how many matches can run at once. Each is fought in a",
-            "full copy of the arena in a world of its own (spawnarena_<arena>_<n>), made with the Spawn world's settings."})
+    @Comment({"Crystal arenas in MULTI mode: how many matches can run at once. Each is fought in a full copy of the arena in a",
+            "world of its own (spawnarena_<arena>_<n>), made with the Spawn world's settings. On plain Folia, which can't make",
+            "worlds while running, they're made through the Worlds plugin, or must be made beforehand (/crystalcopies)."})
     public int crystalMultiMatches = 3;
 
     @Comment({"How far around a MULTI crystal arena's region is copied for its matches (walls, deck, dome), in blocks each way.",
@@ -217,6 +218,11 @@ public final class SettingsConfig {
     @Comment("LuckPerms priority of that suffix: high, so it shows over any suffix a rank or other plugin gives")
     public int topEloSuffixPriority = 1000;
 
+    @Comment({"Folia only: whether this server fires teleport and respawn events (plain Folia fires none; Canvas and forks of it,",
+            "like Vex, do). false: SpawnArena notices teleports itself, just after they happen (from what the server sends the",
+            "player), and treats them as it treats a teleport event, moving the player back if it would have stopped it. It also",
+            "notices by itself when this server does fire them, and then uses them. true: it relies on the events alone."})
+    public boolean foliaPatchedTeleportEvent = false;
 
     @Comment({"Commands fighters can still use mid-fight (all others are blocked): messaging, and staff punishing someone",
             "(players without the permission just get the usual \"no permission\"). Each one's aliases are allowed too (e.g. msg",

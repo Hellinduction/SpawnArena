@@ -68,7 +68,8 @@ public final class TournamentWins extends OwnedModule implements Listener {
          this.expansion.register();
       }
 
-      Bukkit.getScheduler().runTaskTimerAsynchronously(this.owner, this::refresh, 1L, 200L);
+      // Paper's async scheduler (it works on Folia too, the Bukkit one doesn't): every 10 s
+      Bukkit.getAsyncScheduler().runAtFixedRate(this.owner, task -> this.refresh(), 50L, 10_000L, java.util.concurrent.TimeUnit.MILLISECONDS);
    }
 
    public void onDisable() {

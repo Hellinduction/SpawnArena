@@ -42,6 +42,8 @@ public final class ArenaReplay {
     /** Where they were before being brought here (null: they were close enough already) */
     final Location cameFrom;
     private final long endMs;
+    /** The last frame anyone has (the match's end): the replay runs on a little past it, for the last one going in */
+    private final long lastFrameMs;
     private double clock;
     private double speed = 1;
     private boolean paused;
@@ -70,6 +72,8 @@ public final class ArenaReplay {
         final UUID uuid = UUID.randomUUID();
         final Object profile;
         final ItemStack hand;
+        /** Its name tag, as a team of the viewer's (null: none of ours; an online fighter's comes from TAB) */
+        Object team;
         int frame = -1;
         boolean shown, crouched, sprinting;
         float lastYaw = Float.NaN;
@@ -116,7 +120,8 @@ public final class ArenaReplay {
         for (final Recording.Fighter f : rec.fighters)
             if (f.frames > 0)
                 end = Math.max(end, f.time[f.frames - 1]);
-        this.endMs = end;
+        this.lastFrameMs = end;
+        this.endMs = end + 600;
     }
 
     public static ArenaReplay of(final Player p) {
@@ -157,7 +162,7 @@ public final class ArenaReplay {
                 } catch (final RuntimeException ignored) {
                     // no skin (a Bedrock player, or the lookup failed): the default one
                 }
-                looks.add(new Object[]{f, skin});
+                looks.add(new Object[]{f, skin, nameTag(f)});
             }
             final ItemStack hand = handItem(rec.variant(), arena);
             final Location a = arena.spawnPoint1, b = arena.spawnPoint2;
@@ -204,7 +209,9 @@ public final class ArenaReplay {
                 final com.destroystokyo.paper.profile.PlayerProfile shown = Bukkit.createProfile(UUID.randomUUID(), f.name.length() > 16 ? f.name.substring(0, 16) : f.name);
                 if (look[1] != null)
                     shown.setProperties(((com.destroystokyo.paper.profile.PlayerProfile) look[1]).getProperties());
-                replay.puppets.add(replay.new Puppet(f, BotPuppet.authlibCopy.invoke(null, shown), hand));
+                final Puppet puppet = replay.new Puppet(f, BotPuppet.authlibCopy.invoke(null, shown), hand);
+                puppet.team = look.length > 2 ? look[2] : null;
+                replay.puppets.add(puppet);
             }
         } catch (final ReflectiveOperationException | RuntimeException e) {
             viewer.sendMessage("§cCouldn't draw the players: " + e);
@@ -353,11 +360,18 @@ public final class ArenaReplay {
 
     private void draw(final Puppet p) throws ReflectiveOperationException {
         final Recording.Fighter f = p.f;
-        // Out of the match (in the water, or eliminated): gone a moment after their last frame
-        final boolean gone = this.clock > f.time[f.frames - 1] + 400 || this.clock < f.time[0] - 50;
+        // Out of the match (in the water, or eliminated): gone a moment after their last frame. Everyone's frames end with
+        // the match, so at the end only the losers go: the winners stay standing
+        final long last = f.time[f.frames - 1];
+        final boolean out = !f.won || last < this.lastFrameMs - 1000;
+        final boolean gone = (out && this.clock > last + 400) || this.clock < f.time[0] - 50;
         if (gone) {
-            if (p.shown)
+            if (p.shown) {
+                // Out at the end of their frames (into the water, playing on): the splash
+                if (this.clock > last && p.frame >= f.frames - 3)
+                    this.sound(p, org.bukkit.Sound.ENTITY_PLAYER_SPLASH);
                 this.despawn(p);
+            }
             return;
         }
         final double[] at = p.at(this.clock);
@@ -371,8 +385,11 @@ public final class ArenaReplay {
             for (int i = p.frame + 1; i <= frame; i++) {
                 if (f.has(i, Recording.SWUNG))
                     this.swing(p);
-                if (f.has(i, Recording.HURT) || f.hasMore(i, Recording.SHOT))
+                if (f.has(i, Recording.HURT) || f.hasMore(i, Recording.SHOT)) {
                     BotPuppet.send(this.viewer, BotPuppet.hurtPacket.newInstance(p.id, 0f));
+                    this.sound(p, f.hasMore(i, Recording.SHOT) ? org.bukkit.Sound.ENTITY_ARROW_HIT_PLAYER : org.bukkit.Sound.ENTITY_PLAYER_ATTACK_KNOCKBACK);
+                    this.sound(p, org.bukkit.Sound.ENTITY_PLAYER_HURT);
+                }
             }
         p.frame = frame;
         final boolean onGround = f.has(frame, Recording.GROUND);
@@ -394,6 +411,8 @@ public final class ArenaReplay {
         BotPuppet.send(this.viewer, BotPuppet.infoPacket.newInstance(EnumSet.of((Enum) BotPuppet.addPlayer),
                 BotPuppet.infoEntry.newInstance(p.uuid, p.profile, false, 0, BotPuppet.survival, null, true, 0, null)));
         BotPuppet.send(this.viewer, BotPuppet.addPacket.newInstance(p.id, p.uuid, x, y, z, pitch, yaw, BotPuppet.playerType, 0, BotPuppet.zero, (double) yaw));
+        if (p.team != null)
+            BotPuppet.send(this.viewer, BotPuppet.teamPacket.invoke(null, p.team, true));
         p.shown = true;
         p.crouched = p.f.has(Math.max(0, p.frame), Recording.SNEAKING);
         this.data(p);
@@ -410,8 +429,72 @@ public final class ArenaReplay {
         try {
             BotPuppet.send(this.viewer, BotPuppet.removePacket.newInstance((Object) new int[]{p.id}));
             BotPuppet.send(this.viewer, BotPuppet.infoRemovePacket.newInstance(List.of(p.uuid)));
+            if (p.team != null)
+                BotPuppet.send(this.viewer, BotPuppet.teamRemovePacket.invoke(null, p.team));
         } catch (final ReflectiveOperationException | RuntimeException ignored) {
             // they've left
+        }
+    }
+
+    /** A sound where this fighter is drawn now, to the viewer only. */
+    private void sound(final Puppet p, final org.bukkit.Sound sound) {
+        final double[] at = p.at(this.clock);
+        this.viewer.playSound(new org.bukkit.Location(this.world, this.cx + at[1], this.cy + at[2] + 1, this.cz + at[3]), sound,
+                org.bukkit.SoundCategory.PLAYERS, 1f, 0.9f + (float) Math.random() * 0.2f);
+    }
+
+    /** Legacy colour codes (&a...) to the game's colour names, for a name tag's colour. */
+    private static final String CODES = "0123456789abcdef";
+    private static final String[] COLOURS = {"black", "dark_blue", "dark_green", "dark_aqua", "dark_red", "dark_purple", "gold", "gray",
+            "dark_gray", "blue", "green", "aqua", "red", "light_purple", "yellow", "white"};
+
+    /**
+     * An offline fighter's name tag (their LuckPerms prefix and suffix, as TAB would show them), as a team for the viewer's
+     * game; null for one who's online (TAB's own team, which has their name, already shows on the replay) or without
+     * LuckPerms. Off the main thread: it may load them from LuckPerms' storage.
+     */
+    private static Object nameTag(final Recording.Fighter f) {
+        if (Bukkit.getPlayer(f.uuid) != null || !Bukkit.getPluginManager().isPluginEnabled("LuckPerms"))
+            return null;
+        try {
+            final String[] fixes = LuckPermsTags.of(f.uuid);
+            if (fixes == null || (fixes[0] == null && fixes[1] == null))
+                return null;
+            final net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer legacy =
+                    net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.builder().character('&').hexColors().build();
+            final String name = f.name.length() > 16 ? f.name.substring(0, 16) : f.name;
+            final Object team = BotPuppet.teamCtor.newInstance(BotPuppet.scoreboardCtor.newInstance(), "sa_rp_" + Integer.toString(Math.abs(f.uuid.hashCode()), 36));
+            if (fixes[0] != null) {
+                BotPuppet.setPrefix.invoke(team, BotPuppet.asVanilla.invoke(null, legacy.deserialize(fixes[0])));
+                // The name takes the prefix's last colour, as it would in chat
+                final java.util.regex.Matcher m = java.util.regex.Pattern.compile("[&\u00a7]([0-9a-fA-F])").matcher(fixes[0]);
+                String last = null;
+                while (m.find())
+                    last = COLOURS[CODES.indexOf(Character.toLowerCase(m.group(1).charAt(0)))];
+                final Object colour = last == null ? null : BotPuppet.formattingByName.invoke(null, last);
+                if (colour != null)
+                    BotPuppet.setColour.invoke(team, colour);
+            }
+            if (fixes[1] != null)
+                BotPuppet.setSuffix.invoke(team, BotPuppet.asVanilla.invoke(null, legacy.deserialize(fixes[1])));
+            @SuppressWarnings("unchecked") final java.util.Collection<String> members = (java.util.Collection<String>) BotPuppet.teamPlayers.invoke(team);
+            members.add(name);
+            return team;
+        } catch (final ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return null;
+        }
+    }
+
+    /** Everything that touches LuckPerms' classes, only loaded once LuckPerms is known to be there. */
+    private static final class LuckPermsTags {
+        /** {prefix, suffix} (either may be null), or null if they can't be loaded. */
+        static String[] of(final UUID uuid) {
+            final net.luckperms.api.LuckPerms lp = net.luckperms.api.LuckPermsProvider.get();
+            final net.luckperms.api.model.user.User user = lp.getUserManager().loadUser(uuid).join();
+            if (user == null)
+                return null;
+            final net.luckperms.api.cacheddata.CachedMetaData meta = user.getCachedData().getMetaData();
+            return new String[]{meta.getPrefix(), meta.getSuffix()};
         }
     }
 

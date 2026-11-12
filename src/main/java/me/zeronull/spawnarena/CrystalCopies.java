@@ -21,7 +21,13 @@ import java.util.logging.Level;
  * ("spawnarena_<arena>_<n>", empty apart from the copy) at the very same coordinates, so everything about the arena
  * (its WorldGuard regions, spawns, schematic, clean-up) works the same there. Each world gets the Spawn world's
  * difficulty, PvP, game rules, time and weather, and the WorldGuard regions around the arena. The number of copies is
- * crystalMultiMatches. Not on Folia, which can't create worlds while running.
+ * crystalMultiMatches.
+ *
+ * <p>Folia: everything here is done on the global thread (game rules, time, weather and the world border are the global
+ * region's), and the arena is copied in a chunk at a time on each chunk's own thread (see {@link RegionArenaEdits}). Plain
+ * Folia can't create worlds while running: there the Worlds plugin makes them (see {@link WorldsBridge}), or without it
+ * they must be made beforehand (named as above, any terrain: the copied box is emptied first). Either way they're waited
+ * for for up to a minute. Forks that can create worlds (Canvas and those built on it) get them made as on Paper.
  */
 public final class CrystalCopies {
     /** Real arena (lower-case name) -> its copies, 1 first. */
@@ -31,8 +37,26 @@ public final class CrystalCopies {
 
     private CrystalCopies() {}
 
+    /** How long missing worlds are waited for where they can't be made (plain Folia): checked every second. */
+    private static final int WAIT_SECONDS = 60;
+    /** False once this server has refused to create a world (plain Folia): from then on the worlds are only waited for. */
+    private static volatile boolean canCreateWorlds = true;
+    /** Real arena (lower-case name) -> copies whose worlds are still being waited for (plain Folia), by number. */
+    private static final Map<String, Set<Integer>> WAITING = new ConcurrentHashMap<>();
+
     public static boolean supported() {
-        return !Threads.FOLIA && Arena.ArenaUtils.WORLD_EDIT_SUPPORT;
+        return Arena.ArenaUtils.WORLD_EDIT_SUPPORT;
+    }
+
+    /** The copies of this arena whose worlds aren't there yet and are being waited for (plain Folia), by number. */
+    public static Set<Integer> waitingFor(final Arena real) {
+        final Set<Integer> waiting = WAITING.get(real.getArenaName().toLowerCase(Locale.ROOT));
+        return waiting == null ? Set.of() : Set.copyOf(waiting);
+    }
+
+    /** Whether this server makes the copies' worlds itself (false on plain Folia, once it's refused to). */
+    public static boolean canCreateWorlds() {
+        return canCreateWorlds;
     }
 
     /** The copy whose world this is, or null. */
@@ -58,7 +82,7 @@ public final class CrystalCopies {
         return null;
     }
 
-    private static String worldName(final Arena real, final int index) {
+    public static String worldName(final Arena real, final int index) {
         return "spawnarena_" + real.getArenaName().toLowerCase(Locale.ROOT) + "_" + index;
     }
 
@@ -82,20 +106,44 @@ public final class CrystalCopies {
      * copies the arena as it is on spawn into them. Completes once every copy is ready.
      */
     public static CompletableFuture<Void> setUp(final SavableArena real, final boolean recopy) {
+        return setUp(real, recopy, 0);
+    }
+
+    /** {@code attempt} 1 and up: the worlds still missing are looked for again (only those: the rest are set up already). */
+    private static CompletableFuture<Void> setUp(final SavableArena real, final boolean recopy, final int attempt) {
         if (!supported())
             return CompletableFuture.completedFuture(null);
+        // Folia: on the global thread (on starting, once the server ticks: after any worlds other plugins make)
+        if (Threads.FOLIA && !Bukkit.isGlobalTickThread()) {
+            final CompletableFuture<Void> done = new CompletableFuture<>();
+            Threads.global(() -> setUp(real, recopy, attempt).whenComplete((ok, error) -> {
+                if (error != null)
+                    done.completeExceptionally(error);
+                else
+                    done.complete(null);
+            }));
+            return done;
+        }
         final World spawn = real.spawnPoint1 == null ? null : real.spawnPoint1.getWorld();
         if (spawn == null)
             return CompletableFuture.completedFuture(null);
         final int wanted = Math.max(1, SpawnArena.settings == null ? 3 : SpawnArena.settings.crystalMultiMatches);
         final List<CrystalCopy> copies = new ArrayList<>(of(real));
         final List<CompletableFuture<Void>> work = new ArrayList<>();
+        final Set<Integer> missing = new TreeSet<>();
         for (int i = 1; i <= wanted; i++) {
             final int index = i;
             if (copies.stream().anyMatch(c -> c.index() == index)) {
+                if (attempt > 0)
+                    continue; // set up on the first go: only the missing ones are looked for again
                 final CrystalCopy existing = copies.stream().filter(c -> c.index() == index).findFirst().orElseThrow();
                 existing.sync();
-                if (recopy && existing.getFights().isEmpty())
+                // (SpawnArena turned off and on again in the same run keeps its copies: one whose match was cut off is
+                // copied in again here, as it would be after a restart)
+                final boolean leftOver = existing.getFights().isEmpty() && CrystalCopy.leftInUse(existing.world());
+                if (leftOver)
+                    SpawnArena.INSTANCE.getLogger().info("A match in " + existing.world().getName() + " was never put back: copying the arena in again.");
+                if ((recopy || leftOver) && existing.getFights().isEmpty())
                     work.add(copyArena(real, spawn, existing.world(), true).thenRun(existing::markClean));
                 decorate(real, spawn, existing.world());
                 continue;
@@ -103,8 +151,11 @@ public final class CrystalCopies {
             final String name = worldName(real, index);
             final boolean isNew = Bukkit.getWorld(name) == null && !new java.io.File(Bukkit.getWorldContainer(), name).exists();
             final World world = createWorld(name, spawn, spawn.getBiome(real.spawnPoint1));
-            if (world == null)
+            if (world == null) {
+                if (!canCreateWorlds)
+                    missing.add(index);
                 continue;
+            }
             matchSettings(world, spawn);
             try {
                 copyRegions(real, spawn, world);
@@ -117,18 +168,78 @@ public final class CrystalCopies {
             final boolean leftOver = !isNew && CrystalCopy.leftInUse(world);
             if (leftOver)
                 SpawnArena.INSTANCE.getLogger().info("A match in " + name + " was never put back: copying the arena in again.");
-            if (recopy || isNew || leftOver)
-                work.add(copyArena(real, spawn, world, !isNew).thenRun(copy::markClean));
+            // A world made beforehand by someone else (plain Folia) has nothing of ours in it yet
+            final boolean neverCopied = !isNew && lastBox(world) == null;
+            if (recopy || isNew || leftOver || neverCopied) {
+                copy.setResetting(true); // no match in it until the arena is
+                work.add(copyArena(real, spawn, world, !isNew).whenComplete((ok, error) -> {
+                    copy.markClean();
+                    copy.setResetting(false);
+                    Threads.global(() -> real.queue.tryStartFight());
+                }));
+            }
             decorate(real, spawn, world);
         }
         copies.sort(Comparator.comparingInt(CrystalCopy::index));
-        COPIES.put(real.getArenaName().toLowerCase(Locale.ROOT), List.copyOf(copies));
+        final String key = real.getArenaName().toLowerCase(Locale.ROOT);
+        COPIES.put(key, List.copyOf(copies));
+        // Worlds this server can't make: waited for (another plugin may still be loading them), then given up on
+        if (missing.isEmpty())
+            WAITING.remove(key);
+        else if (attempt < WAIT_SECONDS) {
+            WAITING.put(key, Set.copyOf(missing));
+            if (attempt == 0 && !WorldsBridge.available())
+                SpawnArena.INSTANCE.getLogger().info("Waiting for world(s) " + names(real, missing) + " for " + real.getArenaName()
+                        + "'s copies: this server can't create worlds, so they must be made beforehand, or install the Worlds plugin.");
+            final CompletableFuture<Void> later = new CompletableFuture<>();
+            Threads.globalLater(() -> {
+                if (!WAITING.containsKey(key)) { // retired meanwhile
+                    later.complete(null);
+                    return;
+                }
+                setUp(real, recopy, attempt + 1).whenComplete((ok, error) -> later.complete(null));
+            }, 20L);
+            work.add(later);
+        } else {
+            WAITING.remove(key);
+            SpawnArena.INSTANCE.getLogger().warning("Gave up waiting for world(s) " + names(real, missing) + ": " + real.getArenaName()
+                    + " runs with " + copies.size() + " cop" + (copies.size() == 1 ? "y" : "ies") + ". Make them (empty or not), then "
+                    + "/crystalcopies setup " + real.getArenaName() + " or restart.");
+        }
         // The server's combat logger mustn't treat the copies as somewhere new (or tag fighters going in and out of them)
         final List<String> names = new ArrayList<>();
         for (final CrystalCopy copy : copies)
             names.add(copy.world().getName());
         CombatLoggerWorlds.include(names);
         return CompletableFuture.allOf(work.toArray(new CompletableFuture[0]));
+    }
+
+    private static String names(final Arena real, final Set<Integer> indexes) {
+        final List<String> names = new ArrayList<>();
+        for (final int index : indexes)
+            names.add(worldName(real, index));
+        return String.join(", ", names);
+    }
+
+    /**
+     * Copies the real arena into this copy again, as when it was first made (/crystalcopies reset): no match starts in
+     * it meanwhile. Fails if a match is being fought in it or it's being copied or put back already.
+     */
+    public static CompletableFuture<Void> recopy(final CrystalCopy copy) {
+        final World spawn = copy.real().spawnPoint1 == null ? null : copy.real().spawnPoint1.getWorld();
+        if (spawn == null)
+            return CompletableFuture.failedFuture(new IllegalStateException(copy.real().getArenaName() + " has no spawn points"));
+        // Under the real arena's lock, as a new match picking a free copy is (ArenaQueue#target)
+        synchronized (copy.real()) {
+            if (!copy.getFights().isEmpty() || copy.isResetting())
+                return CompletableFuture.failedFuture(new IllegalStateException("a match is being fought in it, or it's being put back"));
+            copy.setResetting(true);
+        }
+        return copyArena(copy.real(), spawn, copy.world(), true).whenComplete((ok, error) -> {
+            copy.markClean();
+            copy.setResetting(false);
+            Threads.global(() -> copy.real().queue.tryStartFight());
+        });
     }
 
     /** The real arena's settings changed (reloaded, set up again): its copies take them. */
@@ -139,6 +250,7 @@ public final class CrystalCopies {
 
     /** No longer MULTI (or deleted): its copies aren't used for new matches. Their worlds stay for next time. */
     public static void retire(final Arena real) {
+        WAITING.remove(real.getArenaName().toLowerCase(Locale.ROOT));
         final List<CrystalCopy> copies = COPIES.remove(real.getArenaName().toLowerCase(Locale.ROOT));
         if (copies != null)
             for (final CrystalCopy copy : copies) {
@@ -200,6 +312,8 @@ public final class CrystalCopies {
         final World existing = Bukkit.getWorld(name);
         if (existing != null)
             return existing;
+        if (!canCreateWorlds)
+            return makeThroughWorlds(name, biome); // plain Folia
         try {
             return new WorldCreator(name)
                     .environment(like.getEnvironment())
@@ -208,14 +322,53 @@ public final class CrystalCopies {
                     .generateStructures(false)
                     .keepSpawnLoaded(net.kyori.adventure.util.TriState.FALSE) // nothing's around its spawn: don't hold the server up loading it
                     .createWorld();
+        } catch (final UnsupportedOperationException e) {
+            // Plain Folia: no new worlds while it runs (Canvas and forks of it can)
+            canCreateWorlds = false;
+            return makeThroughWorlds(name, biome);
         } catch (final RuntimeException e) {
             SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Couldn't create world " + name + " for a crystal arena copy", e);
             return null;
         }
     }
 
+    /** Worlds being made through the Worlds plugin (plain Folia), and those it couldn't make (not tried again). */
+    private static final Set<String> MAKING = ConcurrentHashMap.newKeySet(), COULDNT_MAKE = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Plain Folia: has the Worlds plugin make the world (or load it, if its folder is there), which it can do while the
+     * server runs. Null for now: it's picked up on a later look (see setUp's waiting) once it's there.
+     */
+    private static World makeThroughWorlds(final String name, final org.bukkit.block.Biome biome) {
+        if (!WorldsBridge.available() || COULDNT_MAKE.contains(name) || !MAKING.add(name))
+            return null;
+        SpawnArena.INSTANCE.getLogger().info("Making world " + name + " through the Worlds plugin (the server can't make it itself)...");
+        WorldsBridge.create(name, new Empty(), new OneBiome(biome)).whenComplete((world, error) -> {
+            MAKING.remove(name);
+            if (error != null) {
+                COULDNT_MAKE.add(name);
+                SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "The Worlds plugin couldn't make world " + name + " for a crystal arena copy", error);
+            }
+        });
+        return null;
+    }
+
+    /** Whether worlds this server can't make itself are made through the Worlds plugin instead. */
+    public static boolean viaWorldsPlugin() {
+        return !canCreateWorlds && WorldsBridge.available();
+    }
+
     /** Nothing at all: the arena is copied in. */
-    private static final class Empty extends org.bukkit.generator.ChunkGenerator {}
+    private static final class Empty extends org.bukkit.generator.ChunkGenerator {
+        /**
+         * A spawn point given, so the server doesn't search the empty world for ground to put it on (seconds of loading
+         * chunks while the world is made, holding up the global thread on Folia). It's set to Spawn's right after anyway.
+         */
+        @Override
+        public org.bukkit.Location getFixedSpawnLocation(final World world, final java.util.Random random) {
+            return new org.bukkit.Location(world, 0.5, 100, 0.5);
+        }
+    }
 
     /** The same biome everywhere (the world's own seed would give every copy different grass and water colours). */
     private static final class OneBiome extends org.bukkit.generator.BiomeProvider {

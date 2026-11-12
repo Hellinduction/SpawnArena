@@ -33,6 +33,10 @@ public final class CrystalCopy extends Arena {
 
     /** Put back after its match. */
     public void markClean() {
+        // Folia, while SpawnArena is stopping: the copy couldn't really be put back (see CrystalPvp#cleanup), so it
+        // stays marked and the next start copies the arena in again
+        if (Threads.FOLIA && !SpawnArena.INSTANCE.isEnabled())
+            return;
         Threads.global(() -> this.world.getPersistentDataContainer().remove(IN_USE));
     }
 

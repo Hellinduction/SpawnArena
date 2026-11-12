@@ -37,7 +37,7 @@ public final class Threads {
         if (entity == null)
             return;
         if (shuttingDown() || Bukkit.isOwnedByCurrentRegion(entity)) {
-            task.run();
+            runNow(task);
             return;
         }
         entity.getScheduler().execute(SpawnArena.INSTANCE, task, null, 1L);
@@ -48,7 +48,7 @@ public final class Threads {
         if (location == null || location.getWorld() == null)
             return;
         if (shuttingDown() || Bukkit.isOwnedByCurrentRegion(location)) {
-            task.run();
+            runNow(task);
             return;
         }
         Bukkit.getRegionScheduler().execute(SpawnArena.INSTANCE, location, task);
@@ -172,6 +172,24 @@ public final class Threads {
      * While the plugin is disabling, nothing can be scheduled any more, so work runs where it's called
      * (Folia lets the shutdown thread touch everything).
      */
+    /**
+     * Runs it here and now. While SpawnArena is stopping on Folia, work for something another thread owns may be
+     * refused (reading its world from here): that piece is skipped, so the rest of the shutdown still happens (giving
+     * fighters their things back...); what it would have put back is done at the next start instead.
+     */
+    private static void runNow(final Runnable task) {
+        if (!FOLIA || !shuttingDown()) {
+            task.run();
+            return;
+        }
+        try {
+            task.run();
+        } catch (final IllegalStateException e) {
+            if (SpawnArena.INSTANCE != null)
+                SpawnArena.INSTANCE.getLogger().fine("Skipped while stopping (not this thread's to do on Folia): " + e.getMessage());
+        }
+    }
+
     private static boolean shuttingDown() {
         return SpawnArena.INSTANCE == null || !SpawnArena.INSTANCE.isEnabled();
     }
@@ -197,7 +215,14 @@ public final class Threads {
             player.teleportAsync(to).whenComplete((ok, error) -> result.complete(error == null && Boolean.TRUE.equals(ok)));
         };
 
-        if (shuttingDown() || Bukkit.isOwnedByCurrentRegion(player))
+        // Folia, into another world: never in the middle of whatever is running for them (e.g. a lethal hit ending their
+        // match): the teleport takes them out of their world at once, and the server, carrying on with the hit, then finds
+        // them in another world than the region it's ticking and crashes it. So it's a tick later, on their thread.
+        final boolean otherWorld = FOLIA && to.getWorld() != null && !to.getWorld().equals(player.getWorld());
+        if (otherWorld)
+            CrystalView.beforeWorldChange(player); // (Folia fires no teleport event to tell it)
+        me.zeronull.spawnarena.events.FoliaTeleports.expect(player, to); // (plain Folia: noticed as a PLUGIN teleport)
+        if (shuttingDown() || (Bukkit.isOwnedByCurrentRegion(player) && !otherWorld))
             teleport.run();
         else if (!player.getScheduler().execute(SpawnArena.INSTANCE, teleport, () -> result.complete(false), 1L))
             result.complete(false); // player is gone

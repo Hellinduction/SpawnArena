@@ -128,7 +128,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
 
         if (arena.isCrystalPvp()) {
             if (!me.zeronull.spawnarena.CrystalCopies.supported()) {
-                sender.sendMessage(ChatColor.RED + "Crystal PvP arenas run one fight at a time (SINGLE) on this server: MULTI needs Paper or a fork of it (not Folia).");
+                sender.sendMessage(ChatColor.RED + "Crystal PvP arenas run one fight at a time (SINGLE) on this server: MULTI needs WorldGuard and WorldEdit.");
                 return true;
             }
             if (arena.getArenaMode() == ArenaMode.MULTI) {

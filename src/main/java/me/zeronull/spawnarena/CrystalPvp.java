@@ -555,6 +555,13 @@ public final class CrystalPvp {
      */
     public static java.util.concurrent.CompletableFuture<Void> cleanup(final Fight fight) {
         final Arena arena = fight.getArena();
+        // Folia, while SpawnArena is stopping: nothing can be handed to the region threads any more, and the world
+        // can't be touched from here, so the fight stays on record (saved) and the next start puts the arena back
+        // (as after a crash: its blocks, crystals, and a re-paste or re-copy)
+        if (Threads.FOLIA && !SpawnArena.INSTANCE.isEnabled()) {
+            saveNow();
+            return java.util.concurrent.CompletableFuture.completedFuture(null);
+        }
         final Track track = take(fight);
         if (track == null)
             return java.util.concurrent.CompletableFuture.completedFuture(null);

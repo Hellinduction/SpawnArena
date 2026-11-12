@@ -38,11 +38,40 @@ public final class MatchSounds implements Listener {
 
         @Override
         public void write(final ChannelHandlerContext ctx, final Object msg, final ChannelPromise promise) throws Exception {
-            if (msg != null && msg.getClass().getSimpleName().equals("ClientboundSoundPacket") && fromOtherMatch(this.player, msg)) {
+            final String name = msg == null ? "" : msg.getClass().getSimpleName();
+            if (name.equals("ClientboundSoundPacket") && fromOtherMatch(this.player, msg)) {
                 promise.setSuccess();
                 return;
             }
+            // In a MULTI crystal arena's copy: the sound goes to those watching on spawn too (once, see CrystalView)
+            if (name.equals("ClientboundSoundPacket"))
+                relayFromCopy(this.player, msg);
+            // Plain Folia: a teleport the server fires no event for (see FoliaTeleports)
+            if (name.equals("ClientboundPlayerPositionPacket"))
+                me.zeronull.spawnarena.events.FoliaTeleports.teleportSent(this.player);
             super.write(ctx, BotPuppet.forWatcher(this.botsAsPlayers, ctx, msg), promise);
+        }
+    }
+
+    private static volatile Method getSeed;
+
+    /** A sound heard in a crystal arena's copy: handed to its viewing arena (CrystalView#relaySound). */
+    private static void relayFromCopy(final Player receiver, final Object packet) {
+        try {
+            final org.bukkit.World world = receiver.getWorld();
+            if (CrystalCopies.at(world) == null)
+                return;
+            if (getX == null) {
+                getX = packet.getClass().getMethod("getX");
+                getY = packet.getClass().getMethod("getY");
+                getZ = packet.getClass().getMethod("getZ");
+            }
+            if (getSeed == null)
+                getSeed = packet.getClass().getMethod("getSeed");
+            CrystalView.relaySound(world, packet, (double) getX.invoke(packet), (double) getY.invoke(packet), (double) getZ.invoke(packet),
+                    (long) getSeed.invoke(packet));
+        } catch (final ReflectiveOperationException | RuntimeException ignored) {
+            // never let relaying a sound break someone's connection
         }
     }
 
@@ -97,6 +126,11 @@ public final class MatchSounds implements Listener {
         } catch (final Throwable t) {
             return false; // never let a sound check break someone's connection
         }
+    }
+
+    /** Whether players' connections are being watched (each packet sent to them seen here). */
+    public static boolean watchingPackets() {
+        return !broken;
     }
 
     @EventHandler(priority = EventPriority.MONITOR)

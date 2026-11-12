@@ -10,6 +10,7 @@ softdepend:
   - WorldGuard
   - PlaceholderAPI
   - FancyHolograms
+  - Worlds
   - FancyNpcs
   - bunnyAC
   - Vulcan
@@ -49,7 +50,7 @@ commands:
     permission-message: "§cYou don't have permission!"
   togglearenamode:
     description: Switch an arena between SINGLE and MULTI or free-for-all on and off with "ffa" (only while it's empty), or random sumo variants on and off with "random" (sumo arenas only, from the next match), or combo (no hit delay, softer knockback) on and off with "combo"
-    usage: "/togglearenamode <arena> [ffa|random|combo]"
+    usage: "/togglearenamode <arena> [ffa|random|combo|spleef]"
     permission: spawnarena.togglearenamode
     permission-message: "§cYou don't have permission!"
   setupfight:
@@ -133,6 +134,12 @@ commands:
     description: Set how many Totems of Undying can save each fighter per fight in an arena (0 = no limit)
     usage: "/arenatotems <arena> [limit]"
     permission: spawnarena.arenatotems
+    permission-message: "§cYou don't have permission!"
+
+  crystalcopies:
+    description: The copies MULTI crystal arenas' matches are fought in (each in a world of its own) - see which are ready, look for their worlds again, or copy the arena into one again
+    usage: "/crystalcopies [setup <arena> | reset <arena> <number|all>]"
+    permission: spawnarena.crystalcopies
     permission-message: "§cYou don't have permission!"
 
   arenacheck:
@@ -265,6 +272,8 @@ permissions:
   spawnarena.arenatotems:
     default: op
   spawnarena.arenacheck:
+    default: op
+  spawnarena.crystalcopies:
     default: op
   spawnarena.matches:
     description: Can open /matches and watch their own recorded matches back

@@ -136,7 +136,8 @@ public final class ArenaTeleportGrace implements Listener {
         final Fight fight = runningFight(player);
         final Location to = e.getTo();
         final Location from = e.getFrom();
-        if (fight == null || to == null || from == null || to.getWorld() != from.getWorld() || fight.isSpawnTeleport(player, to))
+        if (fight == null || to == null || from == null || to.getWorld() != from.getWorld() || fight.isSpawnTeleport(player, to)
+                || accepted(player, to))
             return;
         // Only blocks this thread may read (on Folia the destination can belong to another region)
         if (!to.isChunkLoaded() || !org.bukkit.Bukkit.isOwnedByCurrentRegion(to))
@@ -178,7 +179,7 @@ public final class ArenaTeleportGrace implements Listener {
             return; // our own rescue teleport must not grant another window
 
         final Fight fight = runningFight(player);
-        if (fight == null || fight.isSpawnTeleport(player, e.getTo()))
+        if (fight == null || fight.isSpawnTeleport(player, e.getTo()) || accepted(player, e.getTo()))
             return;
         // Only a teleport that put them in danger (or where we can't tell): one that left them somewhere safe isn't to
         // blame if they're knocked in afterwards
@@ -325,6 +326,16 @@ public final class ArenaTeleportGrace implements Listener {
         GRACE.remove(player.getUniqueId());
         LAST_STEP.put(player.getUniqueId(), here);
         ARRIVING.put(player.getUniqueId(), new Arriving(here, System.currentTimeMillis() + STRAGGLER_MILLIS, true));
+    }
+
+    /**
+     * Whether {@code to} is where we were just told they're meant to be ({@link #accept}): no setback. On Folia the
+     * event for that teleport is made up after it happens (see FoliaTeleports), so it comes after the accept.
+     */
+    private static boolean accepted(final Player player, final Location to) {
+        final Arriving a = ARRIVING.get(player.getUniqueId());
+        return a != null && a.landed() && to != null && System.currentTimeMillis() <= a.until() && a.to().getWorld() == to.getWorld()
+                && a.to().distanceSquared(to) < 2.25;
     }
 
     public static void clear(final Player player) {

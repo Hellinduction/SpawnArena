@@ -49,7 +49,8 @@ public final class ArenaWinRate extends OwnedModule implements CommandExecutor {
       this.saveDefaultConfig();
       this.minimum = Math.max(1, this.getConfig().getInt("minimum-matches", 20));
       this.getCommand("arenawinrate").setExecutor(this);
-      this.getServer().getScheduler().runTaskTimerAsynchronously(this.owner, this::update, 20L, 600L);
+      // Paper's schedulers (they work on Folia too, the Bukkit one doesn't): every 30 s, from a second after starting
+      Bukkit.getAsyncScheduler().runAtFixedRate(this.owner, task -> this.update(), 1L, 30L, java.util.concurrent.TimeUnit.SECONDS);
    }
 
    public void onDisable() {
@@ -175,7 +176,7 @@ public final class ArenaWinRate extends OwnedModule implements CommandExecutor {
                }
 
                if (this.isEnabled()) {
-                  Bukkit.getScheduler().runTask(this.owner, () -> {
+                  Bukkit.getGlobalRegionScheduler().execute(this.owner, () -> {
                      if (this.isEnabled()) {
                         for (final Object e : var10.entrySet()) {
                            final Map.Entry entry = (Map.Entry) e;

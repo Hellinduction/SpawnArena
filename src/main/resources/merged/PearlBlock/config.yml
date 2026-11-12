@@ -1,0 +1,51 @@
+# PearlBlock configuration
+# Activate protection on a region with:  /rg flag <region> enderpearl deny
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Extra projectiles to block (in addition to ender pearls)
+# Uses Bukkit EntityType names. These are blocked/tracked using the same
+# enderpearl flag — if a region denies enderpearl, it also blocks these.
+# ──────────────────────────────────────────────────────────────────────────────
+extra-blocked-projectiles:
+  - EXPERIENCE_BOTTLE   # XP bottles — create many orbs, common lag source
+  - SPLASH_POTION       # Splash potions
+  - LINGERING_POTION    # Lingering potions — persistent area effects
+  # - SNOWBALL
+  # - EGG
+  # - ARROW
+  # - TRIDENT
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tracking
+# ──────────────────────────────────────────────────────────────────────────────
+
+# How far from a protected region (blocks) a pearl launch must be to start
+# tracking it. Pearls thrown far from any protected region are ignored.
+# Lower = fewer tracked pearls but increases the risk of missing a fast throw.
+track-radius: 64
+
+# How often (ticks) to check each tracked pearl's position. Default 2 = 10×/sec.
+check-interval-ticks: 2
+
+# How long (seconds) to keep tracking a pearl before giving up.
+# This prevents a stale entry for pearls that simply float away.
+# Exception: pearls sitting ≤2 blocks inside/beside a protected region are kept
+# indefinitely (stasis chamber guard).
+max-lifetime-seconds: 60
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Feedback
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Action-bar message shown when a player tries to throw inside a protected region.
+# Supports MiniMessage formatting: https://docs.advntr.dev/minimessage/format.html
+action-bar-message: "<red>Projectiles are not allowed here.</red>"
+
+# Message sent to the thrower when an in-flight projectile is removed.
+removal-message: "<red>That projectile was blocked by a protected region.</red>"
+
+# Notify the thrower when their pearl is removed while in flight.
+notify-thrower: true
+
+# Log a console line each time a pearl is removed. Rate-limited to avoid floods.
+log-removals: true

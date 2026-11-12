@@ -84,11 +84,9 @@ public class SpawnArena extends JavaPlugin {
         CrystalPvp.startSaving();
         // Plugins merged into SpawnArena (11 Nov), each with its own data folder as before: the arena guards
         // (FightTeleportGuard, CrystalFfaLiquids, PearlBlock; each can be turned off in
-        // guards.yml) and the stats modules (ArenaWinRate, TournamentWins). Not on Folia: they use the Bukkit scheduler.
-        if (!Threads.FOLIA) {
-            net.bunnymc.arena.guards.ArenaGuards.start(this);
-            net.bunnymc.merged.ArenaStatsModules.start(this);
-        }
+        // guards.yml) and the stats modules (ArenaWinRate, TournamentWins). On Paper and Folia alike.
+        net.bunnymc.arena.guards.ArenaGuards.start(this);
+        net.bunnymc.merged.ArenaStatsModules.start(this);
     }
 
     private void registerEvents() {
@@ -149,11 +147,14 @@ public class SpawnArena extends JavaPlugin {
             Bukkit.getServer().getPluginManager().registerEvents(new LeaderboardHolograms.WorldChange(), this);
         }
         Bukkit.getServer().getPluginManager().registerEvents(new Spleef(), this);
+        // Plain Folia fires no teleport events: they're noticed just after and given to SpawnArena's handlers
+        Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.FoliaTeleports(), this);
+        me.zeronull.spawnarena.events.FoliaTeleports.start();
         if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaSpectatorGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new ArenaBoundaryGuard(), this);
             Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.CrystalArenaListener(), this);
-            if (CrystalCopies.supported()) {
+            if (CrystalView.supported()) {
                 Bukkit.getServer().getPluginManager().registerEvents(new CrystalView(), this);
                 Bukkit.getServer().getPluginManager().registerEvents(new WatchMenu.Events(), this);
             }
@@ -197,6 +198,7 @@ public class SpawnArena extends JavaPlugin {
         this.registerCommand("setarenaexit", new SetArenaExitCommand());
         this.registerCommand("arenatotems", new me.zeronull.spawnarena.commands.impl.ArenaTotemsCommand());
         this.registerCommand("arenacheck", new me.zeronull.spawnarena.commands.impl.ArenaCheckCommand());
+        this.registerCommand("crystalcopies", new me.zeronull.spawnarena.commands.impl.CrystalCopiesCommand());
         this.registerCommand("arenareplay", new me.zeronull.spawnarena.commands.impl.ArenaReplayCommand());
         this.registerCommand("matches", new me.zeronull.spawnarena.commands.impl.MatchesCommand());
         this.registerCommand("arenaduel", new ArenaDuelCommand());
@@ -249,7 +251,7 @@ public class SpawnArena extends JavaPlugin {
             }
         }
         CrystalView.stop();
-        if (CrystalCopies.supported())
+        if (CrystalView.supported())
             WatchMenu.sendEveryoneBack();
         CrystalCopies.undecorateAll();
         this.shutdownArenas();

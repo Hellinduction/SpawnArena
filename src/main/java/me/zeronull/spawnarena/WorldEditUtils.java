@@ -20,7 +20,8 @@ import java.util.logging.Level;
 
 /**
  * Uses only the standard WorldEdit API, so it works with WorldEdit and FastAsyncWorldEdit.
- * FAWE can safely paste off the main thread; plain WorldEdit must paste on the thread that owns the region.
+ * FAWE can safely paste off the main thread; plain WorldEdit must paste on the thread that owns the region (on Folia,
+ * arena resets and copies go a chunk at a time through {@link RegionArenaEdits}, as an arena can lie across regions).
  */
 public final class WorldEditUtils {
     public static final boolean FAWE = Bukkit.getPluginManager().getPlugin("FastAsyncWorldEdit") != null;
@@ -52,6 +53,13 @@ public final class WorldEditUtils {
             if (FAWE) {
                 pasteNow(clipboard, loc, ignoreAir, turn);
                 done.complete(null);
+            } else if (Threads.FOLIA) {
+                // The arena can lie across regions: a piece at a time, each on its own region's thread
+                RegionArenaEdits.paste(clipboard, loc, ignoreAir, turn).whenComplete((ok, error) -> {
+                    if (error != null)
+                        SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Failed to paste arena schematic at " + loc, error);
+                    done.complete(null);
+                });
             } else {
                 Bukkit.getRegionScheduler().execute(SpawnArena.INSTANCE, loc, () -> {
                     pasteNow(clipboard, loc, ignoreAir, turn);
@@ -114,6 +122,15 @@ public final class WorldEditUtils {
     public static CompletableFuture<Void> copyBox(final org.bukkit.World from, final org.bukkit.World to, final BlockVector3 min, final BlockVector3 max,
                                                   final BlockVector3 clearMin, final BlockVector3 clearMax) {
         final CompletableFuture<Void> done = new CompletableFuture<>();
+        if (!FAWE && Threads.FOLIA) {
+            // Folia: no thread owns every block (the global one owns none), so a piece at a time on each one's region thread
+            RegionArenaEdits.copyBox(from, to, min, max, clearMin, clearMax).whenComplete((ok, error) -> {
+                if (error != null)
+                    SpawnArena.INSTANCE.getLogger().log(Level.SEVERE, "Failed to copy " + min + " to " + max + " from " + from.getName() + " into " + to.getName(), error);
+                done.complete(null);
+            });
+            return done;
+        }
         final Runnable copy = () -> {
             try {
                 if (clearMin != null && clearMax != null) {

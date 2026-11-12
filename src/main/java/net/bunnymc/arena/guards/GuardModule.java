@@ -53,8 +53,22 @@ public abstract class GuardModule {
         return this.configuration;
     }
 
+    /**
+     * Writes the module's default config.yml (kept in SpawnArena's jar under merged/&lt;module&gt;/, as the original plugin
+     * had it) if there isn't one yet, as the original plugin did; then loads it.
+     */
     public void saveDefaultConfig() {
-        this.getConfig();
+        final File file = new File(this.getDataFolder(), "config.yml");
+        if (!file.exists())
+            try (java.io.InputStream in = this.owner.getResource("merged/" + this.getClass().getSimpleName() + "/config.yml")) {
+                if (in != null) {
+                    this.getDataFolder().mkdirs();
+                    java.nio.file.Files.copy(in, file.toPath());
+                }
+            } catch (final java.io.IOException e) {
+                this.getLogger().warning("Couldn't write the default config of " + this.getClass().getSimpleName() + ": " + e);
+            }
+        this.reloadConfig();
     }
 
     public abstract void onEnable();

@@ -183,13 +183,17 @@ public final class WatchMenu implements InventoryHolder {
     public static final class Events implements Listener {
         public Events() {
             Threads.globalTimer(task -> {
-                // Open menus show the matches as they are now
+                // Open menus show the matches as they are now (each looked at on its player's thread: Folia; checked here
+                // first on Paper, where that's this thread)
                 for (final Player p : Bukkit.getOnlinePlayers())
-                    if (p.getOpenInventory().getTopInventory().getHolder() instanceof WatchMenu menu) {
-                        final Arena arena = SpawnArena.arenas.of(menu.arenaName);
-                        if (arena != null)
-                            menu.fill(arena);
-                    }
+                    if (Threads.FOLIA || p.getOpenInventory().getTopInventory().getHolder() instanceof WatchMenu)
+                        Threads.entity(p, () -> {
+                            if (p.getOpenInventory().getTopInventory().getHolder() instanceof WatchMenu menu) {
+                                final Arena arena = SpawnArena.arenas.of(menu.arenaName);
+                                if (arena != null)
+                                    menu.fill(arena);
+                            }
+                        });
                 // A match that's over: whoever was watching it goes back to the viewing arena
                 for (final Map.Entry<UUID, CrystalCopy> e : new ArrayList<>(WATCHING.entrySet())) {
                     final Player p = Bukkit.getPlayer(e.getKey());
@@ -337,12 +341,14 @@ public final class WatchMenu implements InventoryHolder {
 
     /** On shutdown: everyone watching in a copy goes back to where they were, or the viewing arena (the copies' worlds stay, empty). */
     public static void sendEveryoneBack() {
-        for (final CrystalCopy copy : CrystalCopies.all())
-            for (final Player p : copy.world().getPlayers())
-                if (!SpawnArena.arenas.hasFighter(p)) {
-                    final Location from = CAME_FROM.get(p.getUniqueId());
-                    p.teleport(usable(from) ? from : deck(copy.real(), null));
-                }
+        // (who's in which world read from the players themselves: a world's own list is its region's alone on Folia)
+        for (final Player p : Bukkit.getOnlinePlayers()) {
+            final CrystalCopy copy = CrystalCopies.at(p.getWorld());
+            if (copy != null && !SpawnArena.arenas.hasFighter(p)) {
+                final Location from = CAME_FROM.get(p.getUniqueId());
+                Threads.teleport(p, usable(from) ? from : deck(copy.real(), null));
+            }
+        }
         WATCHING.clear();
         CAME_FROM.clear();
     }
