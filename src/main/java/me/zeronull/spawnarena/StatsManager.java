@@ -1463,6 +1463,15 @@ public class StatsManager {
         return getField(uuid, arena, "win_streak");
     }
 
+    /** Free-for-all kills (crystal FFA kills, spleef rounds' knock-outs). */
+    public int getFfaKills(UUID uuid, String arena) {
+        return getField(uuid, arena, "ffa_kills");
+    }
+
+    public int getFfaDeaths(UUID uuid, String arena) {
+        return getField(uuid, arena, "ffa_deaths");
+    }
+
     public int getLosses(UUID uuid, String arena) {
         return getField(uuid, arena, "losses");
     }
@@ -1586,6 +1595,39 @@ public class StatsManager {
     }
 
     /** Chance (0..1) a player rated {@code rating} beats one rated {@code opponent}. */
+    /**
+     * Elo for a free-for-all round, by where each finished ({@code placed}: the winner first, then each in the order they
+     * outlasted the rest): everyone is scored against everyone else, beating those who went out before them and losing to
+     * those who lasted longer, each pair counting 1/(players - 1) of a 1v1. So a round of two is exactly a 1v1, and
+     * winning a big round is worth about one 1v1 win against the field. uuid -> {new rating, change}.
+     */
+    public java.util.Map<UUID, int[]> recordPlacementElo(final List<Player> placed, final String arena) {
+        final int n = placed.size();
+        if (n < 2)
+            return java.util.Map.of();
+        final int[] before = new int[n];
+        for (int i = 0; i < n; i++)
+            before[i] = getElo(placed.get(i).getUniqueId(), arena);
+        final java.util.Map<UUID, int[]> result = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < n; i++) {
+            double sum = 0;
+            for (int j = 0; j < n; j++)
+                if (j != i)
+                    sum += (i < j ? 1 : 0) - expected(before[i], before[j]);
+            int change = (int) Math.round(ELO_K * sum / (n - 1));
+            if (i == 0)
+                change = Math.max(1, change); // a win always gains something
+            change = Math.max(-before[i], change);
+            result.put(placed.get(i).getUniqueId(), new int[]{before[i] + change, change});
+        }
+        for (final java.util.Map.Entry<UUID, int[]> e : result.entrySet()) {
+            setField(e.getKey(), arena, "elo", e.getValue()[0]);
+            countRatedGame(e.getKey(), arena);
+        }
+        invalidateLeaderboards();
+        return result;
+    }
+
     private static double expected(final double rating, final double opponent) {
         return 1 / (1 + Math.pow(10, (opponent - rating) / 400));
     }

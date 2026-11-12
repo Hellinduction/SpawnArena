@@ -71,8 +71,10 @@ public final class Spleef implements Listener {
                 continue;
             final double dx = at.getX() - (block.getX() + 0.5), dz = at.getZ() - (block.getZ() + 0.5);
             final double above = at.getY() - (block.getY() + 1);
-            if (Math.abs(dx) <= 0.8 && Math.abs(dz) <= 0.8 && above >= -0.1 && above <= 1.5)
+            if (Math.abs(dx) <= 0.8 && Math.abs(dz) <= 0.8 && above >= -0.1 && above <= 1.5) {
                 fight.stats().damage(by, p, 0, false, false, false);
+                fight.onHurt(by, p); // (a free-for-all round credits the knock-out to them)
+            }
         }
     }
 
@@ -133,6 +135,7 @@ public final class Spleef implements Listener {
             e.setCancelled(false);
             e.setDamage(0);
             fight.stats().damage(thrower, victim, 0, true, false, false);
+            fight.onHurt(thrower, victim);
             return;
         }
         e.setCancelled(true); // melee, falling between layers, anything else

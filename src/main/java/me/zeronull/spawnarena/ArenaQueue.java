@@ -166,6 +166,58 @@ public class ArenaQueue {
             final List<List<Player>> teams = TeamPicker.split(four);
             new Fight().initiateTeamFight(teams.get(0), teams.get(1), duoArena);
         }
+
+        this.tryStartRound();
+    }
+
+    /** Spleef free-for-all: when the round starts (millis), once two are waiting; 0 while it isn't counting down. */
+    private long ffaStartsAt;
+
+    private static int ffaWaitSeconds() {
+        return SpawnArena.settings == null ? 15 : Math.max(0, SpawnArena.settings.spleefFfaWaitSeconds);
+    }
+
+    public static int ffaMaxPlayers() {
+        return SpawnArena.settings == null ? 16 : Math.max(2, SpawnArena.settings.spleefFfaMaxPlayers);
+    }
+
+    /** Seconds until the waiting free-for-all round starts (if the arena's free then), or -1 if it isn't counting down. */
+    public synchronized int ffaSecondsLeft() {
+        return this.ffaStartsAt == 0 ? -1 : (int) Math.max(0, (this.ffaStartsAt - System.currentTimeMillis() + 999) / 1000);
+    }
+
+    /**
+     * Spleef free-for-all: two waiting start the wait (spleefFfaWaitSeconds) for more to join; then (or once it's full)
+     * everyone waiting goes in, up to spleefFfaMaxPlayers, as soon as the arena is free. Fewer than two again: it stops.
+     */
+    private void tryStartRound() {
+        final List<Player> waiting = this.queues.get(FightMode.FREE_FOR_ALL);
+        if (!this.arena.isSpleef() || waiting.size() < 2) {
+            this.ffaStartsAt = 0;
+            return;
+        }
+        final long now = System.currentTimeMillis();
+        if (this.ffaStartsAt == 0) {
+            this.ffaStartsAt = now + ffaWaitSeconds() * 1000L;
+            final int seconds = ffaWaitSeconds();
+            for (final Player p : waiting)
+                if (p.isOnline())
+                    p.sendMessage(org.bukkit.ChatColor.GREEN + "The " + this.arena.getArenaName() + " free-for-all starts in " + seconds
+                            + "s (more can still join)!");
+            Threads.globalLater(this::tryStartFight, seconds * 20L + 1);
+        }
+        if (now < this.ffaStartsAt && waiting.size() < ffaMaxPlayers())
+            return;
+        final Arena target = this.target();
+        if (target == null)
+            return; // a match is on: it starts once that's over (its end tries again)
+        final List<Player> players = new ArrayList<>(waiting.subList(0, Math.min(waiting.size(), ffaMaxPlayers())));
+        for (final Player p : players) {
+            waiting.remove(p);
+            PLAYER_QUEUE_MAP.remove(p);
+        }
+        this.ffaStartsAt = 0;
+        new SpleefRound().start(players, target);
     }
 
     /** Where a match can start right now (this arena, or a free copy of a MULTI crystal arena), or null. */

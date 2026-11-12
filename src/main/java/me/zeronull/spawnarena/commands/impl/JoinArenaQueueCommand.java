@@ -46,7 +46,7 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         }
 
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /joinarenaqueue <arena> [1v1|2v2|auto|menu]"));
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /joinarenaqueue <arena> [1v1|2v2|auto|menu|ffa]"));
             return true;
         }
 
@@ -63,7 +63,8 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return true;
         }
 
-        if (args.length >= 2 && !args[1].equalsIgnoreCase("1v1") && !player.hasPermission(MODES_PERMISSION)) {
+        // (a spleef arena's free-for-all is joined like 1v1: by everyone)
+        if (args.length >= 2 && !args[1].equalsIgnoreCase("1v1") && !args[1].equalsIgnoreCase("ffa") && !player.hasPermission(MODES_PERMISSION)) {
             sender.sendMessage(ChatColor.RED + "You can only queue 1v1 here: /joinarenaqueue " + arena.getArenaName());
             return true;
         }
@@ -92,7 +93,11 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         final FightMode mode = args.length < 2 ? FightMode.ONE_V_ONE
                 : args[1].equalsIgnoreCase("auto") ? QueueMenu.autoMode(arena) : FightMode.fromLabel(args[1]);
         if (mode == null) {
-            sender.sendMessage(ChatColor.RED + "Unknown mode. Use 1v1, 2v2, auto or menu.");
+            sender.sendMessage(ChatColor.RED + "Unknown mode. Use 1v1, 2v2, auto or menu" + (arena.isSpleef() ? ", or ffa." : "."));
+            return true;
+        }
+        if (mode == FightMode.FREE_FOR_ALL && !arena.isSpleef()) {
+            sender.sendMessage(ChatColor.RED + "Only spleef arenas have a free-for-all queue.");
             return true;
         }
         join(player, arena, mode);
@@ -145,7 +150,10 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
             return "You can't join while in spectator mode.";
         if (SpawnArena.settings.queueMaxDistance > 0 && arena.distanceFrom(player.getLocation()) > SpawnArena.settings.queueMaxDistance)
             return "You are too far from that arena!";
-        if (busy && !arena.queue.playerInQueue(player) && running(arena) && arena.queue.size(mode) >= mode.players())
+        if (mode == FightMode.FREE_FOR_ALL) {
+            if (busy && !arena.queue.playerInQueue(player) && arena.queue.size(mode) >= ArenaQueue.ffaMaxPlayers())
+                return "The next free-for-all round is full. Wait for it to start, then join!";
+        } else if (busy && !arena.queue.playerInQueue(player) && running(arena) && arena.queue.size(mode) >= mode.players())
             return "There's a fight in that arena and the next match is full. Wait for it to finish, then join!";
         return null;
     }
@@ -187,7 +195,11 @@ public class JoinArenaQueueCommand extends ArenaTabComplete implements CommandEx
         // Joining can immediately start a match, which takes players back out of the queue
         if (arena.queue.playerInQueue(player)) {
             final int waiting = arena.queue.size(mode);
-            final String message = mode == FightMode.ONE_V_ONE
+            final int left = arena.queue.ffaSecondsLeft();
+            final String message = mode == FightMode.FREE_FOR_ALL
+                    ? String.format("&aYou've joined the &e%s free-for-all&a! &7(%d waiting, including you; %s)", arena.getArenaName(), waiting,
+                        left >= 0 ? "it starts in " + left + "s" : "it starts once 2 are in")
+                    : mode == FightMode.ONE_V_ONE
                     ? (waiting <= 1
                         ? String.format("&aYou've joined the &e%s 1v1&a queue! &7Waiting for an opponent...", arena.getArenaName())
                         : String.format("&aYou've joined the &e%s 1v1&a queue! &7(%d players waiting, including you)", arena.getArenaName(), waiting))

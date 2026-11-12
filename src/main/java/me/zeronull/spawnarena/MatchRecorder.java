@@ -106,6 +106,8 @@ public final class MatchRecorder implements Listener {
 
     /** A fight has just gone live: a sumo match between players is recorded. */
     static void start(final Fight fight) {
+        if (fight.getMode() == FightMode.FREE_FOR_ALL)
+            return; // (rounds of more than two aren't recorded yet)
         final Arena arena = fight.getArena();
         if (!enabled() || fight.withBots() || !arena.isDeathOnTouchLiquid() || arena.isFfa())
             return;

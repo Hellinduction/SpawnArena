@@ -218,6 +218,13 @@ public final class SettingsConfig {
     @Comment("LuckPerms priority of that suffix: high, so it shows over any suffix a rank or other plugin gives")
     public int topEloSuffixPriority = 1000;
 
+    @Comment({"Spleef arenas' free-for-all queue (/joinarenaqueue <arena> ffa): once 2 are waiting, how many seconds more",
+            "players get to join before the round starts with everyone waiting (straight away once it's full)."})
+    public int spleefFfaWaitSeconds = 15;
+
+    @Comment("Most players in one spleef free-for-all round (the rest wait for the next).")
+    public int spleefFfaMaxPlayers = 16;
+
     @Comment({"Folia only: whether this server fires teleport and respawn events (plain Folia fires none; Canvas and forks of it,",
             "like Vex, do). false: SpawnArena notices teleports itself, just after they happen (from what the server sends the",
             "player), and treats them as it treats a teleport event, moving the player back if it would have stopped it. It also",

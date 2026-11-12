@@ -89,6 +89,7 @@ public final class Bets {
         final Economy economy = WinRewards.economy();
         final String why = economy == null ? "betting isn't available right now"
                 : fight.isDuel() ? "duels don't take bets"
+                : fight.getMode() == FightMode.FREE_FOR_ALL ? "free-for-all rounds don't take bets"
                 : !rewardReady(player, fight.getArena()) ? "your win reward isn't ready in this arena" : null;
         if (why != null) {
             player.sendMessage(MiniMessage.miniMessage().deserialize(

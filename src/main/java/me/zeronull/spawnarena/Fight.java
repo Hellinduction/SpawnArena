@@ -395,13 +395,32 @@ public class Fight {
         this.teamB.addAll(teamB);
         this.alive.addAll(teamA);
         this.alive.addAll(teamB);
+        this.begin();
+    }
+
+    /** A round of everyone against everyone (see SpleefRound): no teams, its own members. */
+    protected void initiateRound(final List<Player> players, final Arena arena) {
+        this.arena = arena;
+        this.mode = FightMode.FREE_FOR_ALL;
+        this.alive.addAll(players);
+        this.begin();
+    }
+
+    /**
+     * Gets the arena ready while everyone waits for the countdown, done before anyone is sent in (the fight is called off
+     * if it fails). Crystal arenas: the snapshot (nobody can be in the arena then: it's empty, and a new match only starts
+     * once the last one's reset is done); spleef too, as its broken floor is put back the same way.
+     */
+    protected java.util.concurrent.CompletableFuture<Boolean> prepareArena() {
+        return this.arena.isCrystalPvp() || this.arena.isSpleef() ? CrystalPvp.takeSnapshot(this)
+                : java.util.concurrent.CompletableFuture.completedFuture(true);
+    }
+
+    private void begin() {
+        final Arena arena = this.arena;
         arena.addFight(this);
         BotPuppet.hideFrom(this); // other matches' bots in this arena, from now on
-        // Crystal arenas: the snapshot is taken while everyone waits for the countdown (nobody can be in the
-        // arena then: it's empty, and a new match only starts once the last one's reset is done)
-        // (spleef too: its broken floor is put back the same way)
-        if (arena.isCrystalPvp() || arena.isSpleef())
-            this.arenaReady = CrystalPvp.takeSnapshot(this);
+        this.arenaReady = this.prepareArena();
         this.pickVariant();
         if (this.variant != null)
             for (final Player p : this.getMembers())
@@ -802,7 +821,7 @@ public class Fight {
             this.eliminatedAt.put(player.getUniqueId(), player.getLocation().clone());
             this.countFightTime(player.getUniqueId());
             team = getTeamOf(player);
-            teamOut = team.stream().noneMatch(this.alive::contains) && !this.othersStillIn(team);
+            teamOut = this.overWithout(team);
             if (teamOut)
                 this.fightState = FightState.ENDING; // claimed: nothing else can finish this fight now
         }
@@ -812,7 +831,7 @@ public class Fight {
             this.arrived(player);
 
         if (teamOut) {
-            this.finish(otherTeam(team), team);
+            this.finishWithout(team);
             return;
         }
 
@@ -821,10 +840,30 @@ public class Fight {
         AWAITING_RESTORE.add(player.getUniqueId());
         Threads.entity(player, () -> this.restore(player));
         this.showTo(player);
+        this.outWhileOn(player);
+    }
+
+    /** With {@code team} just out (its last player in it eliminated), whether the match is over. Under the fight's lock. */
+    protected boolean overWithout(final List<Player> team) {
+        return team.stream().noneMatch(this.alive::contains) && !this.othersStillIn(team);
+    }
+
+    /** The match is over with {@code team} out: the other team wins. */
+    protected void finishWithout(final List<Player> team) {
+        this.finish(otherTeam(team), team);
+    }
+
+    /** {@code player} is out and the match goes on without them (their teammate's still fighting). */
+    protected void outWhileOn(final Player player) {
         if (player.isOnline())
             player.sendMessage(ChatColor.RED + "You were eliminated! Your teammate is still fighting.");
         for (final Player other : this.getFighters())
             other.sendMessage(ChatColor.GRAY + player.getName() + " was eliminated!");
+    }
+
+    /** When the fighting started (after the countdown), or 0 if it hasn't. */
+    protected long startedAt() {
+        return this.startedAt;
     }
 
     /** Ends the match with {@code player}'s team as the winner (e.g. stone pressure plate). */
@@ -1039,7 +1078,7 @@ public class Fight {
     // ── Results ─────────────────────────────────────────────────────────────
 
     /** Writes this match to the match log, off the main thread. */
-    private void logMatch(final List<Player> winners, final List<Player> losers, final boolean counted, final boolean rated, final boolean selfOut) {
+    protected void logMatch(final List<Player> winners, final List<Player> losers, final boolean counted, final boolean rated, final boolean selfOut) {
         final long now = System.currentTimeMillis();
         final StatsManager.MatchRecord record = new StatsManager.MatchRecord(this.arena.getArenaName(), now,
                 this.startedAt == 0 ? -1 : (int) ((now - this.startedAt) / 1000),

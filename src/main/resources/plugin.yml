@@ -36,7 +36,7 @@ commands:
     permission: pearlblock.admin
   joinarenaqueue:
     description: Join an arena's queue straight away (again to leave), or open the 1v1 / 2v2 / Auto menu
-    usage: "/joinarenaqueue <arena> [1v1|2v2|auto|menu]"
+    usage: "/joinarenaqueue <arena> [1v1|2v2|auto|menu|ffa]"
     permission: spawnarena.joinarenaqueue
     permission-message: "§cYou don't have permission!"
   setarenaspawn:
