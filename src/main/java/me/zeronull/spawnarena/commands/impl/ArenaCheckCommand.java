@@ -42,7 +42,37 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
     private static final long BASELINE_KEPT_MS = 6 * 60 * 60 * 1000L;
     private static final int SCANNED_RECORDINGS = 50000;
 
-    private static volatile CheatChecks.Baseline baseline;
+    /** What's usual, for each kind of arena (kept for a few hours) */
+    private static volatile CheatChecks.Baselines baseline;
+
+    /** These matches by kind of arena (see CheatChecks#kind), the kind with the most first. */
+    private static Map<String, List<CheatChecks.Match>> byKind(final List<CheatChecks.Match> matches) {
+        final Map<String, List<CheatChecks.Match>> byKind = new java.util.HashMap<>();
+        for (final CheatChecks.Match m : matches)
+            byKind.computeIfAbsent(m.kind, k -> new ArrayList<>()).add(m);
+        final Map<String, List<CheatChecks.Match>> sorted = new java.util.LinkedHashMap<>();
+        byKind.entrySet().stream().sorted((a, b) -> Integer.compare(b.getValue().size(), a.getValue().size()))
+                .forEach(e -> sorted.put(e.getKey(), e.getValue()));
+        return sorted;
+    }
+
+    /** One summary per kind of arena they've played, each against that kind's baseline. */
+    private static List<CheatChecks.Summary> summaries(final List<CheatChecks.Match> matches, final CheatChecks.Baselines usual) {
+        final List<CheatChecks.Summary> out = new ArrayList<>();
+        for (final Map.Entry<String, List<CheatChecks.Match>> e : byKind(matches).entrySet())
+            out.add(new CheatChecks.Summary(e.getValue(), usual.of(e.getKey())));
+        return out;
+    }
+
+    private static CheatChecks.Verdict worst(final List<CheatChecks.Summary> summaries) {
+        CheatChecks.Verdict worst = CheatChecks.Verdict.FINE;
+        for (final CheatChecks.Summary s : summaries)
+            if (s.overall() == CheatChecks.Verdict.SUSPICIOUS)
+                return CheatChecks.Verdict.SUSPICIOUS;
+            else if (s.overall() == CheatChecks.Verdict.LOOK)
+                worst = CheatChecks.Verdict.LOOK;
+        return worst;
+    }
     private static final AtomicBoolean RUNNING = new AtomicBoolean();
 
     @Override
@@ -110,13 +140,13 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        // What's usual, from the newest recordings (kept for a few hours)
-        CheatChecks.Baseline usual = baseline;
+        // What's usual in each kind of arena, from the newest recordings (kept for a few hours)
+        CheatChecks.Baselines usual = baseline;
         if (usual == null || System.currentTimeMillis() - usual.builtAt > BASELINE_KEPT_MS) {
             final List<CheatChecks.Match> everyone = new ArrayList<>();
             for (final File f : files.subList(0, Math.min(BASELINE_RECORDINGS, files.size())))
                 everyone.addAll(analyseAll(f, null));
-            usual = CheatChecks.baseline(everyone);
+            usual = CheatChecks.baselines(everyone);
             baseline = usual;
         }
 
@@ -152,29 +182,37 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
             return;
         }
 
-        final CheatChecks.Summary summary = new CheatChecks.Summary(theirs, usual);
-        final List<CheatChecks.Line> lines = summary.lines();
-        final CheatChecks.Verdict overall = summary.overall();
+        // Each kind of arena they've played on its own, against others playing it
+        final List<CheatChecks.Summary> summaries = summaries(theirs, usual);
+        final CheatChecks.Verdict overall = worst(summaries);
         final SimpleDateFormat day = new SimpleDateFormat("d MMM", Locale.ENGLISH);
         long first = Long.MAX_VALUE, last = 0;
         for (final CheatChecks.Match m : theirs) {
             first = Math.min(first, m.rec.started);
             last = Math.max(last, m.rec.started);
         }
-        final File report = this.writeReport(shownName, theirs, summary, lines, usual);
+        final File report = this.writeReport(shownName, theirs, summaries, usual);
 
         final MiniMessage mm = MiniMessage.miniMessage();
         final List<Component> out = new ArrayList<>();
-        out.add(mm.deserialize("<gold><bold>Checks for <name></bold> <gray>(<n> match<s>, <from> to <to>; against <players> players)",
+        out.add(mm.deserialize("<gold><bold>Checks for <name></bold> <gray>(<n> match<s>, <from> to <to>)",
                 Placeholder.unparsed("name", shownName), Placeholder.unparsed("n", String.format("%,d", theirs.size())),
                 Placeholder.unparsed("s", theirs.size() == 1 ? "" : "es"), Placeholder.unparsed("from", day.format(new Date(first))),
-                Placeholder.unparsed("to", day.format(new Date(last))), Placeholder.unparsed("players", String.valueOf(usual.players))));
-        for (final CheatChecks.Line l : lines)
-            out.add(mm.deserialize("<colour><mark> <white><check>:</white> <gray><text>",
-                            Placeholder.parsed("colour", colour(l.verdict())), Placeholder.unparsed("mark", mark(l.verdict())),
-                            Placeholder.unparsed("check", l.check()), Placeholder.unparsed("text", l.text()))
-                    .hoverEvent(l.explain().isEmpty() ? null : net.kyori.adventure.text.event.HoverEvent.showText(Component.text(l.explain()))));
-        final List<Map.Entry<CheatChecks.Match, String>> oddest = summary.oddest(3);
+                Placeholder.unparsed("to", day.format(new Date(last)))));
+        for (final CheatChecks.Summary s : summaries) {
+            final CheatChecks.Baseline theirKind = usual.of(s.kind);
+            out.add(mm.deserialize("<aqua><kind></aqua> <gray>(<n> match<s>; against <players> players' <all>)",
+                    Placeholder.unparsed("kind", CheatChecks.kindTitle(s.kind)), Placeholder.unparsed("n", String.format("%,d", s.matches.size())),
+                    Placeholder.unparsed("s", s.matches.size() == 1 ? "" : "es"), Placeholder.unparsed("players", String.valueOf(theirKind.players)),
+                    Placeholder.unparsed("all", String.format("%,d", theirKind.matches) + (theirKind.matches == 1 ? " match" : " matches"))));
+            for (final CheatChecks.Line l : s.lines())
+                out.add(mm.deserialize("<colour><mark> <white><check>:</white> <gray><text>",
+                                Placeholder.parsed("colour", colour(l.verdict())), Placeholder.unparsed("mark", mark(l.verdict())),
+                                Placeholder.unparsed("check", l.check()), Placeholder.unparsed("text", l.text()))
+                        .hoverEvent(l.explain().isEmpty() ? null : net.kyori.adventure.text.event.HoverEvent.showText(Component.text(l.explain()))));
+        }
+        // The oddest of all their matches, each against its own kind's baseline
+        final List<Map.Entry<CheatChecks.Match, String>> oddest = oddest(summaries, usual, 3);
         if (!oddest.isEmpty()) {
             out.add(mm.deserialize("<gray>Oddest matches:"));
             final SimpleDateFormat when = new SimpleDateFormat("d MMM HH:mm", Locale.ENGLISH);
@@ -199,6 +237,23 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
                 Placeholder.unparsed("secs", String.format("%.1f", (System.currentTimeMillis() - started) / 1000.0))));
         for (final Component c : out)
             tell(sender, c);
+    }
+
+    /** Their oddest matches of every kind, oddest first, each against its kind's baseline. */
+    private static List<Map.Entry<CheatChecks.Match, String>> oddest(final List<CheatChecks.Summary> summaries, final CheatChecks.Baselines usual, final int count) {
+        final List<Object[]> scored = new ArrayList<>(); // {match, why, score}
+        for (final CheatChecks.Summary s : summaries)
+            for (final CheatChecks.Match m : s.matches) {
+                final Map.Entry<Integer, String> o = CheatChecks.Summary.oddness(m, usual.of(s.kind));
+                if (o.getKey() > 0)
+                    scored.add(new Object[]{m, o.getValue(), o.getKey()});
+            }
+        scored.sort((a, b) -> (int) b[2] != (int) a[2] ? Integer.compare((int) b[2], (int) a[2])
+                : Long.compare(((CheatChecks.Match) b[0]).rec.started, ((CheatChecks.Match) a[0]).rec.started));
+        final List<Map.Entry<CheatChecks.Match, String>> out = new ArrayList<>();
+        for (int i = 0; i < Math.min(count, scored.size()); i++)
+            out.add(Map.entry((CheatChecks.Match) scored.get(i)[0], (String) scored.get(i)[1]));
+        return out;
     }
 
     /** How many players /arenacheck top lists, and how many matches they need to be ranked */
@@ -228,20 +283,23 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
             return;
         }
         // What's usual: from everyone's (as for one player), kept for later checks too if it's from everything
-        CheatChecks.Baseline usual = baseline;
+        CheatChecks.Baselines usual = baseline;
         if (usual == null || System.currentTimeMillis() - usual.builtAt > BASELINE_KEPT_MS) {
-            usual = CheatChecks.baseline(all);
+            usual = CheatChecks.baselines(all);
             if (days == 0)
                 baseline = usual;
         }
-        final List<Object[]> ranked = new ArrayList<>(); // {name, matches, summary, score}
+        final List<Object[]> ranked = new ArrayList<>(); // {name, matches, summaries, score}
         for (final Map.Entry<UUID, List<CheatChecks.Match>> e : byPlayer.entrySet()) {
             if (e.getValue().size() < TOP_MIN_MATCHES)
                 continue;
-            final CheatChecks.Summary s = new CheatChecks.Summary(e.getValue(), usual);
-            final int score = s.suspicion();
+            // Each kind of arena they've played against its own baseline, added up
+            final List<CheatChecks.Summary> theirs = summaries(e.getValue(), usual);
+            int score = 0;
+            for (final CheatChecks.Summary s : theirs)
+                score += s.suspicion();
             if (score >= 5) // (one long hit or so is nothing)
-                ranked.add(new Object[]{names.get(e.getKey()), e.getValue().size(), s, score});
+                ranked.add(new Object[]{names.get(e.getKey()), e.getValue().size(), theirs, score});
         }
         ranked.sort((a, b) -> Integer.compare((int) b[3], (int) a[3]));
         final MiniMessage mm = MiniMessage.miniMessage();
@@ -255,10 +313,14 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
         }
         for (int i = 0; i < Math.min(TOP_SHOWN, ranked.size()); i++) {
             final Object[] r = ranked.get(i);
-            final CheatChecks.Summary s = (CheatChecks.Summary) r[2];
+            @SuppressWarnings("unchecked") final List<CheatChecks.Summary> theirs = (List<CheatChecks.Summary>) r[2];
             final String who = (String) r[0];
-            final String reasons = s.reasons();
-            tell(sender, mm.deserialize("<gray><n>.</gray> " + colour(s.overall()) + "<who><reset> <dark_gray>(<count> matches)</dark_gray> <gray><why>",
+            final List<String> why = new ArrayList<>();
+            for (final CheatChecks.Summary s : theirs)
+                if (!s.reasons().isEmpty())
+                    why.add(theirs.size() > 1 ? CheatChecks.kindTitle(s.kind) + ": " + s.reasons() : s.reasons());
+            final String reasons = String.join(" | ", why);
+            tell(sender, mm.deserialize("<gray><n>.</gray> " + colour(worst(theirs)) + "<who><reset> <dark_gray>(<count> matches)</dark_gray> <gray><why>",
                             Placeholder.unparsed("n", String.valueOf(i + 1)),
                             Placeholder.unparsed("who", who),
                             Placeholder.unparsed("count", String.format("%,d", (int) r[1])),
@@ -285,21 +347,26 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
         return out;
     }
 
-    private File writeReport(final String name, final List<CheatChecks.Match> matches, final CheatChecks.Summary summary,
-                             final List<CheatChecks.Line> lines, final CheatChecks.Baseline usual) {
+    private File writeReport(final String name, final List<CheatChecks.Match> matches, final List<CheatChecks.Summary> summaries,
+                             final CheatChecks.Baselines usual) {
         final File dir = new File(SpawnArena.INSTANCE.getDataFolder(), "checks");
         if (!dir.isDirectory() && !dir.mkdirs())
             return null;
         final File file = new File(dir, name.replaceAll("[^A-Za-z0-9_.-]", "") + "-" + new SimpleDateFormat("yyyy-MM-dd-HHmm").format(new Date()) + ".txt");
         final SimpleDateFormat when = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ENGLISH);
         try (PrintWriter w = new PrintWriter(file, StandardCharsets.UTF_8)) {
-            w.println("Checks for " + name + ": " + matches.size() + " recorded matches, against " + usual.players + " players' " + usual.matches + " matches");
-            w.println("Overall: " + summary.overall());
-            w.println();
-            for (final CheatChecks.Line l : lines) {
-                w.println(String.format("%-11s %-14s %s", l.verdict(), l.check(), l.text()));
-                if (!l.explain().isEmpty())
-                    w.println(String.format("%26s%s", "", l.explain()));
+            w.println("Checks for " + name + ": " + matches.size() + " recorded matches");
+            w.println("Overall: " + worst(summaries));
+            for (final CheatChecks.Summary s : summaries) {
+                final CheatChecks.Baseline theirKind = usual.of(s.kind);
+                w.println();
+                w.println(CheatChecks.kindTitle(s.kind) + ": " + s.matches.size() + " matches, against " + theirKind.players + " players' "
+                        + theirKind.matches + " matches there");
+                for (final CheatChecks.Line l : s.lines()) {
+                    w.println(String.format("%-11s %-14s %s", l.verdict(), l.check(), l.text()));
+                    if (!l.explain().isEmpty())
+                        w.println(String.format("%26s%s", "", l.explain()));
+                }
             }
             w.println();
             w.println("Every match (newest first). reach: hits, longest, at " + 3.1 + "+ | kb: knockback taken of what was sent (typical) |"
@@ -311,9 +378,9 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
                 float maxReach = 0;
                 for (final float r : m.reach)
                     maxReach = Math.max(maxReach, r);
-                final Map.Entry<Integer, String> odd = CheatChecks.Summary.oddness(m, usual);
-                w.println(String.format("%s  %-24s %-9s %s  reach %3d %.2f %d  kb %s  steps %s  back %d  top %.1f  %s%s",
-                        when.format(new Date(m.rec.started)), "vs " + String.join(" & ", m.opponents()), m.variant.name(),
+                final Map.Entry<Integer, String> odd = CheatChecks.Summary.oddness(m, usual.of(m.kind));
+                w.println(String.format("%s  %-11s %-24s %-9s %s  reach %3d %.2f %d  kb %s  steps %s  back %d  top %.1f  %s%s",
+                        when.format(new Date(m.rec.started)), CheatChecks.kindTitle(m.kind), "vs " + String.join(" & ", m.opponents()), m.variant.name(),
                         m.f.won ? "won " : "lost", m.reach.size(), maxReach, m.longHits,
                         m.kbRatio.isEmpty() ? "-" : Math.round(100 * median(m.kbRatio)) + "%",
                         m.rotationFit < 0 ? "-" : Math.round(100 * m.rotationFit) + "%", m.sprintBackTicks, m.topSpeed,

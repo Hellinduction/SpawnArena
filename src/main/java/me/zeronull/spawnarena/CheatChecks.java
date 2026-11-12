@@ -66,6 +66,8 @@ public final class CheatChecks {
         public final Recording rec;
         public final Recording.Fighter f;
         public final SumoVariant variant;
+        /** The kind of arena (see {@link CheatChecks#kind}) */
+        public final String kind;
         public final List<Float> reach = new ArrayList<>();
         public int longHits, veryLongHits;
         /** Format 2: knockback taken over what was sent; format 1: how far a hit sent them (no velocity known) */
@@ -100,6 +102,7 @@ public final class CheatChecks {
             this.rec = rec;
             this.f = f;
             this.variant = rec.variant();
+            this.kind = kind(rec);
         }
 
         public List<String> opponents() {
@@ -709,9 +712,56 @@ public final class CheatChecks {
     // ── Everyone (what's usual) ─────────────────────────────────────────────
 
     /** What's usual, from everyone's recordings: per-player figures to rank someone among, and per-variant limits. */
+    /**
+     * Which kind of arena a recording is from, so each player is only measured against others playing the same:
+     * "sumo", "kit", "spleef" or "crystal", and a free-for-all session's parts of sumo, kit or crystal ("sumo-ffa"...).
+     */
+    public static String kind(final Recording rec) {
+        final String base = rec.crystal ? "crystal" : rec.spleef ? "spleef" : rec.kit ? "kit" : "sumo";
+        return rec.session && !rec.spleef ? base + "-ffa" : base;
+    }
+
+    /** "Sumo", "Kit FFA"... */
+    public static String kindTitle(final String kind) {
+        final String base = kind.replace("-ffa", "");
+        return Character.toUpperCase(base.charAt(0)) + base.substring(1) + (kind.endsWith("-ffa") ? " FFA" : "");
+    }
+
+    /** What's usual for each kind of arena (see {@link #kind}), from everyone's recordings. */
+    public static final class Baselines {
+        public final long builtAt = System.currentTimeMillis();
+        public int matches, players;
+        final Map<String, Baseline> byKind = new HashMap<>();
+
+        /** That kind's (an empty one, nobody to rank against, if there are no recordings of it). */
+        public Baseline of(final String kind) {
+            return this.byKind.computeIfAbsent(kind, Baseline::new);
+        }
+    }
+
+    /** Everyone's matches, each kind of arena on its own. */
+    public static Baselines baselines(final Collection<Match> matches) {
+        final Baselines all = new Baselines();
+        all.matches = (int) matches.stream().map(m -> m.rec).distinct().count();
+        all.players = (int) matches.stream().map(m -> m.f.uuid).distinct().count();
+        final Map<String, List<Match>> byKind = new HashMap<>();
+        for (final Match m : matches)
+            byKind.computeIfAbsent(m.kind, k -> new ArrayList<>()).add(m);
+        byKind.forEach((kind, theirs) -> all.byKind.put(kind, baseline(kind, theirs)));
+        return all;
+    }
+
     public static final class Baseline {
         public final long builtAt = System.currentTimeMillis();
         public int matches, players;
+        /** The kind of arena (see {@link CheatChecks#kind}) */
+        public final String kind;
+        /** Kit and crystal arenas (speed potions and the like): their speed limit, from their own matches (or none yet) */
+        Double speedLimit;
+
+        Baseline(final String kind) {
+            this.kind = kind;
+        }
         /** Each player's figure (those with enough to go on), sorted */
         final Map<String, double[]> perPlayer = new HashMap<>();
         /** Format 1's knockback distance, usual (the middle) for each variant */
@@ -733,7 +783,7 @@ public final class CheatChecks {
         public double speedLimit(final SumoVariant v) {
             if (v == SumoVariant.ICE)
                 return this.iceSpeedLimit == null ? Double.MAX_VALUE : this.iceSpeedLimit;
-            return SPEED_LIMIT;
+            return this.speedLimit != null ? this.speedLimit : SPEED_LIMIT;
         }
     }
 
@@ -741,30 +791,33 @@ public final class CheatChecks {
     static final String AIM = "aim", CPS = "cps", ACCURACY = "accuracy", JUMP_RESETS = "jumpresets", REACH = "reach",
             KB = "kb", KB_OLD = "kbold";
 
-    public static Baseline baseline(final Collection<Match> matches) {
-        final Baseline b = new Baseline();
+    /** What's usual in one kind of arena, from everyone's matches there. */
+    static Baseline baseline(final String kind, final Collection<Match> matches) {
+        final Baseline b = new Baseline(kind);
         b.matches = (int) matches.stream().map(m -> m.rec).distinct().count();
         // Format 1's knockback distances, per variant, first (each player's is then a share of it)
         final Map<SumoVariant, List<Float>> distances = new HashMap<>();
-        final List<Float> iceSpeeds = new ArrayList<>();
-        int iceSeconds = 0;
+        final List<Float> iceSpeeds = new ArrayList<>(), speeds = new ArrayList<>();
+        int iceSeconds = 0, seconds = 0;
         for (final Match m : matches) {
             distances.computeIfAbsent(m.variant, x -> new ArrayList<>()).addAll(m.kbDistance);
             if (m.variant == SumoVariant.ICE) {
                 iceSpeeds.addAll(m.fastSeconds);
                 iceSeconds += m.secondsChecked;
+            } else {
+                speeds.addAll(m.fastSeconds);
+                seconds += m.secondsChecked;
             }
         }
+        // Kit and crystal arenas: their own speed limit, the same way as ice's (sumo's own is set from real recordings)
+        if (!kind.startsWith("sumo") && seconds >= 300)
+            b.speedLimit = Math.max(SPEED_LIMIT, fastest(speeds, seconds) * 1.2);
         for (final Map.Entry<SumoVariant, List<Float>> e : distances.entrySet())
             if (e.getValue().size() >= 100)
                 b.kbDistanceMiddle.put(e.getKey(), (double) median(e.getValue()));
         if (iceSeconds >= 300) {
             // The fastest one in a thousand seconds on ice (all below 6 count as below it), and some room
-            final int index = iceSeconds - 1 - iceSeconds / 1000;
-            iceSpeeds.sort(null);
-            final int from = iceSeconds - iceSpeeds.size();
-            final double p999 = index < from ? 6 : iceSpeeds.get(index - from);
-            b.iceSpeedLimit = Math.max(SPEED_LIMIT, p999 * 1.2);
+            b.iceSpeedLimit = Math.max(SPEED_LIMIT, fastest(iceSpeeds, iceSeconds) * 1.2);
         }
         final Map<UUID, List<Match>> byPlayer = new HashMap<>();
         for (final Match m : matches)
@@ -777,6 +830,15 @@ public final class CheatChecks {
         }
         figures.forEach((k, v) -> b.perPlayer.put(k, v.stream().mapToDouble(Double::doubleValue).sorted().toArray()));
         return b;
+    }
+
+    /** The fastest second in a thousand, of {@code seconds} looked at ({@code fast}: those at 6 or more; all below count as 6). */
+    private static double fastest(final List<Float> fast, final int seconds) {
+        final int index = seconds - 1 - seconds / 1000;
+        final List<Float> sorted = new ArrayList<>(fast);
+        sorted.sort(null);
+        final int from = seconds - sorted.size();
+        return index < from ? 6 : sorted.get(index - from);
     }
 
     static float median(final List<Float> values) {
@@ -813,6 +875,8 @@ public final class CheatChecks {
     public static final class Summary {
         public final List<Match> matches;
         final Baseline baseline;
+        /** The kind of arena these matches are from (one summary per kind: see {@link CheatChecks#kind}) */
+        public final String kind;
         public final List<Float> reach = new ArrayList<>(), kbRatio = new ArrayList<>(), kbShare = new ArrayList<>(), aimError = new ArrayList<>();
         public int longHits, veryLongHits, jumpResets, kbHits;
         public int rotationMatches, rotationOff;
@@ -834,6 +898,7 @@ public final class CheatChecks {
         public Summary(final List<Match> matches, final Baseline baseline) {
             this.matches = matches;
             this.baseline = baseline;
+            this.kind = baseline != null ? baseline.kind : matches.isEmpty() ? "sumo" : matches.get(0).kind;
             for (final Match m : matches) {
                 this.reach.addAll(m.reach);
                 for (final float r : m.reach)
@@ -930,13 +995,18 @@ public final class CheatChecks {
             if (r < 0)
                 return "";
             final int pct = (int) Math.round(100 * (higherIsMore ? r : 1 - r));
-            return pct >= 50 ? "; " + more + " than " + pct + "% of players" : "; " + less + " than " + (100 - pct) + "% of players";
+            final String who = "% of " + kindTitle(this.kind) + " players";
+            return pct >= 50 ? "; " + more + " than " + pct + who : "; " + less + " than " + (100 - pct) + who;
         }
 
         public List<Line> lines() {
             final List<Line> lines = new ArrayList<>();
-            // A bot playing for them
-            if (this.botChecked == 0)
+            // A bot playing for them (sumo only: what's looked for was found from a sumo bot)
+            final boolean sumo = this.kind.startsWith("sumo"), noMelee = this.kind.equals("spleef"),
+                    noKnockback = noMelee || this.kind.startsWith("crystal");
+            if (!sumo) {
+                // (no bot line)
+            } else if (this.botChecked == 0)
                 lines.add(new Line("Bot", Verdict.SKIPPED, "no matches with enough swings to judge", ""));
             else {
                 final Verdict v = this.botLike >= 3 ? Verdict.SUSPICIOUS : this.botLike >= 1 ? Verdict.LOOK : Verdict.FINE;
@@ -946,8 +1016,10 @@ public final class CheatChecks {
                                 + " more than anyone, jump resets, hits timed to the tick. Found from real recordings of a sumo bot: no real player's"
                                 + " match here showed four. Someone using one now and then shows it only in those matches."));
             }
-            // Reach
-            if (this.reach.isEmpty())
+            // Reach (not in spleef: no hits there)
+            if (noMelee) {
+                // (no reach line)
+            } else if (this.reach.isEmpty())
                 lines.add(new Line("Reach", Verdict.SKIPPED, "no hits landed to measure", ""));
             else {
                 final double share = this.longHits / (double) this.reach.size();
@@ -959,8 +1031,10 @@ public final class CheatChecks {
                         "The closest the one they hit had been to them at any point over their ping (and a quarter second more) before the"
                                 + " hit: lag can only make a hit look closer. Real players here almost never go past " + LONG_REACH + "."));
             }
-            // Knockback
-            if (this.kbRatio.size() >= 15) {
+            // Knockback (not in spleef or crystal: snowballs and explosions throw it off)
+            if (noKnockback) {
+                // (no knockback line)
+            } else if (this.kbRatio.size() >= 15) {
                 final float med = median(this.kbRatio);
                 final Verdict v = med < KB_VERY_LOW ? Verdict.SUSPICIOUS : med < KB_LOW ? Verdict.LOOK : Verdict.FINE;
                 lines.add(new Line("Knockback", v, String.format("took %d%% of what was sent (typical hit, %d hits)", Math.round(med * 100), this.kbRatio.size())
