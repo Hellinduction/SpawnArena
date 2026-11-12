@@ -103,6 +103,7 @@ public final class Spleef implements Listener {
         e.setExpToDrop(0);
         p.getInventory().addItem(snowball());
         undermined(fight, p, e.getBlock());
+        MatchRecorder.blockChanged(fight, e.getBlock(), p, MatchRecorder.BY_HAND, Material.AIR.createBlockData());
     }
 
     /** A fighter's snowball: breaks the floor it lands on; one that hits a player knocks them back (see onDamage). */
@@ -117,6 +118,7 @@ public final class Spleef implements Listener {
         if (fight == null || !isFloor(fight, block))
             return;
         undermined(fight, thrower, block);
+        MatchRecorder.blockChanged(fight, block, thrower, MatchRecorder.BY_SNOWBALL, Material.AIR.createBlockData());
         block.setType(Material.AIR);
         block.getWorld().playSound(block.getLocation().add(0.5, 0.5, 0.5), org.bukkit.Sound.BLOCK_SNOW_BREAK, 1f, 1f);
     }

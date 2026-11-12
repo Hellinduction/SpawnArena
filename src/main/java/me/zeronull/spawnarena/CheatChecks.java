@@ -46,6 +46,12 @@ public final class CheatChecks {
     static final double KB_LOW = 0.7, KB_VERY_LOW = 0.5;
     /** Faster than this (blocks a second, over a second, with no hit for 1.5 seconds) is too fast, but on ice. */
     static final double SPEED_LIMIT = 7.8;
+    /** Spleef: a block broken by hand this far (from the eyes to its nearest part) or further is far / very far. */
+    static final double FAR_BREAK = 5.0, VERY_FAR_BREAK = 6.0;
+    /** Spleef: breaking a block while looking more than this far (degrees) from it is off aim. */
+    static final double OFF_AIM_BREAK = 30;
+    /** Spleef: this many blocks broken by hand within one tick is more than a vanilla client can. */
+    static final int BURST_BREAKS = 3;
     /** What's left of sideways speed after each tick in the air */
     private static final double AIR = 0.91;
 
@@ -74,6 +80,9 @@ public final class CheatChecks {
         public int hitGapsExact, hitGaps;
         /** Which of the bot signs this match shows (see botSigns) */
         public final List<String> botSigns = new ArrayList<>();
+        /** Spleef: blocks broken by hand, those far / very far away, those broken looking away, bursts in one tick */
+        public int breaks, farBreaks, veryFarBreaks, offAimBreaks, aimedBreaks, bursts;
+        public float maxBreakReach;
 
         Match(final Recording rec, final Recording.Fighter f) {
             this.rec = rec;
@@ -101,6 +110,16 @@ public final class CheatChecks {
             if (o.team != f.team && o.frames > 0)
                 opponents.add(o);
         final SumoVariant v = m.variant;
+        if (rec.spleef) {
+            // No hits in spleef (only snowballs): how they broke the floor, how they turned, sprinted and moved
+            breaking(m);
+            if (!f.bedrock()) {
+                rotation(m);
+                sprintBack(m);
+            }
+            speed(m);
+            return m;
+        }
         final boolean itemSwings = v == SumoVariant.ARCHER || v == SumoVariant.SNOWBALL || v == SumoVariant.ROD;
         if (!opponents.isEmpty() && v != SumoVariant.SPEAR)
             reach(m, opponents);
@@ -130,6 +149,65 @@ public final class CheatChecks {
 
     private static double eyeHeight(final Recording.Fighter f, final int i) {
         return f.has(i, Recording.SNEAKING) ? 1.27 : 1.62;
+    }
+
+    /**
+     * Spleef: each block they broke by hand (not by snowball): how far from their eyes its nearest part was, how far off
+     * they were looking from it (the best of that tick and those either side: the look and the break can arrive a tick
+     * apart either way), and any tick with
+     * {@link #BURST_BREAKS} or more broken.
+     */
+    private static void breaking(final Match m) {
+        final Recording.Fighter f = m.f;
+        final int me = m.rec.fighters.indexOf(f);
+        final double ox = Math.floor(m.rec.centreX) - m.rec.centreX, oy = Math.floor(m.rec.centreY) - m.rec.centreY,
+                oz = Math.floor(m.rec.centreZ) - m.rec.centreZ;
+        final List<Integer> times = new ArrayList<>();
+        for (final Recording.BlockChange b : m.rec.blocks) {
+            if (b.by() != me || b.how() != Recording.BY_HAND)
+                continue;
+            times.add(b.ms());
+            m.breaks++;
+            int i = Arrays.binarySearch(f.time, b.ms());
+            if (i < 0)
+                i = -i - 2;
+            i = Math.max(0, Math.min(i, f.frames - 1));
+            final double minX = b.x() + ox, minY = b.y() + oy, minZ = b.z() + oz;
+            double best = Double.MAX_VALUE, aim = Double.MAX_VALUE;
+            for (int j = Math.max(0, i - 1); j <= Math.min(f.frames - 1, i + 1); j++) {
+                final double ex = f.x[j], ey = f.y[j] + eyeHeight(f, j), ez = f.z[j];
+                final double nx = Math.max(minX, Math.min(ex, minX + 1)) - ex, ny = Math.max(minY, Math.min(ey, minY + 1)) - ey,
+                        nz = Math.max(minZ, Math.min(ez, minZ + 1)) - ez;
+                best = Math.min(best, Math.sqrt(nx * nx + ny * ny + nz * nz));
+                // How far off the block they were looking: from its middle, less how wide it looks from there
+                final double cx = minX + 0.5 - ex, cy = minY + 0.5 - ey, cz = minZ + 0.5 - ez;
+                final double dist = Math.sqrt(cx * cx + cy * cy + cz * cz);
+                if (dist < 0.9) {
+                    aim = 0;
+                    continue;
+                }
+                final double yaw = Math.toRadians(f.yaw[j]), pitch = Math.toRadians(f.pitch[j]);
+                final double lx = -Math.sin(yaw) * Math.cos(pitch), ly = -Math.sin(pitch), lz = Math.cos(yaw) * Math.cos(pitch);
+                final double angle = Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, (lx * cx + ly * cy + lz * cz) / dist))));
+                aim = Math.min(aim, Math.max(0, angle - Math.toDegrees(Math.asin(Math.min(1, 0.87 / dist)))));
+            }
+            m.maxBreakReach = Math.max(m.maxBreakReach, (float) best);
+            if (best >= FAR_BREAK)
+                m.farBreaks++;
+            if (best >= VERY_FAR_BREAK)
+                m.veryFarBreaks++;
+            if (!f.bedrock()) {
+                m.aimedBreaks++;
+                if (aim > OFF_AIM_BREAK)
+                    m.offAimBreaks++;
+            }
+        }
+        java.util.Collections.sort(times);
+        for (int a = 0; a + BURST_BREAKS - 1 < times.size(); a++)
+            if (times.get(a + BURST_BREAKS - 1) - times.get(a) < 50) {
+                m.bursts++;
+                a += BURST_BREAKS - 1;
+            }
     }
 
     /** From an eye to the nearest point of a player's box (0.6 wide, 1.8 high) standing at (x, y, z). */
@@ -609,6 +687,9 @@ public final class CheatChecks {
         public int botLike, botChecked;
         public float topSpeed, maxReach;
         public boolean bedrock;
+        /** Spleef: see Match */
+        public int breaks, farBreaks, veryFarBreaks, offAimBreaks, aimedBreaks, bursts;
+        public float maxBreakReach;
 
         public Summary(final List<Match> matches, final Baseline baseline) {
             this.matches = matches;
@@ -647,6 +728,13 @@ public final class CheatChecks {
                         this.botLike++;
                 }
                 this.bedrock |= m.f.bedrock();
+                this.breaks += m.breaks;
+                this.farBreaks += m.farBreaks;
+                this.veryFarBreaks += m.veryFarBreaks;
+                this.offAimBreaks += m.offAimBreaks;
+                this.aimedBreaks += m.aimedBreaks;
+                this.bursts += m.bursts;
+                this.maxBreakReach = Math.max(this.maxBreakReach, m.maxBreakReach);
             }
         }
 
@@ -779,6 +867,27 @@ public final class CheatChecks {
                                 cps, Math.round(accuracy * 100), this.bestSecond) + among(CPS, cps, true, "more", "fewer"),
                         "Only to the tick (20 a second at most), and drag or butterfly clicking can reach that: never a sign by itself."));
             }
+            // Spleef: breaking the floor
+            if (this.breaks > 0) {
+                final double far = this.farBreaks / (double) this.breaks;
+                lines.add(new Line("Break reach", this.veryFarBreaks >= 2 || (this.farBreaks >= 5 && far >= 0.02) ? Verdict.SUSPICIOUS
+                        : this.farBreaks >= 2 ? Verdict.LOOK : Verdict.FINE,
+                        String.format("%,d blocks broken by hand, furthest %.1f blocks, %d at %.0f+ (%d at %.0f+)", this.breaks, this.maxBreakReach,
+                                this.farBreaks, FAR_BREAK, this.veryFarBreaks, VERY_FAR_BREAK),
+                        "Spleef: from their eyes to the nearest part of each block as they broke it. Survival reach is 4.5 blocks;"
+                                + " lag adds a little, not a block and more."));
+                if (this.aimedBreaks > 0) {
+                    final double off = this.offAimBreaks / (double) this.aimedBreaks;
+                    lines.add(new Line("Break aim", this.offAimBreaks >= 5 && off >= 0.05 ? Verdict.SUSPICIOUS
+                            : this.offAimBreaks >= 2 ? Verdict.LOOK : Verdict.FINE,
+                            String.format("%d of %,d broken while looking %.0f°+ away from the block", this.offAimBreaks, this.aimedBreaks, OFF_AIM_BREAK),
+                            "Spleef: a block can only be broken by looking at it. Breaking ones they aren't looking at is what nukers do."));
+                }
+                lines.add(new Line("Break speed", this.bursts >= 2 ? Verdict.SUSPICIOUS : this.bursts == 1 ? Verdict.LOOK : Verdict.FINE,
+                        this.bursts == 0 ? "never more than a vanilla client can" : String.format("%d time%s %d+ blocks in one tick", this.bursts,
+                                this.bursts == 1 ? "" : "s", BURST_BREAKS),
+                        "Spleef: a vanilla client breaks at most one block a tick (lag can bunch two together)."));
+            }
             if (this.kbHits >= 30)
                 lines.add(new Line("Jump resets", Verdict.INFO, String.format("jumped as knockback came %d%% of the time", Math.round(100.0 * this.jumpResets / this.kbHits))
                                 + among(JUMP_RESETS, this.jumpResets / (double) this.kbHits, true, "more", "less"),
@@ -794,7 +903,8 @@ public final class CheatChecks {
             int score = 0;
             for (final Line l : this.lines())
                 score += l.verdict() == Verdict.SUSPICIOUS ? 100 : l.verdict() == Verdict.LOOK ? 20 : 0;
-            score += 3 * this.botLike + 2 * this.veryLongHits + this.longHits + 2 * this.rotationOff + this.sprintBackTicks / 10 + 2 * this.tooFast;
+            score += 3 * this.botLike + 2 * this.veryLongHits + this.longHits + 2 * this.rotationOff + this.sprintBackTicks / 10 + 2 * this.tooFast
+                    + 2 * this.veryFarBreaks + this.farBreaks + this.offAimBreaks + 3 * this.bursts;
             if (this.kbRatio.size() >= 15 && median(this.kbRatio) < KB_LOW)
                 score += 10;
             return score;
@@ -850,6 +960,18 @@ public final class CheatChecks {
             if (fast > 0) {
                 score += 2 * fast;
                 why.add(String.format("too fast (%.1f b/s)", m.topSpeed));
+            }
+            if (m.farBreaks > 0) {
+                score += m.farBreaks + 2 * m.veryFarBreaks;
+                why.add(String.format("%d block%s broken far away (up to %.1f)", m.farBreaks, m.farBreaks == 1 ? "" : "s", m.maxBreakReach));
+            }
+            if (m.offAimBreaks > 0) {
+                score += m.offAimBreaks;
+                why.add(m.offAimBreaks + " broken looking away");
+            }
+            if (m.bursts > 0) {
+                score += 3 * m.bursts;
+                why.add(m.bursts + "x " + BURST_BREAKS + "+ blocks in a tick");
             }
             return Map.entry(score, String.join(", ", why));
         }

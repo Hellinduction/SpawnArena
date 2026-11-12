@@ -26,6 +26,11 @@ public final class MatchIndex {
             return null;
         }
 
+        /** A free-for-all round: more than two sides (each fighter on their own). */
+        public boolean freeForAll() {
+            return this.fighters.stream().map(Side::team).distinct().count() > 2;
+        }
+
         /** Everyone on the other team from {@code me}. */
         public List<Side> against(final Side me) {
             final List<Side> out = new ArrayList<>();

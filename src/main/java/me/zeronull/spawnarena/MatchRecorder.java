@@ -31,16 +31,21 @@ import java.util.stream.Stream;
 import java.util.zip.GZIPOutputStream;
 
 /**
- * Records sumo matches between players, tick by tick, for one day training a bot on how real players play: where each
+ * Records sumo and spleef matches between players (spleef free-for-all rounds too), tick by tick, for one day training a bot on how real players play: where each
  * fighter is and looks, the keys they're holding (forward, back, left, right, jump, sneak, sprint), on the ground or
  * not, and when they swing, land a hit or are hit. With who won, and each fighter's stats there as the match started
  * (Elo, wins, losses, streaks, time spent fighting there, bots beaten), their ping and their client, to pick out
  * matches by later. A finished match (a winner, not a draw) is saved, compressed, to
  * recordings/&lt;date&gt;/ in the plugin's folder (about 10 KB for a 30-second 1v1); past recordingMaxMb, the oldest go.
- * Bot matches aren't recorded. The format: see {@link #write}.
+ * Bot matches aren't recorded. Spleef: every floor block broken too, when, by whom and how (to be shown in replays and
+ * checked). The format: see {@link #write}.
  */
 public final class MatchRecorder implements Listener {
-    private static final int FORMAT = 2;
+    private static final int FORMAT = 3;
+    /** The most block changes kept for one match (a long spleef free-for-all breaks a few hundred) */
+    private static final int MAX_BLOCKS = 20_000;
+    /** Header flags (format 3): a spleef match; a free-for-all round (each fighter on a team of their own) */
+    static final int SPLEEF = 1, FREE_FOR_ALL = 2;
     /** The longest it records a match for (ten minutes); after that it stops taking frames */
     private static final int MAX_FRAMES = 20 * 60 * 10;
     private static final Map<Fight, MatchRecorder> RECORDING = new ConcurrentHashMap<>();
@@ -52,6 +57,14 @@ public final class MatchRecorder implements Listener {
     private final Location centre;
     private final List<Track> tracks = new ArrayList<>();
     private volatile List<Player> winners;
+    /** Blocks changed during the match (spleef's floor broken), in order */
+    private final List<BlockChange> blocks = new ArrayList<>();
+
+    /** A block changed: when (ms since the start), where (from the centre's block), by which fighter (-1: none), how, to what. */
+    private record BlockChange(int ms, int x, int y, int z, int by, int how, String data) {}
+
+    /** How a block was changed: broken by hand, or by a snowball landing on it */
+    static final int BY_HAND = 0, BY_SNOWBALL = 1;
 
     /** One fighter's frames. */
     private static final class Track {
@@ -104,12 +117,10 @@ public final class MatchRecorder implements Listener {
         return SpawnArena.settings == null || SpawnArena.settings.recordSumoMatches;
     }
 
-    /** A fight has just gone live: a sumo match between players is recorded. */
+    /** A fight has just gone live: a sumo or spleef match (or spleef free-for-all round) between players is recorded. */
     static void start(final Fight fight) {
-        if (fight.getMode() == FightMode.FREE_FOR_ALL)
-            return; // (rounds of more than two aren't recorded yet)
         final Arena arena = fight.getArena();
-        if (!enabled() || fight.withBots() || !arena.isDeathOnTouchLiquid() || arena.isFfa())
+        if (!enabled() || fight.withBots() || !(arena.isDeathOnTouchLiquid() || arena.isSpleef()) || arena.isFfa())
             return;
         final Location a = arena.spawnPoint1, b = arena.spawnPoint2;
         if (a == null || b == null)
@@ -118,9 +129,12 @@ public final class MatchRecorder implements Listener {
         final List<Player> fighters = fight.getFighters();
         if (fighters.isEmpty())
             return;
+        final boolean round = fight.getMode() == FightMode.FREE_FOR_ALL;
+        if (fighters.size() > 100)
+            return; // (a fighter's number is a byte)
         final List<Player> firstTeam = fight.getTeamOf(fighters.get(0));
-        for (final Player p : fighters)
-            rec.tracks.add(new Track(p, firstTeam.contains(p) ? 0 : 1));
+        for (final Player p : fighters) // (a free-for-all round: everyone on a team of their own)
+            rec.tracks.add(new Track(p, round ? rec.tracks.size() : firstTeam.contains(p) ? 0 : 1));
         RECORDING.put(fight, rec);
         for (final Track t : rec.tracks) {
             OF.put(t.player.getUniqueId(), rec);
@@ -142,6 +156,26 @@ public final class MatchRecorder implements Listener {
                     t.botsBeaten = stats.botWins(id, name);
                 }
             });
+    }
+
+    /**
+     * A block in this fight's arena changed (spleef: floor broken by {@code by}, by hand or snowball): kept with the
+     * recording, if there is one. Any thread.
+     */
+    static void blockChanged(final Fight fight, final org.bukkit.block.Block block, final Player by, final int how,
+                             final org.bukkit.block.data.BlockData now) {
+        final MatchRecorder rec = RECORDING.get(fight);
+        if (rec == null)
+            return;
+        final Track t = by == null ? null : rec.track(by);
+        final int ms = (int) (System.currentTimeMillis() - rec.startedAt);
+        final BlockChange change = new BlockChange(ms, block.getX() - (int) Math.floor(rec.centre.getX()),
+                block.getY() - (int) Math.floor(rec.centre.getY()), block.getZ() - (int) Math.floor(rec.centre.getZ()),
+                t == null ? -1 : rec.tracks.indexOf(t), how, now.getAsString());
+        synchronized (rec.blocks) {
+            if (rec.blocks.size() < MAX_BLOCKS)
+                rec.blocks.add(change);
+        }
     }
 
     /** The fight has a result: it's kept once it ends. */
@@ -348,7 +382,8 @@ public final class MatchRecorder implements Listener {
      * "SAREC" (5 bytes), format (int, 1)
      * started (long, epoch ms), arena (text), variant (text: "" for none), centre x, y, z (doubles: the middle of
      *   the two spawn points; positions below are from it), length (int, ms), a duel (byte, 0/1: not from the
-     *   queue), the winning team (byte, 0 or 1)
+     *   queue), the winning team (byte, 0 or 1; a free-for-all round: the winner's)
+     * format 3 only: flags (byte: 1 spleef, 2 a free-for-all round, where each fighter is a team of their own, 0, 1, 2...)
      * fighters (byte), then each: UUID (2 longs), name (text), team (byte, 0 or 1), won (byte, 0/1),
      *   their stats in that arena as it started: Elo, wins, losses, win streak, best win streak, seconds spent
      *   fighting there (ints), bots beaten there (byte: how many levels, then each: level (text), how many (int)),
@@ -364,6 +399,9 @@ public final class MatchRecorder implements Listener {
      *   8 teleported, 16 landed a hit on a fighter (their number, below)), then if 1: the velocity x, y, z (floats),
      *   then if 16: which fighter (byte: their place in the list above, from 0)
      * </pre>
+     * format 3 only, after the frames: blocks changed (int), then each: time since the start (int, ms), x, y, z (ints:
+     *   from the centre's block, its coordinates rounded down), by (byte: which fighter, -1 none), how (byte: 0 by hand,
+     *   1 a snowball landing on it), what it became (text: block data, e.g. "minecraft:air")
      * A frame a tick (20 a second) while they're fighting. Read back by {@link Recording}.
      */
     private void write(final File file) throws IOException {
@@ -385,6 +423,7 @@ public final class MatchRecorder implements Listener {
                 if (won != null && won.contains(t.player))
                     winningTeam = t.team;
             out.writeByte(winningTeam);
+            out.writeByte((this.fight.getArena().isSpleef() ? SPLEEF : 0) | (this.fight.getMode() == FightMode.FREE_FOR_ALL ? FREE_FOR_ALL : 0));
             out.writeByte(this.tracks.size());
             for (final Track t : this.tracks) {
                 out.writeLong(t.player.getUniqueId().getMostSignificantBits());
@@ -411,6 +450,18 @@ public final class MatchRecorder implements Listener {
                     out.writeInt(t.frames);
                     t.bytes.writeTo(out);
                 }
+            synchronized (this.blocks) {
+                out.writeInt(this.blocks.size());
+                for (final BlockChange b : this.blocks) {
+                    out.writeInt(b.ms());
+                    out.writeInt(b.x());
+                    out.writeInt(b.y());
+                    out.writeInt(b.z());
+                    out.writeByte(b.by());
+                    out.writeByte(b.how());
+                    out.writeUTF(b.data());
+                }
+            }
         }
     }
 

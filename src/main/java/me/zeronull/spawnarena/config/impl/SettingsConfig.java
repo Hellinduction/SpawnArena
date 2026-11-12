@@ -33,8 +33,9 @@ public final class SettingsConfig {
             "Toggle in game with /arenalock <arena>"})
     public volatile java.util.List<String> lockedArenas = new java.util.ArrayList<>();
 
-    @Comment({"Record sumo matches between players, tick by tick (positions, looks, keys held, swings and hits), to",
-            "plugins/SpawnArena/recordings/, for one day training a bot on how real players play. About 1-3 KB a match."})
+    @Comment({"Record sumo and spleef matches between players (spleef free-for-all rounds too), tick by tick (positions,",
+            "looks, keys held, swings and hits; spleef: the floor broken), to plugins/SpawnArena/recordings/, for replays",
+            "(/matches), /arenacheck, and one day training a bot on how real players play. About 1-3 KB a match."})
     public boolean recordSumoMatches = true;
 
     @Comment("Most space the recordings take, in MB: past it, the oldest go. 0 = no limit.")

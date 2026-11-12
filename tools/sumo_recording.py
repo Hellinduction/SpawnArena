@@ -1,4 +1,4 @@
-"""Reads SpawnArena's sumo match recordings (plugins/SpawnArena/recordings/<date>/*.sarec.gz).
+"""Reads SpawnArena's sumo and spleef match recordings (plugins/SpawnArena/recordings/<date>/*.sarec.gz).
 
 As a module:
     from sumo_recording import read
@@ -47,11 +47,14 @@ def read(path):
         raise ValueError("not a SpawnArena recording")
     r.at = 5
     version = r.take("i")
-    if version not in (1, 2):
+    if version not in (1, 2, 3):
         raise ValueError("unknown recording format %d" % version)
     match = {"format": version, "started": r.take("q"), "arena": r.text(), "variant": r.text() or None,
              "centre": [r.take("d"), r.take("d"), r.take("d")], "length_ms": r.take("i"),
              "duel": bool(r.take("b")), "winning_team": r.take("b"), "fighters": []}
+    # Format 3: a spleef match, a free-for-all round (each fighter a team of their own)
+    flags = r.take("B") if version >= 3 else 0
+    match["spleef"], match["free_for_all"] = bool(flags & 1), bool(flags & 2)
     for _ in range(r.take("b")):
         most, least = r.take("q"), r.take("q")
         fighter = {"uuid": str(uuid.UUID(int=((most & (2**64 - 1)) << 64) | (least & (2**64 - 1)))),
@@ -84,11 +87,20 @@ def read(path):
                 frame["hit_fighter"] = r.take("b") if more & 16 else None
             frames.append(frame)
         fighter["frames"] = frames
+    # Format 3: blocks changed (spleef's floor broken): when, where (from the centre's block), by which fighter
+    # (-1 none), how (0 by hand, 1 snowball), what it became
+    match["blocks"] = []
+    if version >= 3:
+        for _ in range(r.take("i")):
+            ms, x, y, z, by, how = r.take("iiiibb")
+            match["blocks"].append({"ms": ms, "x": x, "y": y, "z": z, "by": by,
+                                    "how": "snowball" if how == 1 else "hand", "became": r.text()})
     return match
 
 
 def summary(match):
-    out = {k: v for k, v in match.items() if k != "fighters"}
+    out = {k: v for k, v in match.items() if k not in ("fighters", "blocks")}
+    out["blocks"] = len(match.get("blocks", []))
     out["format"] = match.get("format", 1)
     out["winners"] = [f["name"] for f in match["fighters"] if f["won"]]
     out["fighters"] = []
@@ -99,6 +111,9 @@ def summary(match):
         for k in KEYS + STATE + MORE:
             s[k] = sum(fr.get(k, False) for fr in frames)
         s["furthest"] = round(max((abs(fr["x"]) + abs(fr["z"]) for fr in frames), default=0), 2)
+        me = match["fighters"].index(f)
+        s["broke_by_hand"] = sum(1 for b in match.get("blocks", []) if b["by"] == me and b["how"] == "hand")
+        s["broke_by_snowball"] = sum(1 for b in match.get("blocks", []) if b["by"] == me and b["how"] == "snowball")
         out["fighters"].append(s)
     return out
 

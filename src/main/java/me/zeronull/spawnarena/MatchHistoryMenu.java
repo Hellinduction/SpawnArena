@@ -116,7 +116,7 @@ public final class MatchHistoryMenu implements InventoryHolder {
             lore.add("<green>Left-click to watch it back");
             lore.add("<yellow>Right-click to " + (favourite ? "unfavourite" : "favourite"));
             lore.add("<aqua>Shift-click for its command in chat");
-            final String vs = against.isEmpty() ? "?" : String.join(" & ", against);
+            final String vs = against.isEmpty() ? "?" : Recording.opponents(against, m.freeForAll());
             final ItemStack item = item(side.won() ? Material.LIME_DYE : Material.RED_DYE,
                     (side.won() ? "<green><bold>Won</bold>" : "<red><bold>Lost</bold>") + " <gray>vs <white>" + esc(vs), lore);
             if (favourite)

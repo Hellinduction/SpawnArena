@@ -269,6 +269,8 @@ public final class SpleefRound extends Fight {
         final Map<UUID, Player> outBy = Map.copyOf(this.outBy);
         final long seconds = this.startedAt() == 0 ? 0 : (System.currentTimeMillis() - this.startedAt()) / 1000;
 
+        if (!winners.isEmpty())
+            MatchRecorder.result(this, winners); // (kept once it ends)
         this.endFight();
         this.showTitles(placed);
         if (winners.isEmpty() || this.isDuel())

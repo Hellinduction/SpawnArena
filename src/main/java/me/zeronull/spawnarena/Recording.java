@@ -25,6 +25,20 @@ public final class Recording {
     public final int lengthMs;
     public final boolean duel;
     public final List<Fighter> fighters;
+    /** Format 3: a spleef match; a free-for-all round (each fighter a team of their own) */
+    public final boolean spleef, freeForAll;
+    /** The centre positions are from (the middle of the two spawn points), as it was then */
+    public final double centreX, centreY, centreZ;
+    /** Format 3: blocks changed during the match, in order (empty unless frames were read) */
+    public final List<BlockChange> blocks = new ArrayList<>();
+
+    /**
+     * A block changed: when (ms since the start), where (from the centre's block: its coordinates rounded down), by which
+     * fighter (their place in the list, -1 none), how ({@link #BY_HAND} or {@link #BY_SNOWBALL}), what it became.
+     */
+    public record BlockChange(int ms, int x, int y, int z, int by, int how, String data) {}
+
+    public static final int BY_HAND = 0, BY_SNOWBALL = 1;
 
     /** One fighter: who, and (unless only the header was read) their frames, a tick each. */
     public static final class Fighter {
@@ -73,7 +87,7 @@ public final class Recording {
     public static final int VELOCITY = 1, DIGGING = 2, SHOT = 4, TELEPORTED = 8, LANDED_ON = 16;
 
     private Recording(final File file, final int format, final long started, final String arena, final String variant,
-                      final int lengthMs, final boolean duel, final List<Fighter> fighters) {
+                      final int lengthMs, final boolean duel, final List<Fighter> fighters, final int flags, final double[] centre) {
         this.file = file;
         this.format = format;
         this.started = started;
@@ -82,6 +96,11 @@ public final class Recording {
         this.lengthMs = lengthMs;
         this.duel = duel;
         this.fighters = fighters;
+        this.spleef = (flags & 1) != 0;
+        this.freeForAll = (flags & 2) != 0;
+        this.centreX = centre[0];
+        this.centreY = centre[1];
+        this.centreZ = centre[2];
     }
 
     public static Recording read(final File file) throws IOException {
@@ -100,17 +119,16 @@ public final class Recording {
             if (!"SAREC".equals(new String(magic, java.nio.charset.StandardCharsets.US_ASCII)))
                 throw new IOException("not a recording");
             final int format = in.readInt();
-            if (format < 1 || format > 2)
+            if (format < 1 || format > 3)
                 throw new IOException("unknown format " + format);
             final long started = in.readLong();
             final String arena = in.readUTF();
             final String variant = in.readUTF();
-            in.readDouble();
-            in.readDouble();
-            in.readDouble();
+            final double[] centre = {in.readDouble(), in.readDouble(), in.readDouble()};
             final int length = in.readInt();
             final boolean duel = in.readByte() != 0;
             in.readByte(); // winning team (each fighter says whether they won)
+            final int flags = format >= 3 ? in.readUnsignedByte() : 0;
             final int count = in.readUnsignedByte();
             final List<Fighter> fighters = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
@@ -135,11 +153,18 @@ public final class Recording {
                 f.client = in.readUTF();
                 fighters.add(f);
             }
-            final Recording rec = new Recording(file, format, started, arena, variant, length, duel, fighters);
+            final Recording rec = new Recording(file, format, started, arena, variant, length, duel, fighters, flags, centre);
             if (!frames)
                 return rec;
             for (final Fighter f : fighters)
                 readFrames(in, f, format);
+            if (format >= 3) {
+                final int n = in.readInt();
+                if (n < 0 || n > 1_000_000)
+                    throw new IOException("bad block count " + n);
+                for (int i = 0; i < n; i++)
+                    rec.blocks.add(new BlockChange(in.readInt(), in.readInt(), in.readInt(), in.readInt(), in.readByte(), in.readByte(), in.readUTF()));
+            }
             return rec;
         } catch (final EOFException e) {
             throw new IOException("cut short", e);
@@ -199,6 +224,7 @@ public final class Recording {
 
     /** Lets go of every fighter's frames (once analysed), keeping who fought: thousands can then be held at once. */
     public void dropFrames() {
+        this.blocks.clear();
         for (final Fighter f : this.fighters) {
             f.time = null;
             f.x = f.y = f.z = f.yaw = f.pitch = null;
@@ -206,6 +232,22 @@ public final class Recording {
             f.ping = null;
             f.velocity = null;
         }
+    }
+
+    /** Who fought whom: "A vs B", "A & B vs C & D", or a free-for-all's "A vs B vs C". */
+    public String versus() {
+        final java.util.Map<Integer, List<String>> teams = new java.util.TreeMap<>();
+        for (final Fighter f : this.fighters)
+            teams.computeIfAbsent(f.team, t -> new ArrayList<>()).add(f.name);
+        final List<String> sides = new ArrayList<>();
+        for (final List<String> team : teams.values())
+            sides.add(String.join(" & ", team));
+        return String.join(" vs ", sides);
+    }
+
+    /** Names of those someone fought against, together: "A & B" (a team), or a free-for-all's "A, B, C". */
+    public static String opponents(final List<String> names, final boolean freeForAll) {
+        return String.join(freeForAll ? ", " : " & ", names);
     }
 
     public Fighter fighter(final UUID uuid) {

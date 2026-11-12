@@ -103,7 +103,7 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
         Threads.async(() -> {
             final List<Recording> theirs = matchesOf(args[0], n);
             if (theirs.size() < n) {
-                tell(player, theirs.isEmpty() ? "<red>No recorded matches for " + esc(args[0]) + ". <gray>(Only sumo matches between players are recorded.)"
+                tell(player, theirs.isEmpty() ? "<red>No recorded matches for " + esc(args[0]) + ". <gray>(Only sumo and spleef matches between players are recorded.)"
                         : "<red>" + esc(args[0]) + " only has " + theirs.size() + " recorded match" + (theirs.size() == 1 ? "" : "es") + ".");
                 return;
             }
@@ -220,7 +220,7 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
             final SumoVariant v = r.variant();
             final int s = r.lengthMs / 1000;
             tell(player, "<click:run_command:/arenareplay file " + path(r.file) + "><hover:show_text:'<gray>Watch it'>"
-                    + "<dark_gray>#" + (i + 1) + "</dark_gray> <white>" + when.format(new Date(r.started)) + "</white> <gray>vs " + esc(String.join(" & ", against))
+                    + "<dark_gray>#" + (i + 1) + "</dark_gray> <white>" + when.format(new Date(r.started)) + "</white> <gray>vs " + esc(me.zeronull.spawnarena.Recording.opponents(against, r.freeForAll))
                     + (v == SumoVariant.CLASSIC ? "" : " (" + v.title + ")") + ", " + (them.won ? "<green>won</green>" : "<red>lost</red>")
                     + " <gray>(" + s / 60 + ":" + String.format("%02d", s % 60) + ") <aqua>[Watch]</aqua></hover></click>");
         }

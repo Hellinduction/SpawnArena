@@ -106,7 +106,7 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
         final File root = new File(SpawnArena.INSTANCE.getDataFolder(), "recordings");
         final List<File> files = CheatChecks.recordings(root, SCANNED_RECORDINGS);
         if (files.isEmpty()) {
-            tell(sender, MiniMessage.miniMessage().deserialize("<red>No recorded matches yet (sumo matches between players are recorded)."));
+            tell(sender, MiniMessage.miniMessage().deserialize("<red>No recorded matches yet (sumo and spleef matches between players are recorded)."));
             return;
         }
 
@@ -148,7 +148,7 @@ public final class ArenaCheckCommand implements CommandExecutor, TabCompleter {
         }
         if (theirs.isEmpty()) {
             tell(sender, MiniMessage.miniMessage().deserialize("<red>No recorded matches for <name>" + (days > 0 ? " in that time" : "")
-                    + ". <gray>(Only sumo matches between players are recorded.)", Placeholder.unparsed("name", name)));
+                    + ". <gray>(Only sumo and spleef matches between players are recorded.)", Placeholder.unparsed("name", name)));
             return;
         }
 

@@ -27,7 +27,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * Plays a recorded sumo match back (see {@link MatchRecorder}) to one player, in the arena it was fought in: each
  * fighter is a player drawn by packets for them alone (their skin, name, the match's item in hand), moving and looking
  * as they did tick by tick, crouching, swinging and flashing red when hit. Paused, sped up, slowed down (smoothed between
- * ticks), skipped through; an Ice Rink match shows them the ice. Nothing in the world changes, and nobody else sees it.
+ * ticks), skipped through; an Ice Rink match shows them the ice, a spleef match the floor being broken as it was (and
+ * put back as they skip back). Nothing in the world changes, and nobody else sees it.
  */
 public final class ArenaReplay {
     private static final Map<UUID, ArenaReplay> WATCHING = new ConcurrentHashMap<>();
@@ -39,6 +40,17 @@ public final class ArenaReplay {
     private final double cx, cy, cz;
     private final List<Puppet> puppets = new ArrayList<>();
     private final List<SumoIce.FakeBlock> ice;
+    /** Spleef: the blocks changed during the match (in order), where they are now and what they became */
+    private final List<Change> changes;
+    /** The real blocks at those spots (read as it started), to show again */
+    private final Map<Location, org.bukkit.block.data.BlockData> realBlocks;
+    /** What the viewer is shown instead of the real block, now */
+    private final Map<Location, org.bukkit.block.data.BlockData> shownBlocks = new java.util.HashMap<>();
+    /** The time the blocks were last shown for (-1: not yet) */
+    private double blocksAt = -1;
+
+    /** One block change, placed in the arena as it is now. */
+    private record Change(int ms, Location at, org.bukkit.block.data.BlockData now) {}
     /** Where they were before being brought here (null: they were close enough already) */
     final Location cameFrom;
     private final long endMs;
@@ -107,7 +119,7 @@ public final class ArenaReplay {
     }
 
     private ArenaReplay(final Player viewer, final Recording rec, final World world, final double[] centre, final List<SumoIce.FakeBlock> ice,
-                        final Location cameFrom) {
+                        final Location cameFrom, final List<Change> changes, final Map<Location, org.bukkit.block.data.BlockData> realBlocks) {
         this.viewer = viewer;
         this.rec = rec;
         this.world = world;
@@ -116,6 +128,8 @@ public final class ArenaReplay {
         this.cz = centre[2];
         this.ice = ice;
         this.cameFrom = cameFrom;
+        this.changes = changes;
+        this.realBlocks = realBlocks;
         long end = 0;
         for (final Recording.Fighter f : rec.fighters)
             if (f.frames > 0)
@@ -168,6 +182,22 @@ public final class ArenaReplay {
             final Location a = arena.spawnPoint1, b = arena.spawnPoint2;
             final double[] centre = {(a.getX() + b.getX()) / 2, (a.getY() + b.getY()) / 2, (a.getZ() + b.getZ()) / 2};
             final List<SumoIce.FakeBlock> ice = rec.variant() == SumoVariant.ICE ? SumoIce.findForFake(arena).join() : List.of();
+            // Spleef: the blocks broken, where they are in the arena now, and the real ones there (read on their thread)
+            final List<Change> changes = new ArrayList<>();
+            for (final Recording.BlockChange c : rec.blocks) {
+                try {
+                    changes.add(new Change(c.ms(), new Location(a.getWorld(), Math.floor(centre[0]) + c.x(), Math.floor(centre[1]) + c.y(),
+                            Math.floor(centre[2]) + c.z()), Bukkit.createBlockData(c.data())));
+                } catch (final IllegalArgumentException ignored) {
+                    // a block this version doesn't know
+                }
+            }
+            final Map<Location, org.bukkit.block.data.BlockData> realBlocks = changes.isEmpty() ? Map.of() : Threads.supplyAt(a, () -> {
+                final Map<Location, org.bukkit.block.data.BlockData> real = new java.util.HashMap<>();
+                for (final Change c : changes)
+                    real.computeIfAbsent(c.at(), at -> at.getBlock().getBlockData().clone());
+                return real;
+            }).join();
             Threads.entity(viewer, () -> {
                 if (!viewer.isOnline())
                     return;
@@ -191,18 +221,19 @@ public final class ArenaReplay {
                 final boolean moved = !arrived.isDone() || from != null && old == null;
                 arrived.thenAccept(ok -> Threads.entityLater(viewer, () -> {
                     if (viewer.isOnline() && viewer.getWorld() == a.getWorld())
-                        begin(viewer, rec, a.getWorld(), centre, ice, from, looks, hand, moved);
+                        begin(viewer, rec, a.getWorld(), centre, ice, from, looks, hand, moved, changes, realBlocks);
                 }, moved ? 20L : 1L));
             });
         });
     }
 
     private static void begin(final Player viewer, final Recording rec, final World world, final double[] centre, final List<SumoIce.FakeBlock> ice,
-                              final Location cameFrom, final List<Object[]> looks, final ItemStack hand, final boolean moved) {
+                              final Location cameFrom, final List<Object[]> looks, final ItemStack hand, final boolean moved,
+                              final List<Change> changes, final Map<Location, org.bukkit.block.data.BlockData> realBlocks) {
         final ArenaReplay old = WATCHING.get(viewer.getUniqueId());
         if (old != null)
             old.stop(false);
-        final ArenaReplay replay = new ArenaReplay(viewer, rec, world, centre, ice, cameFrom);
+        final ArenaReplay replay = new ArenaReplay(viewer, rec, world, centre, ice, cameFrom, changes, realBlocks);
         try {
             for (final Object[] look : looks) {
                 final Recording.Fighter f = (Recording.Fighter) look[0];
@@ -221,8 +252,10 @@ public final class ArenaReplay {
         replay.begin(moved);
     }
 
-    /** What the match's fighters held: the random sumo variant's item, or the Slap Fish (fists in a combo arena). */
+    /** What the match's fighters held: the spleef shovel, the random sumo variant's item, or the Slap Fish (fists in a combo arena). */
     private static ItemStack handItem(final SumoVariant v, final Arena arena) {
+        if (arena.isSpleef())
+            return Spleef.shovel();
         final ItemStack held = v.heldItem(); // (enchanted as they had it)
         if (held != null)
             return held;
@@ -249,10 +282,7 @@ public final class ArenaReplay {
     }
 
     private String versus() {
-        final List<String> a = new ArrayList<>(), b = new ArrayList<>();
-        for (final Recording.Fighter f : this.rec.fighters)
-            (f.team == 0 ? a : b).add(f.name);
-        return String.join(" & ", a) + " vs " + String.join(" & ", b);
+        return this.rec.versus();
     }
 
     /** The buttons, in chat. */
@@ -348,6 +378,8 @@ public final class ArenaReplay {
             }
             for (final Puppet p : this.puppets)
                 this.draw(p);
+            if (!this.changes.isEmpty())
+                this.blocks();
         } catch (final ReflectiveOperationException | RuntimeException e) {
             SpawnArena.INSTANCE.getLogger().warning("Stopped a replay: " + e);
             this.stop(false);
@@ -405,6 +437,45 @@ public final class ArenaReplay {
             p.sprinting = sprinting;
             this.data(p);
         }
+    }
+
+    /**
+     * Spleef: the blocks as they were at this point of the match, shown to the viewer (what changed since the last tick;
+     * all of it again every second, as clicking a block makes the server send the real one). Playing on, each block
+     * broken makes its sound.
+     */
+    private void blocks() {
+        final double now = this.clock;
+        if (now == this.blocksAt && this.ticks % 20 != 0)
+            return;
+        final double before = this.blocksAt;
+        final Map<Location, org.bukkit.block.data.BlockData> wanted = new java.util.HashMap<>();
+        for (final Change c : this.changes) {
+            if (c.ms() > now)
+                break;
+            wanted.put(c.at(), c.now());
+            if (before >= 0 && c.ms() > before && now - before <= 500) {
+                final org.bukkit.block.data.BlockData real = this.realBlocks.get(c.at());
+                if (real != null)
+                    this.viewer.playSound(c.at().clone().add(0.5, 0.5, 0.5), real.getSoundGroup().getBreakSound(), org.bukkit.SoundCategory.BLOCKS, 1f, 0.8f);
+            }
+        }
+        final boolean all = this.ticks % 20 == 0;
+        final Map<Location, org.bukkit.block.data.BlockData> send = new java.util.HashMap<>();
+        for (final Map.Entry<Location, org.bukkit.block.data.BlockData> e : wanted.entrySet())
+            if (all || !e.getValue().equals(this.shownBlocks.get(e.getKey())))
+                send.put(e.getKey(), e.getValue());
+        for (final Location at : this.shownBlocks.keySet())
+            if (!wanted.containsKey(at)) {
+                final org.bukkit.block.data.BlockData real = this.realBlocks.get(at);
+                if (real != null)
+                    send.put(at, real);
+            }
+        this.shownBlocks.clear();
+        this.shownBlocks.putAll(wanted);
+        this.blocksAt = now;
+        if (!send.isEmpty())
+            this.viewer.sendMultiBlockChange(send);
     }
 
     private void spawn(final Puppet p, final double x, final double y, final double z, final float yaw, final float pitch) throws ReflectiveOperationException {
@@ -615,6 +686,14 @@ public final class ArenaReplay {
                 this.despawn(p);
         if (!this.ice.isEmpty())
             SumoIce.showReal(this.viewer, this.ice);
+        if (!this.shownBlocks.isEmpty()) {
+            final Map<Location, org.bukkit.block.data.BlockData> real = new java.util.HashMap<>();
+            for (final Location at : this.shownBlocks.keySet())
+                if (this.realBlocks.containsKey(at))
+                    real.put(at, this.realBlocks.get(at));
+            this.shownBlocks.clear();
+            this.viewer.sendMultiBlockChange(real);
+        }
         this.viewer.sendActionBar(Component.empty());
         if (sendBack && this.cameFrom != null)
             Threads.teleport(this.viewer, this.cameFrom);

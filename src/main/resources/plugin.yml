@@ -143,13 +143,13 @@ commands:
     permission-message: "§cYou don't have permission!"
 
   arenacheck:
-    description: Look back over a player's recorded sumo matches for signs of cheating (reach, knockback, aim, sprinting, speed)
+    description: Look back over a player's recorded sumo and spleef matches for signs of cheating (reach, knockback, aim, sprinting, speed, and for spleef how they broke the floor)
     usage: "/arenacheck <player> [days]  or  /arenacheck top [days] (the most suspicious players)"
     permission: spawnarena.arenacheck
     permission-message: "§cYou don't have permission!"
 
   arenareplay:
-    description: Watch a recorded sumo match back, shown to you alone
+    description: Watch a recorded sumo or spleef match back, shown to you alone
     usage: "/arenareplay <player> [n] | list <player> [page] | file <day/file> | pause | play | skip <seconds> | speed <x> | restart | stop"
     permission: spawnarena.arenareplay
     permission-message: "§cYou don't have permission!"
