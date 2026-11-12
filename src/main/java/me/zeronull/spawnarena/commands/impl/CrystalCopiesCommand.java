@@ -39,8 +39,8 @@ public final class CrystalCopiesCommand implements CommandExecutor, TabCompleter
         }
         final SavableArena real = args.length < 2 ? null : multi(args[1]);
         if (real == null) {
-            sender.sendMessage(ChatColor.RED + (args.length < 2 ? "Which arena? " : "That isn't a MULTI crystal arena. ")
-                    + "MULTI crystal arenas: " + String.join(", ", names()));
+            sender.sendMessage(ChatColor.RED + (args.length < 2 ? "Which arena? " : "That isn't a MULTI crystal or spleef arena. ")
+                    + "MULTI crystal and spleef arenas: " + String.join(", ", names()));
             return true;
         }
 
@@ -87,7 +87,7 @@ public final class CrystalCopiesCommand implements CommandExecutor, TabCompleter
     private static void status(final CommandSender sender) {
         final List<SavableArena> arenas = multis();
         if (arenas.isEmpty()) {
-            sender.sendMessage(ChatColor.YELLOW + "There are no MULTI crystal arenas"
+            sender.sendMessage(ChatColor.YELLOW + "There are no MULTI crystal or spleef arenas"
                     + (CrystalCopies.supported() ? "." : " (MULTI needs WorldGuard and WorldEdit)."));
             return;
         }
@@ -116,7 +116,7 @@ public final class CrystalCopiesCommand implements CommandExecutor, TabCompleter
         final List<SavableArena> found = new ArrayList<>();
         if (SpawnArena.arenas != null)
             for (final Arena arena : SpawnArena.arenas)
-                if (arena instanceof SavableArena real && real.isCrystalPvp() && real.getArenaMode() == ArenaMode.MULTI)
+                if (arena instanceof SavableArena real && real.usesCopies() && real.getArenaMode() == ArenaMode.MULTI)
                     found.add(real);
         return found;
     }

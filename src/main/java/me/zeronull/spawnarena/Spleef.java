@@ -86,9 +86,11 @@ public final class Spleef implements Listener {
         final Player p = e.getPlayer();
         final Fight fight = fightOf(p);
         if (fight == null) {
-            // Not in a match: a spleef arena's floor is only for its fighters
+            // Not in a match: a spleef arena's floor is only for its fighters (and a MULTI one's real arena is its viewing
+            // arena, never broken)
             final Arena at = SpawnArena.arenas == null ? null : SpawnArena.arenas.of(e.getBlock().getLocation());
-            if (at != null && at.isSpleef() && !at.getFights().isEmpty() && !p.hasPermission("spawnarena.admin"))
+            if (at != null && at.isSpleef() && (!at.getFights().isEmpty() || at instanceof CrystalCopy || !CrystalCopies.of(at).isEmpty())
+                    && !p.hasPermission("spawnarena.admin"))
                 e.setCancelled(true);
             return;
         }

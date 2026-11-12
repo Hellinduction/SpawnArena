@@ -155,12 +155,12 @@ public final class SettingsConfig {
             "which some anticheats may flag. Set to false and Ice Rink is never picked in MULTI arenas (SINGLE arenas use real ice)."})
     public boolean sumoIceInMulti = true;
 
-    @Comment({"Crystal arenas in MULTI mode: how many matches can run at once. Each is fought in a full copy of the arena in a",
+    @Comment({"Crystal and spleef arenas in MULTI mode: how many matches can run at once. Each is fought in a full copy of the arena in a",
             "world of its own (spawnarena_<arena>_<n>), made with the Spawn world's settings. On plain Folia, which can't make",
             "worlds while running, they're made through the Worlds plugin, or must be made beforehand (/crystalcopies)."})
     public int crystalMultiMatches = 3;
 
-    @Comment({"How far around a MULTI crystal arena's region is copied for its matches (walls, deck, dome), in blocks each way.",
+    @Comment({"How far around a MULTI crystal or spleef arena's region is copied for its matches (walls, deck, dome), in blocks each way.",
             "Not used when there's a WorldGuard region called <arena>_copy (e.g. crystal_copy): then exactly that is copied."})
     public int crystalCopyMargin = 32;
 
@@ -172,7 +172,7 @@ public final class SettingsConfig {
     public String combatLoggerWorldsSection = "COMBAT-MANAGER.EXCLUDED-WORLDS";
     public String combatLoggerWorldsReload = "economy reload";
 
-    @Comment({"MULTI crystal arenas: players on spawn see every match at once in the real arena (fighters as mannequins, blocks",
+    @Comment({"MULTI crystal and spleef arenas: players on spawn see every match at once in the real arena (fighters as mannequins, blocks",
             "changed in any match, the newest change winning). Around each fighter their own match's blocks always show:",
             "this many blocks out to the sides..."})
     public int crystalViewBubbleRadius = 3;
@@ -183,7 +183,7 @@ public final class SettingsConfig {
     @Comment("...and this many above their head.")
     public int crystalViewBubbleAbove = 2;
 
-    @Comment("How far from a MULTI crystal arena players on spawn see its matches, in blocks")
+    @Comment("How far from a MULTI crystal or spleef arena players on spawn see its matches, in blocks")
     public int crystalViewDistance = 96;
 
     @Comment({"Crystal arenas: blocks fighters can dig out of the arena's own floor during a fight (put back afterwards, like",

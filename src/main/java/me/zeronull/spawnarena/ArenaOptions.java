@@ -218,18 +218,25 @@ public abstract class ArenaOptions {
     }
 
     /**
-     * Free-for-all arenas have one session that everyone joins. Crystal PvP arenas run one fight at a time in the arena
-     * itself (blocks placed in one fight would show up in the other), unless they're MULTI where that's supported:
-     * then each match is fought in a copy of its own (CrystalCopies), each copy running one at a time.
+     * Free-for-all arenas have one session that everyone joins. Crystal PvP and spleef arenas run one fight at a time in
+     * the arena itself (blocks placed or broken in one fight would show up in the other), unless they're MULTI where
+     * that's supported: then each match is fought in a copy of its own (CrystalCopies), each copy running one at a time.
      */
     public ArenaMode getArenaMode() {
-        // (spleef: one match at a time in the arena itself, as its floor is broken; copies of their own to come)
-        if (this.ffa || this.spleef)
+        if (this.ffa)
             return ArenaMode.SINGLE;
-        if (this.crystalPvp)
+        if (this.usesCopies())
             return this.arenaMode == ArenaMode.MULTI && CrystalCopies.supported() && !(this instanceof CrystalCopy)
                     ? ArenaMode.MULTI : ArenaMode.SINGLE;
         return this.arenaMode;
+    }
+
+    /**
+     * Crystal PvP and spleef arenas change their blocks during a match, so in MULTI mode each match is fought in a copy
+     * of the arena of its own (see CrystalCopies), the real arena being the viewing arena.
+     */
+    public boolean usesCopies() {
+        return this.crystalPvp || this.spleef;
     }
 
     public boolean isFfa() {

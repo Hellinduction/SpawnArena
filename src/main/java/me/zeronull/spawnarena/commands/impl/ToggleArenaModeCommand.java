@@ -126,9 +126,10 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             redrawHolograms();
         }
 
-        if (arena.isCrystalPvp()) {
+        if (arena.usesCopies()) {
             if (!me.zeronull.spawnarena.CrystalCopies.supported()) {
-                sender.sendMessage(ChatColor.RED + "Crystal PvP arenas run one fight at a time (SINGLE) on this server: MULTI needs WorldGuard and WorldEdit.");
+                sender.sendMessage(ChatColor.RED + (arena.isSpleef() ? "Spleef" : "Crystal PvP")
+                        + " arenas run one fight at a time (SINGLE) on this server: MULTI needs WorldGuard and WorldEdit.");
                 return true;
             }
             if (arena.getArenaMode() == ArenaMode.MULTI) {
@@ -183,6 +184,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             return;
         }
         final boolean nowSpleef;
+        final boolean wasMulti;
         synchronized (arena) {
             final String busy = whyBusy(arena);
             if (busy != null) {
@@ -190,6 +192,14 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
                 return;
             }
             nowSpleef = !arena.isSpleef();
+            // MULTI means something else for spleef (a copy of the arena per match, set up by /togglearenamode): back to
+            // SINGLE either way, and a spleef arena's copies retired
+            wasMulti = arena.getArenaMode() == ArenaMode.MULTI;
+            if (wasMulti) {
+                arena.setArenaMode(ArenaMode.SINGLE.name());
+                arena.save(config -> config.arenaMode = ArenaMode.SINGLE.name());
+                me.zeronull.spawnarena.CrystalCopies.retire(arena);
+            }
             arena.setSpleef(nowSpleef);
             if (nowSpleef)
                 arena.setShouldClearItems(true);
@@ -203,11 +213,14 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
                 ? ChatColor.GREEN + "Spleef is on for " + arena.getArenaName() + ": fighters get a shovel and break the floor ("
                         + arena.getSpleefFloor() + ") to drop each other into the liquid at the bottom. It's put back after every match."
                 : ChatColor.YELLOW + "Spleef is off for " + arena.getArenaName() + ".");
+        if (wasMulti)
+            sender.sendMessage(ChatColor.YELLOW + arena.getArenaName() + " is back to SINGLE (one match at a time)."
+                    + (nowSpleef ? " /togglearenamode " + arena.getArenaName() + " makes it MULTI again, each match in a copy of its own." : ""));
     }
 
     private static void toggleFfa(final CommandSender player, final SavableArena arena) {
-        // A MULTI crystal arena's real arena is its viewing arena (put back whenever it's changed): back to SINGLE first
-        if (!arena.isFfa() && arena.isCrystalPvp() && arena.getArenaMode() == ArenaMode.MULTI) {
+        // A MULTI crystal or spleef arena's real arena is its viewing arena (put back whenever it's changed): back to SINGLE first
+        if (!arena.isFfa() && arena.usesCopies() && arena.getArenaMode() == ArenaMode.MULTI) {
             if (me.zeronull.spawnarena.CrystalCopies.of(arena).stream().anyMatch(copy -> !copy.getFights().isEmpty())) {
                 player.sendMessage(ChatColor.RED + arena.getArenaName() + " is in MULTI mode, which has to go off for a free-for-all, "
                         + "and there are matches going on in its copies. Try again once they're over.");

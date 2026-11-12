@@ -336,7 +336,7 @@ public final class CrystalPvp {
         // In a MULTI arena's copy: that copy (its world has the arena's region under the same name)
         final CrystalCopy copy = CrystalCopies.at(loc.getWorld());
         if (copy != null)
-            return Regions.contains(copy, loc, margin) ? copy : null;
+            return copy.isCrystalPvp() && Regions.contains(copy, loc, margin) ? copy : null; // (a spleef arena's copy isn't one)
         for (final Arena arena : SpawnArena.arenas)
             if (arena.isCrystalPvp() && Regions.contains(arena, loc, margin))
                 return arena;
@@ -348,7 +348,7 @@ public final class CrystalPvp {
             return null;
         final CrystalCopy copy = CrystalCopies.at(loc.getWorld());
         if (copy != null)
-            return Regions.contains(copy, loc, 0) ? copy : null;
+            return copy.isCrystalPvp() && Regions.contains(copy, loc, 0) ? copy : null;
         for (final Arena arena : SpawnArena.arenas)
             if (arena.isCrystalPvp() && Regions.contains(arena, loc, 0))
                 return arena;
@@ -365,7 +365,7 @@ public final class CrystalPvp {
             return false;
         final CrystalCopy copy = CrystalCopies.at(loc.getWorld());
         if (copy != null)
-            return Regions.contains(copy, loc, margin);
+            return copy.isCrystalPvp() && Regions.contains(copy, loc, margin);
         for (final Arena arena : SpawnArena.arenas)
             if (arena.isCrystalPvp() && Regions.contains(arena, loc, margin))
                 return true;

@@ -135,8 +135,8 @@ public final class ArenaMoveCommand extends ArenaTabComplete implements CommandE
             c.pasteTurn = Math.floorMod(c.pasteTurn + turn, 360);
         });
         arena.reloadFromDisk();
-        // A MULTI crystal arena's copies are copied from the arena again, at its new spot
-        if (arena.isCrystalPvp() && arena.getArenaMode() == ArenaMode.MULTI && CrystalCopies.supported()) {
+        // A MULTI crystal or spleef arena's copies are copied from the arena again, at its new spot
+        if (arena.usesCopies() && arena.getArenaMode() == ArenaMode.MULTI && CrystalCopies.supported()) {
             CrystalCopies.retire(arena);
             CrystalCopies.setUp(arena, true);
         }

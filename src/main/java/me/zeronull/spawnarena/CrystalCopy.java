@@ -4,7 +4,7 @@ import org.bukkit.Location;
 import org.bukkit.World;
 
 /**
- * One copy of a MULTI crystal arena that a match is actually fought in: the whole arena, pasted at the same
+ * One copy of a MULTI crystal (or spleef) arena that a match is actually fought in: the whole arena, pasted at the same
  * coordinates in a world of its own (see {@link CrystalCopies}). It has the real arena's name and settings, so stats,
  * Elo and rewards count for that arena, and shares its queue; but its own world, spawns, fights and clean-up.
  * Copies are only ever equal to themselves (a real arena is equal to anything with its name).
@@ -71,7 +71,9 @@ public final class CrystalCopy extends Arena {
         this.setWinOnStepStonePressurePlate(this.real.isWinOnStepStonePressurePlate());
         this.setGiveKnockBackStick(this.real.isGiveKnockBackStick());
         this.setArenaMode(ArenaMode.SINGLE.name()); // one match per copy
-        this.setCrystalPvp(true);
+        this.setCrystalPvp(this.real.isCrystalPvp());
+        this.setSpleef(this.real.isSpleef());
+        this.setSpleefFloor(this.real.getSpleefFloor().stream().map(org.bukkit.Material::name).toList());
         this.setFfa(false);
         this.setRandomSumo(this.real.isRandomSumo());
         this.setCombo(this.real.isCombo());

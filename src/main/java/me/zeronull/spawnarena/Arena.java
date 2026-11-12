@@ -26,19 +26,19 @@ public abstract class Arena extends ArenaOptions {
         return world != null && (SPAWN_WORLDS.isEmpty() || SPAWN_WORLDS.contains(world.getName().toLowerCase(java.util.Locale.ROOT)));
     }
 
-    /** A spawn world, or one of the worlds a MULTI crystal arena's matches are fought in. */
+    /** A spawn world, or one of the worlds a MULTI crystal or spleef arena's matches are fought in. */
     public static boolean isArenaWorld(final org.bukkit.World world) {
         return isSpawnWorld(world) || (world != null && CrystalCopies.at(world) != null);
     }
 
     /**
      * Where a new match here goes, or null if none can start now: this arena (empty, or MULTI), or for a MULTI crystal
-     * arena a free copy of it. Never a free-for-all or an arena being reset.
+     * or spleef arena a free copy of it. Never a free-for-all or an arena being reset.
      */
     public Arena arenaForNewFight() {
         if (this.isFfa() || this.isResetting())
             return null;
-        if (this.isCrystalPvp() && this.getArenaMode() == ArenaMode.MULTI && CrystalCopies.supported() && !(this instanceof CrystalCopy))
+        if (this.usesCopies() && this.getArenaMode() == ArenaMode.MULTI && CrystalCopies.supported() && !(this instanceof CrystalCopy))
             return CrystalCopies.free(this);
         if (this.getArenaMode() != ArenaMode.MULTI && BotShow.runningIn(this))
             return null; // two bots are fighting in it (/arenabotfight)

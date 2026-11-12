@@ -232,8 +232,8 @@ public final class SavableArena extends Arena {
         this.setDisplayName(config.displayName);
         this.setTotemLimit(config.totemLimit);
         this.setFfaRewards(config.ffaStreakReward, config.ffaStreakRewardTens, config.ffaStreakRewardCooldownMinutes, config.ffaSameVictimMinutes);
-        // A MULTI crystal arena's copies follow: set up if it just became one, dropped if it no longer is
-        if (this.isCrystalPvp() && this.getArenaMode() == ArenaMode.MULTI) {
+        // A MULTI crystal or spleef arena's copies follow: set up if it just became one, dropped if it no longer is
+        if (this.usesCopies() && this.getArenaMode() == ArenaMode.MULTI) {
             if (CrystalCopies.of(this).isEmpty())
                 Threads.global(() -> CrystalCopies.setUp(this, false));
             else

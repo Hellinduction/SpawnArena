@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 
 /**
- * MULTI crystal arenas: each match is fought in a copy of the whole arena, in a world of its own
+ * MULTI crystal and spleef arenas: each match is fought in a copy of the whole arena, in a world of its own
  * ("spawnarena_<arena>_<n>", empty apart from the copy) at the very same coordinates, so everything about the arena
  * (its WorldGuard regions, spawns, schematic, clean-up) works the same there. Each world gets the Spawn world's
  * difficulty, PvP, game rules, time and weather, and the WorldGuard regions around the arena. The number of copies is
@@ -64,7 +64,7 @@ public final class CrystalCopies {
         return world == null || BY_WORLD.isEmpty() ? null : BY_WORLD.get(world.getUID());
     }
 
-    /** This real arena's copies (none if it isn't a MULTI crystal arena). */
+    /** This real arena's copies (none if it isn't a MULTI crystal or spleef arena). */
     public static List<CrystalCopy> of(final Arena real) {
         final List<CrystalCopy> copies = COPIES.get(real.getArenaName().toLowerCase(Locale.ROOT));
         return copies == null ? List.of() : copies;
@@ -86,12 +86,12 @@ public final class CrystalCopies {
         return "spawnarena_" + real.getArenaName().toLowerCase(Locale.ROOT) + "_" + index;
     }
 
-    /** On start: every MULTI crystal arena gets its copies (the arena copied over only into worlds that are new). */
+    /** On start: every MULTI crystal or spleef arena gets its copies (the arena copied over only into worlds that are new). */
     public static void startAll() {
         if (!supported() || SpawnArena.arenas == null)
             return;
         for (final Arena arena : SpawnArena.arenas)
-            if (arena instanceof SavableArena real && real.isCrystalPvp() && real.getArenaMode() == ArenaMode.MULTI) {
+            if (arena instanceof SavableArena real && real.usesCopies() && real.getArenaMode() == ArenaMode.MULTI) {
                 // A free-for-all runs in the arena itself: no copies, nor a viewing arena that would be put back under it
                 if (real.isFfa())
                     SpawnArena.INSTANCE.getLogger().warning(real.getArenaName() + " is set to both MULTI and free-for-all: it runs as a "
@@ -461,14 +461,14 @@ public final class CrystalCopies {
     private static CompletableFuture<Void> copyArena(final SavableArena real, final World spawn, final World world, final boolean hadCopy) {
         final BlockVector3[] box = box(real, spawn);
         if (box == null) {
-            SpawnArena.INSTANCE.getLogger().warning("Crystal arena " + real.getArenaName() + " has no WorldGuard region, so it can't be copied.");
+            SpawnArena.INSTANCE.getLogger().warning("Arena " + real.getArenaName() + " has no WorldGuard region, so it can't be copied.");
             return CompletableFuture.completedFuture(null);
         }
         BlockVector3[] old = hadCopy ? lastBox(world) : null;
         if (hadCopy && old == null)
             old = box(real, spawn, false);
         final BlockVector3[] clear = old;
-        SpawnArena.INSTANCE.getLogger().info("Copying crystal arena " + real.getArenaName() + " into " + world.getName() + "...");
+        SpawnArena.INSTANCE.getLogger().info("Copying arena " + real.getArenaName() + " into " + world.getName() + "...");
         return WorldEditUtils.copyBox(spawn, world, box[0], box[1], clear == null ? null : clear[0], clear == null ? null : clear[1])
                 .thenRun(() -> rememberBox(world, box));
     }
