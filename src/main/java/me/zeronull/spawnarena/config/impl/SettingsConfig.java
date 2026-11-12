@@ -220,7 +220,7 @@ public final class SettingsConfig {
     @Comment("LuckPerms priority of that suffix: high, so it shows over any suffix a rank or other plugin gives")
     public int topEloSuffixPriority = 1000;
 
-    @Comment({"A crystal free-for-all is recorded (recordSumoMatches) in parts of this many seconds, each with everyone in",
+    @Comment({"A free-for-all (crystal, sumo, any arena) is recorded (recordSumoMatches) in parts of this many seconds, each with everyone in",
             "at the time (a part also ends when the arena's put back, and when everyone's gone). 30 at least."})
     public int crystalFfaRecordingSeconds = 180;
 

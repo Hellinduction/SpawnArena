@@ -411,7 +411,7 @@ public final class ArenaReplay {
                 this.draw(p);
             if (!this.changes.isEmpty())
                 this.blocks();
-            if (this.rec.crystal)
+            if (this.rec.crystal || this.rec.session || this.rec.kit)
                 this.events();
         } catch (final ReflectiveOperationException | RuntimeException e) {
             SpawnArena.INSTANCE.getLogger().warning("Stopped a replay: " + e);
@@ -439,7 +439,7 @@ public final class ArenaReplay {
             if (p.shown) {
                 // Out at the end of their frames (playing on): into the water's splash, or (a crystal match) dying
                 if ((this.clock > last && p.frame >= f.frames - 3) || (away && p.frame >= at0 - 2))
-                    this.sound(p, this.rec.crystal ? org.bukkit.Sound.ENTITY_PLAYER_DEATH : org.bukkit.Sound.ENTITY_PLAYER_SPLASH);
+                    this.sound(p, this.rec.crystal || this.rec.kit ? org.bukkit.Sound.ENTITY_PLAYER_DEATH : org.bukkit.Sound.ENTITY_PLAYER_SPLASH);
                 this.despawn(p);
             }
             return;
@@ -587,7 +587,8 @@ public final class ArenaReplay {
                         // a short one
                     }
                     final Float was = health.put(e.fighter(), value);
-                    if (e.ms() > before && was != null && value < was - 0.01f)
+                    // (crystal only: elsewhere the recorded hit already flashes them, see draw)
+                    if (this.rec.crystal && e.ms() > before && was != null && value < was - 0.01f)
                         this.hurt(e.fighter());
                 } else if (e.kind() == Recording.KILL && e.ms() > before) {
                     // A free-for-all: who killed whom, in chat

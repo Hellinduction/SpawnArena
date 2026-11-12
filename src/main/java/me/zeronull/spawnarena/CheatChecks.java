@@ -146,6 +146,24 @@ public final class CheatChecks {
             speed(m);
             return m;
         }
+        if (rec.kit) {
+            // A plain arena (swords and the like): reach, knockback taken, how they turned and aimed, clicking, sprinting
+            // and moving (the bot signs are sumo's: they were worked out from sumo matches)
+            if (!opponents.isEmpty())
+                reach(m, opponents);
+            knockback(m, opponents);
+            if (!f.bedrock()) {
+                rotation(m);
+                sprintBack(m);
+            }
+            if (!opponents.isEmpty()) {
+                aim(m, opponents);
+                clicks(m, opponents);
+            }
+            breaking(m);
+            speed(m);
+            return m;
+        }
         final boolean itemSwings = v == SumoVariant.ARCHER || v == SumoVariant.SNOWBALL || v == SumoVariant.ROD;
         if (!opponents.isEmpty() && v != SumoVariant.SPEAR)
             reach(m, opponents);

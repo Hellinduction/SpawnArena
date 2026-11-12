@@ -30,6 +30,8 @@ public final class Recording {
      * a part of a free-for-all session (people come and go: frames stop while they're out)
      */
     public final boolean spleef, freeForAll, crystal, session;
+    /** A plain arena (not sumo, spleef or crystal): its fighters die rather than fall in the water */
+    public final boolean kit;
     /** The centre positions are from (the middle of the two spawn points), as it was then */
     public final double centreX, centreY, centreZ;
     /** Format 3: blocks changed during the match, in order (empty unless frames were read) */
@@ -143,6 +145,7 @@ public final class Recording {
         this.freeForAll = (flags & 2) != 0;
         this.crystal = (flags & 4) != 0;
         this.session = (flags & 8) != 0;
+        this.kit = (flags & 16) != 0;
         this.centreX = centre[0];
         this.centreY = centre[1];
         this.centreZ = centre[2];

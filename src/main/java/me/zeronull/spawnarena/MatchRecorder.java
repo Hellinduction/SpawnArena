@@ -50,6 +50,13 @@ public final class MatchRecorder implements Listener {
     private static final int MAX_BLOCKS = 20_000;
     /** Header flags (format 3): a spleef match; a free-for-all round (each fighter on a team of their own); (format 4) crystal PvP */
     static final int SPLEEF = 1, FREE_FOR_ALL = 2, CRYSTAL = 4, SESSION = 8;
+    /** A plain arena: not sumo (out in the water), spleef or crystal: fought with swords and the like (flags, format 5) */
+    static final int KIT = 16;
+
+    /** Neither sumo, spleef nor crystal: the arena's own fights (kit PvP). */
+    static boolean isKit(final Arena arena) {
+        return !arena.isDeathOnTouchLiquid() && !arena.isSpleef() && !arena.isCrystalPvp();
+    }
     /** The longest it records a match for (ten minutes); after that it stops taking frames */
     private static final int MAX_FRAMES = 20 * 60 * 10;
     private static final Map<Fight, MatchRecorder> RECORDING = new ConcurrentHashMap<>();
@@ -170,10 +177,10 @@ public final class MatchRecorder implements Listener {
         return SpawnArena.settings == null || SpawnArena.settings.recordSumoMatches;
     }
 
-    /** A fight has just gone live: a sumo or spleef match (or spleef free-for-all round) between players is recorded. */
+    /** A fight has just gone live: a match between players is recorded, in any arena (a free-for-all: see ffaJoined). */
     static void start(final Fight fight) {
         final Arena arena = fight.getArena();
-        if (!enabled() || fight.withBots() || !(arena.isDeathOnTouchLiquid() || arena.isSpleef() || arena.isCrystalPvp()) || arena.isFfa())
+        if (!enabled() || fight.withBots() || arena.isFfa())
             return;
         final Location a = arena.spawnPoint1, b = arena.spawnPoint2;
         if (a == null || b == null)
@@ -218,14 +225,14 @@ public final class MatchRecorder implements Listener {
     // ── A crystal free-for-all: recorded in parts ───────────────────────────
 
     /**
-     * A crystal free-for-all session is recorded in parts, each of crystalFfaRecordingSeconds (and one ends whenever the
+     * A free-for-all session (crystal, sumo, any arena) is recorded in parts, each of crystalFfaRecordingSeconds (and one ends whenever the
      * arena's put back, and when the session ends): each has everyone who was in at the time (on a team of their own),
      * from when they came in to when they went out, again if they came back; with their kills and deaths. A part is kept
      * if at least two of them were in it for 5 seconds or more.
      */
     private static boolean recordsSession(final Fight fight) {
         final Arena arena = fight.getArena();
-        return enabled() && arena.isFfa() && arena.isCrystalPvp() && arena.spawnPoint1 != null && arena.spawnPoint2 != null;
+        return enabled() && arena.isFfa() && arena.spawnPoint1 != null && arena.spawnPoint2 != null;
     }
 
     private static MatchRecorder newPart(final Fight fight) {
@@ -631,11 +638,11 @@ public final class MatchRecorder implements Listener {
         }
     }
 
-    /** A recorded crystal fighter placing a block (each block of a bed or door). */
+    /** A recorded fighter placing a block (each block of a bed or door), in any arena but spleef. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onPlace(final org.bukkit.event.block.BlockPlaceEvent e) {
         final MatchRecorder rec = OF.get(e.getPlayer().getUniqueId());
-        final Track t = rec == null || !rec.fight.getArena().isCrystalPvp() ? null : rec.track(e.getPlayer());
+        final Track t = rec == null || rec.fight.getArena().isSpleef() ? null : rec.track(e.getPlayer());
         if (t == null)
             return;
         final int me = rec.tracks.indexOf(t);
@@ -647,11 +654,11 @@ public final class MatchRecorder implements Listener {
         }
     }
 
-    /** A recorded crystal fighter breaking a block (spleef's floor is recorded by Spleef). */
+    /** A recorded fighter breaking a block, in any arena but spleef (its floor is recorded by Spleef). */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBreak(final org.bukkit.event.block.BlockBreakEvent e) {
         final MatchRecorder rec = OF.get(e.getPlayer().getUniqueId());
-        final Track t = rec == null || !rec.fight.getArena().isCrystalPvp() ? null : rec.track(e.getPlayer());
+        final Track t = rec == null || rec.fight.getArena().isSpleef() ? null : rec.track(e.getPlayer());
         if (t != null)
             rec.block(e.getBlock(), rec.tracks.indexOf(t), BY_HAND, "minecraft:air");
     }
@@ -766,7 +773,8 @@ public final class MatchRecorder implements Listener {
                     winningTeam = t.team;
             out.writeByte(winningTeam);
             out.writeByte((this.fight.getArena().isSpleef() ? SPLEEF : 0) | (this.fight.getMode() == FightMode.FREE_FOR_ALL || this.session ? FREE_FOR_ALL : 0)
-                    | (this.fight.getArena().isCrystalPvp() ? CRYSTAL : 0) | (this.session ? SESSION : 0));
+                    | (this.fight.getArena().isCrystalPvp() ? CRYSTAL : 0) | (this.session ? SESSION : 0)
+                    | (isKit(this.fight.getArena()) ? KIT : 0));
             out.writeByte(this.tracks.size());
             for (final Track t : this.tracks) {
                 out.writeLong(t.player.getUniqueId().getMostSignificantBits());
