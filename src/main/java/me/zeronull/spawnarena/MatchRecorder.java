@@ -87,7 +87,10 @@ public final class MatchRecorder implements Listener {
     private final List<Event> events = new ArrayList<>();
 
     /** Event kinds: see {@link #write} */
-    static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6, KILL = 7, DEATH = 8;
+    static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6, KILL = 7, DEATH = 8,
+            THROUGH_WALL = 9, TOTEM_BACK = 10, INVENTORY_CLICK = 11, ROCKET = 12;
+    /** What THROUGH_WALL was: a hit on a player, a hit on a crystal, a block broken, a block placed (against the one clicked) */
+    static final int WALL_HIT = 0, WALL_CRYSTAL = 1, WALL_BREAK = 2, WALL_PLACE = 3;
     /** The equipment slots EQUIP numbers (0 to 5) */
     private static final org.bukkit.inventory.EquipmentSlot[] GEAR = {org.bukkit.inventory.EquipmentSlot.HAND,
             org.bukkit.inventory.EquipmentSlot.OFF_HAND, org.bukkit.inventory.EquipmentSlot.FEET, org.bukkit.inventory.EquipmentSlot.LEGS,
@@ -99,13 +102,18 @@ public final class MatchRecorder implements Listener {
 
     /** Keeps an event (any thread). */
     private void event(final int fighter, final int kind, final Details details) {
+        this.event(System.currentTimeMillis(), fighter, kind, details);
+    }
+
+    /** Keeps an event that happened at {@code at} (epoch ms: looked at a tick later, but timed to when it was done). */
+    private void event(final long at, final int fighter, final int kind, final Details details) {
         final ByteArrayOutputStream bytes = new ByteArrayOutputStream(16);
         try {
             details.write(new DataOutputStream(bytes));
         } catch (final IOException ignored) {
             // (in memory: can't happen)
         }
-        final Event e = new Event((int) (System.currentTimeMillis() - this.startedAt), fighter, kind, bytes.toByteArray());
+        final Event e = new Event((int) (at - this.startedAt), fighter, kind, bytes.toByteArray());
         synchronized (this.events) {
             if (this.events.size() < MAX_EVENTS)
                 this.events.add(e);
@@ -118,6 +126,8 @@ public final class MatchRecorder implements Listener {
         volatile Player player;
         /** A free-for-all: in the arena now (frames are only taken then); kills and deaths in this part */
         volatile boolean in = true;
+        /** When (epoch ms) they last picked a totem up onto the cursor in an inventory, or 0 */
+        volatile long totemPickedUp;
         final java.util.concurrent.atomic.AtomicInteger kills = new java.util.concurrent.atomic.AtomicInteger(),
                 deaths = new java.util.concurrent.atomic.AtomicInteger();
         final int team;
@@ -472,6 +482,7 @@ public final class MatchRecorder implements Listener {
         if (t.swung) flags |= 8;
         if (t.landed) flags |= 16;
         if (t.hurt) flags |= 32;
+        if (p.isGliding()) flags |= 64; // (an elytra: drawn gliding in replays, and not checked for speed or flying)
         int extra = 0;
         final org.bukkit.util.Vector velocity = t.velocity;
         if (velocity != null) extra |= 1;
@@ -480,6 +491,14 @@ public final class MatchRecorder implements Listener {
         if (t.teleported) extra |= 8;
         final int landedOn = t.landedOn;
         if (landedOn >= 0) extra |= 16;
+        // Where they are, as the server sees it, for the flying and speed checks: in water, lava, cobwebs or powder snow,
+        // climbing, or on a slime block or bed (32); helped through the air: gliding, flying, levitating, slow falling,
+        // jump boost, riptide, riding (64); nothing solid under them (128)
+        if (p.isInWater() || p.isInLava() || p.isClimbing() || p.isInPowderedSnow() || stuckOrBouncy(at)) extra |= 32;
+        if (p.isGliding() || p.isFlying() || p.isRiptiding() || p.isInsideVehicle()
+                || p.hasPotionEffect(org.bukkit.potion.PotionEffectType.LEVITATION) || p.hasPotionEffect(org.bukkit.potion.PotionEffectType.SLOW_FALLING)
+                || p.hasPotionEffect(org.bukkit.potion.PotionEffectType.JUMP_BOOST)) extra |= 64;
+        if (!supported(at)) extra |= 128;
         t.swung = t.landed = t.hurt = t.shot = t.teleported = false;
         t.velocity = null;
         t.knockedBack = false;
@@ -509,6 +528,91 @@ public final class MatchRecorder implements Listener {
                 // (in memory: can't happen)
             }
         }
+    }
+
+    /** In a cobweb, or standing on a slime block or bed (which bounce). On the player's thread. */
+    private static boolean stuckOrBouncy(final Location at) {
+        final org.bukkit.block.Block feet = at.getBlock(), under = at.clone().subtract(0, 0.2, 0).getBlock();
+        return feet.getType() == org.bukkit.Material.COBWEB || feet.getRelative(org.bukkit.block.BlockFace.UP).getType() == org.bukkit.Material.COBWEB
+                || under.getType() == org.bukkit.Material.SLIME_BLOCK || org.bukkit.Tag.BEDS.isTagged(under.getType());
+    }
+
+    /**
+     * Whether anything solid is within half a block under them (their feet's four corners), as the server sees it; a
+     * fence or wall (a block and a half tall) counts from the block below. On the player's thread.
+     */
+    private static boolean supported(final Location at) {
+        final org.bukkit.World w = at.getWorld();
+        for (final double depth : new double[]{0.05, 0.5})
+            for (final double dx : new double[]{-0.3, 0.3})
+                for (final double dz : new double[]{-0.3, 0.3}) {
+                    final org.bukkit.block.Block b = w.getBlockAt((int) Math.floor(at.getX() + dx), (int) Math.floor(at.getY() - depth), (int) Math.floor(at.getZ() + dz));
+                    if (!b.isPassable() || b.isLiquid())
+                        return true;
+                    final org.bukkit.Material below = b.getRelative(org.bukkit.block.BlockFace.DOWN).getType();
+                    if (org.bukkit.Tag.FENCES.isTagged(below) || org.bukkit.Tag.WALLS.isTagged(below) || org.bukkit.Tag.FENCE_GATES.isTagged(below))
+                        return true;
+                }
+        return false;
+    }
+
+    // ── Through walls ───────────────────────────────────────────────────────
+
+    /**
+     * Whether they could see any of this box from their eyes (its middle and eight corners pulled a little in): nothing
+     * solid in the way of at least one. On the thread the event came on (any trouble reading the world: taken as seen).
+     */
+    private static boolean seesBox(final Player p, final org.bukkit.util.BoundingBox box) {
+        try {
+            final Location eye = p.getEyeLocation();
+            final org.bukkit.util.Vector from = eye.toVector();
+            for (final org.bukkit.util.Vector to : points(box)) {
+                final org.bukkit.util.Vector d = to.clone().subtract(from);
+                final double len = d.length();
+                if (len < 0.05 || eye.getWorld().rayTraceBlocks(eye, d.normalize(), len, org.bukkit.FluidCollisionMode.NEVER, true) == null)
+                    return true;
+            }
+            return false;
+        } catch (final RuntimeException e) {
+            return true;
+        }
+    }
+
+    /** Whether they could see any face of this block: the first block in the way of at least one line to it is itself. */
+    private static boolean seesBlock(final Player p, final org.bukkit.block.Block target) {
+        try {
+            final Location eye = p.getEyeLocation();
+            final org.bukkit.util.Vector from = eye.toVector();
+            for (final org.bukkit.util.Vector to : points(target.getBoundingBox().getVolume() > 0 ? target.getBoundingBox()
+                    : org.bukkit.util.BoundingBox.of(target))) {
+                final org.bukkit.util.Vector d = to.clone().subtract(from);
+                final double len = d.length();
+                if (len < 0.05)
+                    return true;
+                final org.bukkit.util.RayTraceResult hit = eye.getWorld().rayTraceBlocks(eye, d.normalize(), len + 0.1, org.bukkit.FluidCollisionMode.NEVER, true);
+                if (hit == null || target.equals(hit.getHitBlock()))
+                    return true;
+            }
+            return false;
+        } catch (final RuntimeException e) {
+            return true;
+        }
+    }
+
+    /** A box's middle, and its eight corners a tenth of the way in. */
+    private static List<org.bukkit.util.Vector> points(final org.bukkit.util.BoundingBox box) {
+        final List<org.bukkit.util.Vector> out = new ArrayList<>(9);
+        out.add(box.getCenter());
+        final double ix = box.getWidthX() * 0.1, iy = box.getHeight() * 0.1, iz = box.getWidthZ() * 0.1;
+        for (final double x : new double[]{box.getMinX() + ix, box.getMaxX() - ix})
+            for (final double y : new double[]{box.getMinY() + iy, box.getMaxY() - iy})
+                for (final double z : new double[]{box.getMinZ() + iz, box.getMaxZ() - iz})
+                    out.add(new org.bukkit.util.Vector(x, y, z));
+        return out;
+    }
+
+    private void throughWall(final Track t, final int what) {
+        this.event(this.tracks.indexOf(t), THROUGH_WALL, out -> out.writeByte(what));
     }
 
     private Track track(final Player p) {
@@ -542,6 +646,8 @@ public final class MatchRecorder implements Listener {
             if (t != null) {
                 final int id = crystal.getEntityId();
                 rec.event(rec.tracks.indexOf(t), CRYSTAL_HIT, out -> out.writeInt(id));
+                if (by == e.getDamager() && !seesBox(by, crystal.getBoundingBox()))
+                    rec.throughWall(t, WALL_CRYSTAL);
             }
             return;
         }
@@ -566,6 +672,8 @@ public final class MatchRecorder implements Listener {
         if (hitter != null) {
             hitter.landed = true;
             hitter.landedOn = rec.tracks.indexOf(hurt);
+            if (!seesBox(attacker, victim.getBoundingBox()))
+                rec.throughWall(hitter, WALL_HIT);
         }
     }
 
@@ -646,6 +754,8 @@ public final class MatchRecorder implements Listener {
         if (t == null)
             return;
         final int me = rec.tracks.indexOf(t);
+        if (!seesBlock(e.getPlayer(), e.getBlockAgainst()))
+            rec.throughWall(t, WALL_PLACE);
         final List<org.bukkit.block.BlockState> placed = e instanceof org.bukkit.event.block.BlockMultiPlaceEvent multi
                 ? multi.getReplacedBlockStates() : List.of(e.getBlockReplacedState());
         for (final org.bukkit.block.BlockState state : placed) {
@@ -658,9 +768,79 @@ public final class MatchRecorder implements Listener {
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onBreak(final org.bukkit.event.block.BlockBreakEvent e) {
         final MatchRecorder rec = OF.get(e.getPlayer().getUniqueId());
-        final Track t = rec == null || rec.fight.getArena().isSpleef() ? null : rec.track(e.getPlayer());
-        if (t != null)
+        final Track t = rec == null ? null : rec.track(e.getPlayer());
+        if (t == null)
+            return;
+        if (!seesBlock(e.getPlayer(), e.getBlock()))
+            rec.throughWall(t, WALL_BREAK); // (spleef too)
+        if (!rec.fight.getArena().isSpleef())
             rec.block(e.getBlock(), rec.tracks.indexOf(t), BY_HAND, "minecraft:air");
+    }
+
+    // ── Totems back in the off hand, inventory clicks, rockets ──────────────
+
+    private static boolean isTotem(final org.bukkit.inventory.ItemStack item) {
+        return item != null && item.getType() == org.bukkit.Material.TOTEM_OF_UNDYING;
+    }
+
+    /**
+     * Every inventory click a recorded fighter makes (when, for the inventory-moving check), a totem picked up onto the
+     * cursor (when), and a totem that ends up in their off hand from it: how long after the pick-up (auto-totem puts one
+     * there within a few ms).
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryClick(final org.bukkit.event.inventory.InventoryClickEvent e) {
+        if (!(e.getWhoClicked() instanceof Player p))
+            return;
+        final MatchRecorder rec = OF.get(p.getUniqueId());
+        final Track t = rec == null ? null : rec.track(p);
+        if (t == null)
+            return;
+        final long now = System.currentTimeMillis();
+        final int me = rec.tracks.indexOf(t);
+        final int slot = e.getRawSlot();
+        rec.event(now, me, INVENTORY_CLICK, out -> out.writeShort(slot));
+        final org.bukkit.event.inventory.InventoryAction action = e.getAction();
+        if (isTotem(e.getCurrentItem()) && (action == org.bukkit.event.inventory.InventoryAction.PICKUP_ALL || action == org.bukkit.event.inventory.InventoryAction.PICKUP_HALF
+                || action == org.bukkit.event.inventory.InventoryAction.PICKUP_ONE || action == org.bukkit.event.inventory.InventoryAction.PICKUP_SOME))
+            t.totemPickedUp = now;
+        final boolean had = isTotem(p.getInventory().getItemInOffHand());
+        if (had)
+            return;
+        Threads.entityLater(p, () -> {
+            if (!isTotem(p.getInventory().getItemInOffHand()))
+                return;
+            final long picked = t.totemPickedUp;
+            final int gap = picked > 0 && picked <= now ? (int) (now - picked) : -1;
+            t.totemPickedUp = 0;
+            rec.event(now, me, TOTEM_BACK, out -> {
+                out.writeByte(0); // by an inventory click
+                out.writeInt(gap);
+            });
+        }, 1L);
+    }
+
+    /** A totem swapped into the off hand with the swap key (F), outside an inventory. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onSwapHands(final org.bukkit.event.player.PlayerSwapHandItemsEvent e) {
+        final Player p = e.getPlayer();
+        final MatchRecorder rec = OF.get(p.getUniqueId());
+        final Track t = rec == null ? null : rec.track(p);
+        if (t == null || !isTotem(e.getOffHandItem()) || isTotem(p.getInventory().getItemInOffHand()))
+            return;
+        rec.event(rec.tracks.indexOf(t), TOTEM_BACK, out -> {
+            out.writeByte(1); // by the swap key
+            out.writeInt(-1);
+        });
+    }
+
+    /** A firework rocket boosting a recorded fighter's elytra flight (shown in replays). */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onRocket(final com.destroystokyo.paper.event.player.PlayerElytraBoostEvent e) {
+        final MatchRecorder rec = OF.get(e.getPlayer().getUniqueId());
+        final Track t = rec == null ? null : rec.track(e.getPlayer());
+        if (t != null)
+            rec.event(rec.tracks.indexOf(t), ROCKET, out -> {});
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -751,6 +931,15 @@ public final class MatchRecorder implements Listener {
      *   6 their health changed: health and absorption together (float); also in their first frame
      *   7 (a free-for-all) got a kill: whom (byte: their place in the list)
      *   8 (a free-for-all) died (no details)
+     *   9 did something through a wall (nothing to be seen of it from their eyes): what (byte: 0 hit a player, 1 hit a
+     *     crystal, 2 broke a block, 3 placed a block against one)
+     *   10 a totem back in their off hand: how (byte: 0 an inventory click, 1 the swap key), ms since they picked it up
+     *     onto the cursor (int, -1 not known)
+     *   11 an inventory click: its raw slot (short)
+     *   12 a firework rocket boosted their elytra flight (no details)
+     *   Frames (format 2 on) also mark in "more": 32 in water, lava, cobwebs or powder snow, climbing, or on a slime block
+     *   or bed; 64 helped through the air (gliding, flying, levitating, slow falling, jump boost, riptide, riding); 128
+     *   nothing solid under them, as the server sees it; and in "state", 64 gliding with an elytra
      * A frame a tick (20 a second) while they're fighting. Read back by {@link Recording}.
      */
     private void write(final File file) throws IOException {

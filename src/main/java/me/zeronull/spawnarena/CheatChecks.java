@@ -52,6 +52,18 @@ public final class CheatChecks {
     static final double OFF_AIM_BREAK = 30;
     /** Spleef: this many blocks broken by hand within one tick is more than a vanilla client can. */
     static final int BURST_BREAKS = 3;
+    /** A totem back in the off hand sooner than this past their ping (ms) after a pop is faster than a person reacts. */
+    static final int FAST_REFILL = 100;
+    /** Picked up and put in the off hand within this (ms): one click straight after the other, as auto-totem does. */
+    static final int INSTANT_CLICKS = 5;
+    /** Totem refills this alike (their spread, ms, over 5 or more) are suspicious / worth a look (as TotemGuard's) */
+    static final double REFILL_SPREAD_SUSPICIOUS = 5, REFILL_SPREAD_LOOK = 15;
+    /** In the air (nothing under them, nothing helping) this long (ms) and never more than a block lower: hovering */
+    static final int HOVER_MS = 1500;
+    /** Rising this far (blocks) with nothing under them, nothing helping and nothing pushing them: higher than a jump */
+    static final double RISE = 1.6;
+    /** "On the ground" with nothing under them for this many ticks in a row: claiming to stand on nothing */
+    static final int SPOOF_TICKS = 10;
     /** Crystal PvP: a crystal hit this far (from the eyes to the nearest part of it) or further is far / very far. */
     static final double FAR_CRYSTAL = 3.5, VERY_FAR_CRYSTAL = 4.0;
     /** A crystal hit sooner after it appeared than this share of their ping: before they could have seen it. */
@@ -94,6 +106,16 @@ public final class CheatChecks {
         /** Crystal PvP: blocks placed, the same way */
         public int places, farPlaces, veryFarPlaces, offAimPlaces, aimedPlaces;
         public float maxPlaceReach;
+        /** Totems: popped, put back in the off hand after (within 3 s, before the next pop), too fast, put in within 5 ms of
+         * picking it up; each refill's time past their ping */
+        public int totemPops, totemRefills, fastRefills, instantClicks;
+        public final List<Float> refillDelays = new ArrayList<>();
+        /** Through walls: player hits, crystal hits, blocks broken and placed with nothing of them to be seen; hits landed */
+        public int wallHits, wallCrystals, wallBreaks, wallPlaces, landedHits;
+        /** Inventory clicks, and those made holding a movement key (the game lets go of them all with an inventory open) */
+        public int invClicks, moveClicks;
+        /** Flying: hovering, rising higher than a jump, standing on nothing; ticks with nothing under them (0: not recorded) */
+        public int hovers, rises, groundSpoofs, airTicks;
         /** Crystal PvP: crystals hit, far / very far, looking away, before they could have seen them (of those timed), most in a second */
         public int crystalHits, farCrystalHits, veryFarCrystalHits, offAimCrystalHits, aimedCrystalHits, predictedHits, timedHits, bestCrystalSecond;
         public float maxCrystalReach;
@@ -120,6 +142,12 @@ public final class CheatChecks {
         final Match m = new Match(rec, f);
         if (f.frames < 2)
             return m;
+        // Every kind of arena: auto-totem, through walls, moving in an inventory, flying
+        totems(m);
+        walls(m);
+        inventory(m);
+        if (!f.bedrock())
+            flying(m);
         final List<Recording.Fighter> opponents = new ArrayList<>();
         for (final Recording.Fighter o : rec.fighters)
             if (o.team != f.team && o.frames > 0)
@@ -345,6 +373,166 @@ public final class CheatChecks {
                 a++;
             m.bestCrystalSecond = Math.max(m.bestCrystalSecond, b - a + 1);
         }
+    }
+
+    /** The frame at or before this time. */
+    private static int frameAt(final Recording.Fighter f, final int ms) {
+        int i = Arrays.binarySearch(f.time, ms);
+        if (i < 0)
+            i = -i - 2;
+        return Math.max(0, Math.min(i, f.frames - 1));
+    }
+
+    /**
+     * Auto-totem: after each totem they popped, how long until a new one was in their off hand (within 3 s, before the
+     * next pop), past their ping (the pop takes that long to reach them and their click to come back): under
+     * {@link #FAST_REFILL} is faster than anyone reacts; and a totem put in within {@link #INSTANT_CLICKS} ms of picking
+     * it up is one click straight after the other.
+     */
+    private static void totems(final Match m) {
+        final Recording.Fighter f = m.f;
+        final int me = m.rec.fighters.indexOf(f);
+        final List<Integer> pops = new ArrayList<>();
+        final List<int[]> backs = new ArrayList<>(); // {ms, gap since picked up}
+        for (final Recording.Event e : m.rec.events) {
+            if (e.fighter() != me)
+                continue;
+            if (e.kind() == Recording.TOTEM)
+                pops.add(e.ms());
+            else if (e.kind() == Recording.TOTEM_BACK)
+                try {
+                    final java.io.DataInputStream in = e.details();
+                    in.readByte();
+                    backs.add(new int[]{e.ms(), in.readInt()});
+                } catch (final java.io.IOException ignored) {
+                    // a short one
+                }
+        }
+        m.totemPops = pops.size();
+        for (int p = 0; p < pops.size(); p++) {
+            final int pop = pops.get(p), next = p + 1 < pops.size() ? pops.get(p + 1) : Integer.MAX_VALUE;
+            for (final int[] back : backs) {
+                if (back[0] < pop || back[0] > next || back[0] - pop > 3000)
+                    continue;
+                final int delay = back[0] - pop, ping = f.ping == null ? 0 : f.ping[frameAt(f, pop)];
+                m.totemRefills++;
+                m.refillDelays.add((float) (delay - ping));
+                if (delay - ping < FAST_REFILL)
+                    m.fastRefills++;
+                if (back[1] >= 0 && back[1] <= INSTANT_CLICKS && delay <= 1500)
+                    m.instantClicks++;
+                break;
+            }
+        }
+    }
+
+    /** Through walls: what they did with nothing of it to be seen from their eyes (worked out live, as they did it). */
+    private static void walls(final Match m) {
+        final Recording.Fighter f = m.f;
+        final int me = m.rec.fighters.indexOf(f);
+        for (int i = 0; i < f.frames; i++)
+            if (f.has(i, Recording.LANDED))
+                m.landedHits++;
+        for (final Recording.Event e : m.rec.events) {
+            if (e.fighter() != me || e.kind() != Recording.THROUGH_WALL)
+                continue;
+            try {
+                switch (e.details().readByte()) {
+                    case Recording.WALL_HIT -> m.wallHits++;
+                    case Recording.WALL_CRYSTAL -> m.wallCrystals++;
+                    case Recording.WALL_BREAK -> m.wallBreaks++;
+                    case Recording.WALL_PLACE -> m.wallPlaces++;
+                    default -> { }
+                }
+            } catch (final java.io.IOException ignored) {
+                // a short one
+            }
+        }
+    }
+
+    /**
+     * Moving in an inventory: the game lets go of every movement key while an inventory is open, so a click with one
+     * held (in that tick and the next) is a client moving with it open.
+     */
+    private static void inventory(final Match m) {
+        final Recording.Fighter f = m.f;
+        if (f.bedrock())
+            return;
+        final int me = m.rec.fighters.indexOf(f);
+        final int moving = Recording.FORWARD | Recording.BACK | Recording.LEFT | Recording.RIGHT | Recording.JUMP;
+        for (final Recording.Event e : m.rec.events) {
+            if (e.fighter() != me || e.kind() != Recording.INVENTORY_CLICK)
+                continue;
+            m.invClicks++;
+            final int i = frameAt(f, e.ms());
+            if ((f.keys[i] & moving) != 0 && i + 1 < f.frames && (f.keys[i + 1] & moving) != 0)
+                m.moveClicks++;
+        }
+    }
+
+    /**
+     * Flying: stretches with nothing under them (as the server saw it), nothing helping them through the air (an elytra,
+     * levitation, water...) and nothing having pushed them in the last second and a half: one that lasts
+     * {@link #HOVER_MS} without them ever dropping a block is hovering, one where they rise {@link #RISE} is higher than a
+     * jump; and saying they're on the ground with nothing under them {@link #SPOOF_TICKS} ticks running is standing on
+     * nothing.
+     */
+    private static void flying(final Match m) {
+        final Recording.Fighter f = m.f;
+        if (f.more == null)
+            return;
+        int pushed = -1000, start = -1, spoof = 0;
+        double low = 0, high = 0, from = 0;
+        for (int i = 0; i <= f.frames; i++) {
+            final boolean end = i == f.frames;
+            if (!end && (f.has(i, Recording.HURT) || f.has(i, Recording.GLIDING)
+                    || f.hasMore(i, Recording.SHOT | Recording.TELEPORTED | Recording.VELOCITY | Recording.SURROUNDED | Recording.HELPED) || teleported(f, i)))
+                pushed = i;
+            final boolean nothingUnder = !end && f.hasMore(i, Recording.UNSUPPORTED);
+            if (nothingUnder)
+                m.airTicks++;
+            final boolean free = nothingUnder && i - pushed > 30;
+            // Standing on nothing
+            if (free && f.has(i, Recording.GROUND))
+                spoof++;
+            else {
+                if (spoof >= SPOOF_TICKS)
+                    m.groundSpoofs++;
+                spoof = 0;
+            }
+            // In the air
+            if (free) {
+                if (start < 0) {
+                    start = i;
+                    low = high = from = f.y[i];
+                }
+                low = Math.min(low, f.y[i]);
+                high = Math.max(high, f.y[i]);
+            } else if (start >= 0) {
+                // (any stretch of it: a hover is often followed by falling, in the same time off the ground)
+                if (hovered(f, start, i - 1))
+                    m.hovers++;
+                if (high - from >= RISE)
+                    m.rises++;
+                start = -1;
+            }
+        }
+    }
+
+    /** Whether, between these frames, they stayed {@link #HOVER_MS} or more within a block of the same height. */
+    private static boolean hovered(final Recording.Fighter f, final int from, final int to) {
+        for (int s = from; s <= to; s++) {
+            double low = f.y[s], high = f.y[s];
+            for (int j = s; j <= to; j++) {
+                low = Math.min(low, f.y[j]);
+                high = Math.max(high, f.y[j]);
+                if (high - low >= 1.0)
+                    break;
+                if (f.time[j] - f.time[s] >= HOVER_MS)
+                    return true;
+            }
+        }
+        return false;
     }
 
     /** From an eye to the nearest point of a player's box (0.6 wide, 1.8 high) standing at (x, y, z). */
@@ -691,7 +879,9 @@ public final class CheatChecks {
         int lastPushed = -1000;
         final int[] pushedAt = new int[f.frames];
         for (int i = 0; i < f.frames; i++) {
-            if (f.has(i, Recording.HURT) || f.hasMore(i, Recording.SHOT | Recording.TELEPORTED | Recording.VELOCITY) || teleported(f, i))
+            // (gliding, levitating, in water or on slime and the like: not their own running, so not measured)
+            if (f.has(i, Recording.HURT) || f.has(i, Recording.GLIDING)
+                    || f.hasMore(i, Recording.SHOT | Recording.TELEPORTED | Recording.VELOCITY | Recording.SURROUNDED | Recording.HELPED) || teleported(f, i))
                 lastPushed = i;
             pushedAt[i] = lastPushed;
         }
@@ -841,6 +1031,17 @@ public final class CheatChecks {
         return index < from ? 6 : sorted.get(index - from);
     }
 
+    /** How spread out these are (their standard deviation). */
+    static double spread(final List<Float> values) {
+        double sum = 0, squares = 0;
+        for (final float v : values) {
+            sum += v;
+            squares += v * v;
+        }
+        final double mean = sum / values.size();
+        return Math.sqrt(Math.max(0, squares / values.size() - mean * mean));
+    }
+
     static float median(final List<Float> values) {
         if (values.isEmpty())
             return Float.NaN;
@@ -887,6 +1088,10 @@ public final class CheatChecks {
         public int botLike, botChecked;
         public float topSpeed, maxReach;
         public boolean bedrock;
+        /** Totems, walls, inventory, flying: see Match */
+        public int totemPops, totemRefills, fastRefills, instantClicks, wallHits, wallCrystals, wallBreaks, wallPlaces, landedHits,
+                invClicks, moveClicks, hovers, rises, groundSpoofs, airTicks;
+        public final List<Float> refillDelays = new ArrayList<>();
         /** Spleef and crystal PvP: see Match */
         public int breaks, farBreaks, veryFarBreaks, offAimBreaks, aimedBreaks, bursts;
         public float maxBreakReach;
@@ -940,6 +1145,22 @@ public final class CheatChecks {
                 this.aimedBreaks += m.aimedBreaks;
                 this.bursts += m.bursts;
                 this.maxBreakReach = Math.max(this.maxBreakReach, m.maxBreakReach);
+                this.totemPops += m.totemPops;
+                this.totemRefills += m.totemRefills;
+                this.fastRefills += m.fastRefills;
+                this.instantClicks += m.instantClicks;
+                this.refillDelays.addAll(m.refillDelays);
+                this.wallHits += m.wallHits;
+                this.wallCrystals += m.wallCrystals;
+                this.wallBreaks += m.wallBreaks;
+                this.wallPlaces += m.wallPlaces;
+                this.landedHits += m.landedHits;
+                this.invClicks += m.invClicks;
+                this.moveClicks += m.moveClicks;
+                this.hovers += m.hovers;
+                this.rises += m.rises;
+                this.groundSpoofs += m.groundSpoofs;
+                this.airTicks += m.airTicks;
                 this.places += m.places;
                 this.farPlaces += m.farPlaces;
                 this.veryFarPlaces += m.veryFarPlaces;
@@ -1117,6 +1338,49 @@ public final class CheatChecks {
                                 this.bursts == 1 ? "" : "s", BURST_BREAKS),
                         "Spleef: a vanilla client breaks at most one block a tick (lag can bunch two together)."));
             }
+            // Auto-totem
+            if (this.totemRefills > 0) {
+                final double spread = this.refillDelays.size() >= 5 ? spread(this.refillDelays) : Double.NaN;
+                final double fast = this.fastRefills / (double) this.totemRefills;
+                final Verdict v = this.instantClicks >= 2 || (this.fastRefills >= 3 && fast >= 0.3) || spread < REFILL_SPREAD_SUSPICIOUS ? Verdict.SUSPICIOUS
+                        : this.instantClicks >= 1 || this.fastRefills >= 1 || spread < REFILL_SPREAD_LOOK ? Verdict.LOOK : Verdict.FINE;
+                lines.add(new Line("Totems", v, String.format("%d back in the off hand after %d pops, typically %d ms past their ping%s; %d too fast, %d put in within %d ms of picking it up",
+                                this.totemRefills, this.totemPops, Math.round(median(this.refillDelays)),
+                                Double.isNaN(spread) ? "" : String.format(" (spread %d ms)", Math.round(spread)), this.fastRefills, this.instantClicks, INSTANT_CLICKS),
+                        "After a totem pops, how long until a new one is in the off hand, less their ping. A person needs a few hundred ms (an"
+                                + " inventory click or the swap key); auto-totem is near instant, or the same delay every time (a spread under "
+                                + Math.round(REFILL_SPREAD_LOOK) + " ms), or puts it in the moment it's picked up."));
+            }
+            // Through walls (what they hit, broke or placed with nothing of it to be seen from their eyes)
+            final int walls = this.wallHits + this.wallCrystals + this.wallBreaks + this.wallPlaces;
+            final int actions = this.landedHits + this.crystalHits + this.breaks + this.places;
+            if (walls > 0 || (actions > 0 && !this.kind.startsWith("sumo"))) {
+                final Verdict v = walls >= 5 && walls >= 0.03 * actions ? Verdict.SUSPICIOUS : walls >= 2 ? Verdict.LOOK : Verdict.FINE;
+                lines.add(new Line("Through walls", v, walls == 0 ? "nothing hit, broken or placed through a wall (" + actions + " looked at)"
+                                : String.format("%d of %,d through a wall: %d player hits, %d crystals, %d blocks broken, %d placed",
+                                walls, actions, this.wallHits, this.wallCrystals, this.wallBreaks, this.wallPlaces),
+                        "Worked out as it happened: every line from their eyes to it was blocked. Lag can make one now and then;"
+                                + " hitting, breaking or placing through walls again and again is what killaura, nuker and scaffold do."));
+            }
+            // Moving in an inventory
+            if (this.invClicks > 0 && !this.bedrock) {
+                final Verdict v = this.moveClicks >= 5 && this.moveClicks >= 0.1 * this.invClicks ? Verdict.SUSPICIOUS
+                        : this.moveClicks >= 2 ? Verdict.LOOK : Verdict.FINE;
+                lines.add(new Line("Inventory", v, String.format("%d of %,d inventory clicks made holding a movement key", this.moveClicks, this.invClicks),
+                        "The game lets go of every movement key while an inventory is open: clicking in one while still moving is an"
+                                + " inventory-move cheat (or a mod for it)."));
+            }
+            // Flying
+            if (this.airTicks > 0 && !this.bedrock) {
+                final int odd = this.hovers + this.rises + this.groundSpoofs;
+                final Verdict v = this.hovers >= 3 || this.rises >= 3 || this.groundSpoofs >= 3 ? Verdict.SUSPICIOUS : odd >= 1 ? Verdict.LOOK : Verdict.FINE;
+                lines.add(new Line("Flying", v, odd == 0 ? "never hovered, rose higher than a jump or stood on nothing"
+                                : String.format("hovered %d time%s, rose higher than a jump %d, stood on nothing %d", this.hovers,
+                                this.hovers == 1 ? "" : "s", this.rises, this.groundSpoofs),
+                        "With nothing under them (as the server saw it), nothing helping (elytra, levitation, slow falling, jump boost, water,"
+                                + " ladders, slime) and nothing pushing them: staying up " + (HOVER_MS / 1000.0) + " s without dropping, rising more than "
+                                + RISE + " blocks, or saying they're on the ground for " + SPOOF_TICKS + " ticks. Recorded from 12 Nov on."));
+            }
             // Crystal PvP: popping crystals, and placing blocks
             if (this.crystalHits > 0) {
                 final double far = this.farCrystalHits / (double) this.crystalHits;
@@ -1179,7 +1443,9 @@ public final class CheatChecks {
             score += 3 * this.botLike + 2 * this.veryLongHits + this.longHits + 2 * this.rotationOff + this.sprintBackTicks / 10 + 2 * this.tooFast
                     + 2 * this.veryFarBreaks + this.farBreaks + this.offAimBreaks + 3 * this.bursts
                     + 2 * this.veryFarCrystalHits + this.farCrystalHits + this.offAimCrystalHits + 2 * this.predictedHits
-                    + 2 * this.veryFarPlaces + this.farPlaces + this.offAimPlaces;
+                    + 2 * this.veryFarPlaces + this.farPlaces + this.offAimPlaces
+                    + 5 * this.instantClicks + 2 * this.fastRefills + 2 * (this.wallHits + this.wallCrystals + this.wallBreaks + this.wallPlaces)
+                    + this.moveClicks + 3 * (this.hovers + this.rises + this.groundSpoofs);
             if (this.kbRatio.size() >= 15 && median(this.kbRatio) < KB_LOW)
                 score += 10;
             return score;
@@ -1259,6 +1525,23 @@ public final class CheatChecks {
             if (m.predictedHits > 0) {
                 score += 2 * m.predictedHits;
                 why.add(m.predictedHits + " crystal" + (m.predictedHits == 1 ? "" : "s") + " hit before they could see it");
+            }
+            if (m.instantClicks > 0 || m.fastRefills > 0) {
+                score += 5 * m.instantClicks + 2 * m.fastRefills;
+                why.add(m.fastRefills + " totem" + (m.fastRefills == 1 ? "" : "s") + " back too fast" + (m.instantClicks > 0 ? ", " + m.instantClicks + " put in instantly" : ""));
+            }
+            final int walls = m.wallHits + m.wallCrystals + m.wallBreaks + m.wallPlaces;
+            if (walls > 0) {
+                score += 2 * walls;
+                why.add(walls + " through a wall");
+            }
+            if (m.moveClicks > 0) {
+                score += m.moveClicks;
+                why.add(m.moveClicks + " inventory click" + (m.moveClicks == 1 ? "" : "s") + " while moving");
+            }
+            if (m.hovers + m.rises + m.groundSpoofs > 0) {
+                score += 3 * (m.hovers + m.rises + m.groundSpoofs);
+                why.add(String.format("flying: %d hover, %d rise, %d on nothing", m.hovers, m.rises, m.groundSpoofs));
             }
             if (m.farPlaces > 0) {
                 score += m.farPlaces + 2 * m.veryFarPlaces;

@@ -17,12 +17,14 @@ import sys
 import uuid
 
 KEYS = ["forward", "back", "left", "right", "jump", "sneak", "sprint"]
-STATE = ["on_ground", "sprinting", "sneaking", "swung", "landed_hit", "was_hit"]
+STATE = ["on_ground", "sprinting", "sneaking", "swung", "landed_hit", "was_hit", "gliding"]
 # Format 2's "more" byte (the velocity and who they hit are read separately)
-MORE = ["sent_velocity", "digging", "shot", "teleported", "landed_on_fighter"]
+MORE = ["sent_velocity", "digging", "shot", "teleported", "landed_on_fighter", "in_water_or_climbing", "helped_through_air", "nothing_under"]
 # Format 3's block changes, and format 4's events
 HOW = {0: "hand", 1: "snowball", 2: "placed", 3: "exploded"}
-EVENTS = {1: "equip", 2: "totem", 3: "crystal_placed", 4: "crystal_hit", 5: "crystal_gone", 6: "health", 7: "kill", 8: "death"}
+EVENTS = {1: "equip", 2: "totem", 3: "crystal_placed", 4: "crystal_hit", 5: "crystal_gone", 6: "health", 7: "kill", 8: "death",
+          9: "through_wall", 10: "totem_back", 11: "inventory_click", 12: "rocket"}
+WALLS = ["player_hit", "crystal_hit", "block_broken", "block_placed"]
 SLOTS = ["main_hand", "off_hand", "feet", "legs", "chest", "head"]
 FRAME = struct.Struct(">ifffffBB")
 FRAME_2 = struct.Struct(">hB")
@@ -121,6 +123,14 @@ def read(path):
                 event["health"] = d.take("f")
             elif kind == 7:
                 event["victim"] = d.take("b")
+            elif kind == 9:
+                w = d.take("b")
+                event["what"] = WALLS[w] if 0 <= w < len(WALLS) else w
+            elif kind == 10:
+                event["how"] = "swap_key" if d.take("b") == 1 else "inventory_click"
+                event["since_picked_up_ms"] = d.take("i")
+            elif kind == 11:
+                event["slot"] = d.take("h")
             match["events"].append(event)
     return match
 

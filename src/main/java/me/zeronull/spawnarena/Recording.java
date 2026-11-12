@@ -56,7 +56,10 @@ public final class Recording {
     }
 
     /** Event kinds */
-    public static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6, KILL = 7, DEATH = 8;
+    public static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6, KILL = 7, DEATH = 8,
+            THROUGH_WALL = 9, TOTEM_BACK = 10, INVENTORY_CLICK = 11, ROCKET = 12;
+    /** What a THROUGH_WALL was */
+    public static final int WALL_HIT = 0, WALL_CRYSTAL = 1, WALL_BREAK = 2, WALL_PLACE = 3;
 
     /** A crystal placed during the match: its entity id, where (from the centre), who placed it (-1 not known), when it went. */
     public record Crystal(int id, float x, float y, float z, int placedBy, int placedMs, int goneMs) {}
@@ -125,11 +128,14 @@ public final class Recording {
     }
 
     // State bits
-    public static final int GROUND = 1, SPRINTING = 2, SNEAKING = 4, SWUNG = 8, LANDED = 16, HURT = 32;
+    public static final int GROUND = 1, SPRINTING = 2, SNEAKING = 4, SWUNG = 8, LANDED = 16, HURT = 32, GLIDING = 64;
     // Key bits
     public static final int FORWARD = 1, BACK = 2, LEFT = 4, RIGHT = 8, JUMP = 16, SNEAK = 32, SPRINT = 64;
     // Format 2's "more" bits
     public static final int VELOCITY = 1, DIGGING = 2, SHOT = 4, TELEPORTED = 8, LANDED_ON = 16;
+    /** Where they were, as the server saw it: in water, climbing, in cobwebs, on slime (32); helped through the air:
+     * gliding, levitating, slow falling, jump boost... (64); nothing solid under them (128) */
+    public static final int SURROUNDED = 32, HELPED = 64, UNSUPPORTED = 128;
 
     private Recording(final File file, final int format, final long started, final String arena, final String variant,
                       final int lengthMs, final boolean duel, final List<Fighter> fighters, final int flags, final double[] centre) {

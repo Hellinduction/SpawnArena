@@ -77,7 +77,7 @@ public final class ArenaReplay {
      */
     private final java.util.Set<UUID> hiddenFighters = new java.util.HashSet<>();
     private int ticks;
-    private static Object sharedFlags, poseData, customisation, crouching, standing, endCrystalType;
+    private static Object sharedFlags, poseData, customisation, crouching, standing, gliding, endCrystalType;
     private static java.lang.reflect.Constructor<?> entityEventPacket;
     private static Field entityEventId;
     /** Crystal matches: the crystals placed, and those shown now (crystal's id in the match -> its entity id for the viewer) */
@@ -96,7 +96,7 @@ public final class ArenaReplay {
         /** Its name tag, as a team of the viewer's (null: none of ours; an online fighter's comes from TAB) */
         Object team;
         int frame = -1;
-        boolean shown, crouched, sprinting;
+        boolean shown, crouched, sprinting, flying;
         float lastYaw = Float.NaN;
         /** What they wore and held as it changed (ms, slot, item), and what they're shown in now (format 4) */
         final List<Object[]> gearChanges = new ArrayList<>();
@@ -411,7 +411,7 @@ public final class ArenaReplay {
                 this.draw(p);
             if (!this.changes.isEmpty())
                 this.blocks();
-            if (this.rec.crystal || this.rec.session || this.rec.kit)
+            if (this.rec.crystal || this.rec.session || this.rec.kit || !this.rec.events.isEmpty())
                 this.events();
         } catch (final ReflectiveOperationException | RuntimeException e) {
             SpawnArena.INSTANCE.getLogger().warning("Stopped a replay: " + e);
@@ -471,10 +471,12 @@ public final class ArenaReplay {
             p.lastYaw = yaw;
             this.head(p, yaw);
         }
-        final boolean crouched = f.has(frame, Recording.SNEAKING), sprinting = f.has(frame, Recording.SPRINTING);
-        if (crouched != p.crouched || sprinting != p.sprinting) {
+        final boolean crouched = f.has(frame, Recording.SNEAKING), sprinting = f.has(frame, Recording.SPRINTING),
+                flying = f.has(frame, Recording.GLIDING);
+        if (crouched != p.crouched || sprinting != p.sprinting || flying != p.flying) {
             p.crouched = crouched;
             p.sprinting = sprinting;
+            p.flying = flying;
             this.data(p);
         }
     }
@@ -600,6 +602,15 @@ public final class ArenaReplay {
                                     Placeholder.unparsed("victim", this.rec.fighters.get(victim).name)));
                     } catch (final java.io.IOException ignored) {
                         // a short one
+                    }
+                } else if (e.kind() == Recording.ROCKET && e.ms() > before) {
+                    // A firework rocket boosting their elytra flight: its sound and sparks
+                    final Puppet p = this.puppet(e.fighter());
+                    if (p != null && p.shown) {
+                        final double[] at = p.at(this.clock);
+                        final Location where = new Location(this.world, this.cx + at[1], this.cy + at[2], this.cz + at[3]);
+                        this.viewer.playSound(where, org.bukkit.Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, org.bukkit.SoundCategory.PLAYERS, 1f, 1f);
+                        this.viewer.spawnParticle(org.bukkit.Particle.FIREWORK, where, 8, 0.2, 0.2, 0.2, 0.05);
                     }
                 } else if (e.kind() == Recording.TOTEM && e.ms() > before) {
                     final Puppet p = this.puppet(e.fighter());
@@ -734,10 +745,11 @@ public final class ArenaReplay {
 
     /** Crouching or not, sprinting or not, and every layer of their skin shown. */
     private void data(final Puppet p) throws ReflectiveOperationException {
-        final byte flags = (byte) ((p.crouched ? 0x02 : 0) | (p.sprinting ? 0x08 : 0));
+        // (gliding with an elytra: its flag and pose)
+        final byte flags = (byte) ((p.crouched ? 0x02 : 0) | (p.sprinting ? 0x08 : 0) | (p.flying ? 0x80 : 0));
         BotPuppet.send(this.viewer, BotPuppet.dataPacket.newInstance(p.id, List.of(
                 BotPuppet.dataValue.invoke(null, sharedFlags, flags),
-                BotPuppet.dataValue.invoke(null, poseData, p.crouched ? crouching : standing),
+                BotPuppet.dataValue.invoke(null, poseData, p.flying && gliding != null ? gliding : p.crouched ? crouching : standing),
                 BotPuppet.dataValue.invoke(null, customisation, (byte) 0x7F))));
     }
 
@@ -889,6 +901,7 @@ public final class ArenaReplay {
             sharedFlags = field(entity, "DATA_SHARED_FLAGS_ID");
             poseData = field(entity, "DATA_POSE");
             crouching = pose.getField("CROUCHING").get(null);
+            gliding = pose.getField("FALL_FLYING").get(null);
             standing = pose.getField("STANDING").get(null);
             customisation = field(avatar, "DATA_PLAYER_MODE_CUSTOMISATION");
             endCrystalType = Class.forName("net.minecraft.world.entity.EntityType", true, cl).getField("END_CRYSTAL").get(null);
