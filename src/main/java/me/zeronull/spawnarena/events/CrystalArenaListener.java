@@ -98,6 +98,8 @@ public final class CrystalArenaListener implements Listener {
         String problem = null;
         if (CrystalPvp.isBanned(block.getType(), block.getWorld()))
             problem = "You can't place that in this arena.";
+        else if (arena.isMace() && (block.getType() == Material.RESPAWN_ANCHOR || Tag.BEDS.isTagged(block.getType())))
+            problem = "No respawn anchors or beds in Mace PvP.";
         for (final BlockState state : replaced) {
             if (problem != null)
                 break;
@@ -253,6 +255,11 @@ public final class CrystalArenaListener implements Listener {
                 e.setCancelled(true);
             return;
         }
+        if (arena.isMace()) {
+            e.setCancelled(true);
+            this.tell(player, "No end crystals in Mace PvP.");
+            return;
+        }
         if ((type == Material.OBSIDIAN || type == Material.BEDROCK)
                 && arena.equals(CrystalPvp.arenaAt(clicked.getRelative(org.bukkit.block.BlockFace.UP)))) {
             e.setUseItemInHand(Event.Result.ALLOW);
@@ -292,6 +299,11 @@ public final class CrystalArenaListener implements Listener {
             return;
         }
 
+        if (arena.isMace()) {
+            e.setCancelled(true);
+            this.tell(player, "No end crystals in Mace PvP.");
+            return;
+        }
         e.setCancelled(false);
         CrystalPvp.recordCrystal(arena.getFight(player), e.getEntity());
         arena.getFight(player).stats().crystalPlaced(player);

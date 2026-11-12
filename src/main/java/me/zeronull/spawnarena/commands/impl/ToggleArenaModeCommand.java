@@ -56,6 +56,29 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             return true;
         }
 
+        // Mace PvP on/off (crystal arenas), from anywhere
+        if (args.length >= 2 && args[1].equalsIgnoreCase("mace")) {
+            final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
+            if (!(found instanceof SavableArena savable)) {
+                sender.sendMessage(ChatColor.RED + "That arena was not found.");
+                return true;
+            }
+            if (!savable.isCrystalPvp() && !savable.isMace()) {
+                sender.sendMessage(ChatColor.RED + "Mace PvP uses the crystal arena rules: make " + savable.getArenaName()
+                        + " a crystal arena first (crystalPvp: true, or /arenawizard).");
+                return true;
+            }
+            final boolean on = !savable.isMace();
+            savable.setMace(on);
+            savable.save(config -> config.mace = on);
+            for (final me.zeronull.spawnarena.CrystalCopy copy : me.zeronull.spawnarena.CrystalCopies.of(savable))
+                copy.setMace(on);
+            sender.sendMessage(on
+                    ? ChatColor.GREEN + "Mace PvP is on for " + savable.getArenaName() + ": crystal arena rules, but no end crystals, respawn anchors or beds."
+                    : ChatColor.YELLOW + "Mace PvP is off for " + savable.getArenaName() + ": end crystals, anchors and beds are allowed again.");
+            return true;
+        }
+
         // Spleef on/off works from anywhere, the console included
         if (args.length >= 2 && args[1].equalsIgnoreCase("spleef")) {
             final me.zeronull.spawnarena.Arena found = SpawnArena.arenas.of(args[0]);
@@ -84,7 +107,7 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
         }
 
         if (args.length < 1) {
-            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa|random|combo|spleef]"));
+            sender.sendMessage(ChatColor.translateAlternateColorCodes('&', "&cUsage: /togglearenamode <name> [ffa|random|combo|spleef|mace]"));
             return true;
         }
 
@@ -274,7 +297,12 @@ public final class ToggleArenaModeCommand extends ArenaTabComplete implements Co
             // "random" only for sumo arenas (or one that somehow has it on, to turn it off)
             final me.zeronull.spawnarena.Arena arena = SpawnArena.arenas.of(args[0]);
             final boolean sumo = arena != null && (arena.isDeathOnTouchLiquid() || arena.isRandomSumo());
-            return (sumo ? java.util.List.of("ffa", "random", "combo", "spleef") : java.util.List.of("ffa", "combo", "spleef")).stream()
+            final boolean crystal = arena != null && arena.isCrystalPvp();
+            final java.util.List<String> options = new java.util.ArrayList<>(sumo ? java.util.List.of("ffa", "random", "combo", "spleef")
+                    : java.util.List.of("ffa", "combo", "spleef"));
+            if (crystal)
+                options.add("mace");
+            return options.stream()
                     .filter(o -> o.startsWith(args[1].toLowerCase())).toList();
         }
         return super.onTabComplete(sender, command, label, args);

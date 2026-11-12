@@ -66,9 +66,9 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
                 sender.sendMessage("§7Nobody is in the §e" + arena + "§7 free-for-all right now.");
                 return true;
             }
-            sender.sendMessage("§6§l--- " + arena + " Leaderboard (" + statLabel(stat) + ", live) ---");
+            sender.sendMessage(header(arena, statLabel(stat) + " · Live"));
             for (int i = 0; i < live.size() && i < limit; i++)
-                sender.sendMessage(String.format("§e#%d §f%s §7— §e%d", i + 1, live.get(i).name(), live.get(i).streak()));
+                sender.sendMessage(row(i + 1, live.get(i).name(), String.valueOf(live.get(i).streak())));
             return true;
         }
         final String field = statToField(stat);
@@ -79,12 +79,23 @@ public final class ArenaLeaderboardCommand implements CommandExecutor, TabComple
             return true;
         }
 
-        sender.sendMessage("§6§l--- " + arena + " Leaderboard (" + statLabel(stat) + ") ---");
+        sender.sendMessage(header(arena, statLabel(stat)));
         for (int i = 0; i < entries.size(); i++) {
             final StatsManager.LeaderboardEntry e = entries.get(i);
-            sender.sendMessage(String.format("§e#%d §f%s §7— §e%d", i + 1, e.name(), e.value()));
+            sender.sendMessage(row(i + 1, e.name(), me.zeronull.spawnarena.SpawnArenaPapiExpansion.shown(field, (int) e.value())));
         }
         return true;
+    }
+
+    /** "CrystalFFA · Time Fighting", as the holograms title it. */
+    private static String header(final String arena, final String label) {
+        return "§6§l" + me.zeronull.spawnarena.Arena.displayName(arena) + " §8· §e§l" + label;
+    }
+
+    /** "#1 dannyok  3h 57m": the top three in gold, silver and bronze, as on the holograms. */
+    private static String row(final int rank, final String name, final String value) {
+        final String colour = rank == 1 ? "§6" : rank == 2 ? "§7" : rank == 3 ? "§c" : "§8";
+        return colour + "#" + rank + " §f" + name + " §8- §e" + value;
     }
 
     private boolean spawn(CommandSender sender, String[] args) {

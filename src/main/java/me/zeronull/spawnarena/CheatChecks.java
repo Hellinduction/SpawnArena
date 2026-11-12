@@ -43,7 +43,21 @@ public final class CheatChecks {
     /** A match's view turns fitting a mouse's steps less than this is off. */
     static final double ROTATION_OFF = 0.8;
     /** Knockback taken, of what was sent: below these is low / very low. */
-    static final double KB_LOW = 0.7, KB_VERY_LOW = 0.5;
+    static final double KB_LOW = 0.6, KB_VERY_LOW = 0.45;
+
+    /**
+     * Whether a plugin that makes crystals hittable sooner (FasterCrystals) is on the server: then hitting one "before it
+     * could be seen" is that plugin working, not a cheat, so crystal timing is shown but never flags anyone.
+     */
+    static boolean fasterCrystals() {
+        try {
+            return org.bukkit.Bukkit.getServer() != null && org.bukkit.Bukkit.getPluginManager().isPluginEnabled("FasterCrystals");
+        } catch (final RuntimeException | LinkageError e) {
+            return false;
+        }
+    }
+    /** Through walls (hits, crystals, blocks broken; not placed): lag makes a few, so it takes this many to look, or be suspicious */
+    static final int WALLS_LOOK = 5, WALLS_SUSPICIOUS = 10;
     /** Faster than this (blocks a second, over a second, with no hit for 1.5 seconds) is too fast, but on ice. */
     static final double SPEED_LIMIT = 7.8;
     /** Spleef: a block broken by hand this far (from the eyes to its nearest part) or further is far / very far. */
@@ -1168,6 +1182,11 @@ public final class CheatChecks {
 
     /** All of one player's matches put together. */
     public static final class Summary {
+        /** Through-wall hits, crystals and blocks broken (placed blocks don't count: see the Through walls line) */
+        int wallsCounted() {
+            return this.wallHits + this.wallCrystals + this.wallBreaks;
+        }
+
         public final List<Match> matches;
         final Baseline baseline;
         /** The kind of arena these matches are from (one summary per kind: see {@link CheatChecks#kind}) */
@@ -1444,7 +1463,7 @@ public final class CheatChecks {
                 final double spread = this.refillDelays.size() >= 5 ? spread(this.refillDelays) : Double.NaN;
                 final double fast = this.fastRefills / (double) this.totemRefills;
                 final Verdict v = this.instantClicks >= 2 || (this.fastRefills >= 3 && fast >= 0.3) || spread < REFILL_SPREAD_SUSPICIOUS ? Verdict.SUSPICIOUS
-                        : this.instantClicks >= 1 || this.fastRefills >= 1 || spread < REFILL_SPREAD_LOOK ? Verdict.LOOK : Verdict.FINE;
+                        : this.instantClicks >= 1 || this.fastRefills >= 3 || spread < REFILL_SPREAD_LOOK ? Verdict.LOOK : Verdict.FINE;
                 lines.add(new Line("Totems", v, String.format("%d back in the off hand after %d pops, typically %d ms past their ping%s; %d too fast, %d put in within %d ms of picking it up",
                                 this.totemRefills, this.totemPops, Math.round(median(this.refillDelays)),
                                 Double.isNaN(spread) ? "" : String.format(" (spread %d ms)", Math.round(spread)), this.fastRefills, this.instantClicks, INSTANT_CLICKS),
@@ -1453,15 +1472,19 @@ public final class CheatChecks {
                                 + Math.round(REFILL_SPREAD_LOOK) + " ms), or puts it in the moment it's picked up."));
             }
             // Through walls (what they hit, broke or placed with nothing of it to be seen from their eyes)
-            final int walls = this.wallHits + this.wallCrystals + this.wallBreaks + this.wallPlaces;
-            final int actions = this.landedHits + this.crystalHits + this.breaks + this.places;
+            // (placed blocks don't count: a block goes against another one's face, so the spot it fills is often behind
+            // something from their eyes: that's normal building)
+            final int walls = this.wallsCounted();
+            final int actions = this.landedHits + this.crystalHits + this.breaks;
             if (walls > 0 || (actions > 0 && !this.kind.startsWith("sumo"))) {
-                final Verdict v = walls >= 5 && walls >= 0.03 * actions ? Verdict.SUSPICIOUS : walls >= 2 ? Verdict.LOOK : Verdict.FINE;
-                lines.add(new Line("Through walls", v, walls == 0 ? "nothing hit, broken or placed through a wall (" + actions + " looked at)"
-                                : String.format("%d of %,d through a wall: %d player hits, %d crystals, %d blocks broken, %d placed",
-                                walls, actions, this.wallHits, this.wallCrystals, this.wallBreaks, this.wallPlaces),
-                        "Worked out as it happened: every line from their eyes to it was blocked. Lag can make one now and then;"
-                                + " hitting, breaking or placing through walls again and again is what killaura, nuker and scaffold do."));
+                final Verdict v = walls >= WALLS_SUSPICIOUS && walls >= 0.05 * actions ? Verdict.SUSPICIOUS
+                        : walls >= WALLS_LOOK ? Verdict.LOOK : Verdict.FINE;
+                lines.add(new Line("Through walls", v, walls == 0 ? "nothing hit or broken through a wall (" + actions + " looked at)"
+                                : String.format("%d of %,d through a wall: %d player hits, %d crystals, %d blocks broken",
+                                walls, actions, this.wallHits, this.wallCrystals, this.wallBreaks),
+                        "Worked out as it happened: every line from their eyes to it was blocked. Lag makes a few now and then;"
+                                + " hitting or breaking through walls again and again is what killaura and nuker do. (Placed blocks"
+                                + " aren't counted: placing against a block often fills a spot hidden behind it.)"));
             }
             // Moving in an inventory
             if (this.invClicks > 0 && !this.bedrock) {
@@ -1520,8 +1543,8 @@ public final class CheatChecks {
                 }
                 if (this.timedHits > 0) {
                     final double share = this.predictedHits / (double) this.timedHits;
-                    lines.add(new Line("Crystal timing", this.predictedHits >= 10 && share >= 0.1 ? Verdict.SUSPICIOUS
-                            : this.predictedHits >= 3 ? Verdict.LOOK : Verdict.FINE,
+                    lines.add(new Line("Crystal timing", fasterCrystals() ? Verdict.INFO : this.predictedHits >= 20 && share >= 0.15 ? Verdict.SUSPICIOUS
+                            : this.predictedHits >= 10 && share >= 0.05 ? Verdict.LOOK : Verdict.FINE,
                             String.format("%d of %,d hit before they could have seen them; most in a second %d", this.predictedHits, this.timedHits,
                                     this.bestCrystalSecond),
                             "A crystal can't be seen until the server's word of it reaches them, and their hit takes as long to come back:"
@@ -1562,9 +1585,11 @@ public final class CheatChecks {
                 score += l.verdict() == Verdict.SUSPICIOUS ? 100 : l.verdict() == Verdict.LOOK ? 20 : 0;
             score += 3 * this.botLike + 2 * this.veryLongHits + this.longHits + 2 * this.rotationOff + this.sprintBackTicks / 10 + 2 * this.tooFast
                     + 2 * this.veryFarBreaks + this.farBreaks + this.offAimBreaks + 3 * this.bursts
-                    + 2 * this.veryFarCrystalHits + this.farCrystalHits + this.offAimCrystalHits + 2 * this.predictedHits
+                    + 2 * this.veryFarCrystalHits + this.farCrystalHits + this.offAimCrystalHits
+                    + (!fasterCrystals() && this.predictedHits >= 10 && this.predictedHits >= 0.05 * Math.max(1, this.timedHits) ? 2 * this.predictedHits : 0)
                     + 2 * this.veryFarPlaces + this.farPlaces + this.offAimPlaces
-                    + 5 * this.instantClicks + 2 * this.fastRefills + 2 * (this.wallHits + this.wallCrystals + this.wallBreaks + this.wallPlaces)
+                    + 5 * this.instantClicks + (this.fastRefills >= 3 ? 2 * this.fastRefills : 0)
+                    + (this.wallsCounted() >= WALLS_LOOK ? 2 * this.wallsCounted() : 0)
                     + this.moveClicks + 3 * (this.hovers + this.rises + this.groundSpoofs) + 5 * this.fastStretches + 2 * this.airOdd;
             if (this.kbRatio.size() >= 15 && median(this.kbRatio) < KB_LOW)
                 score += 10;
@@ -1642,16 +1667,16 @@ public final class CheatChecks {
                 score += m.offAimCrystalHits;
                 why.add(m.offAimCrystalHits + " crystal" + (m.offAimCrystalHits == 1 ? "" : "s") + " hit looking away");
             }
-            if (m.predictedHits > 0) {
+            if (m.predictedHits >= 3 && !fasterCrystals()) {
                 score += 2 * m.predictedHits;
                 why.add(m.predictedHits + " crystal" + (m.predictedHits == 1 ? "" : "s") + " hit before they could see it");
             }
-            if (m.instantClicks > 0 || m.fastRefills > 0) {
+            if (m.instantClicks > 0 || m.fastRefills >= 2) {
                 score += 5 * m.instantClicks + 2 * m.fastRefills;
                 why.add(m.fastRefills + " totem" + (m.fastRefills == 1 ? "" : "s") + " back too fast" + (m.instantClicks > 0 ? ", " + m.instantClicks + " put in instantly" : ""));
             }
-            final int walls = m.wallHits + m.wallCrystals + m.wallBreaks + m.wallPlaces;
-            if (walls > 0) {
+            final int walls = m.wallHits + m.wallCrystals + m.wallBreaks; // (not blocks placed: see the Through walls line)
+            if (walls >= 3) {
                 score += 2 * walls;
                 why.add(walls + " through a wall");
             }

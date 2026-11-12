@@ -358,7 +358,7 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
     }
 
     /** How a board's value shows: time for playtime, two decimals for the ratios, else the number. */
-    private static String shown(final String field, final int value) {
+    public static String shown(final String field, final int value) {
         if (field.equals("fight_seconds"))
             return StatsManager.formatDuration(value);
         if (StatsManager.isRatio(field))

@@ -117,6 +117,10 @@ public final class ArenaConfig {
             "Combo variant. Toggle with /togglearenamode <arena> combo."})
     public boolean combo = false;
 
+    @Comment({"Mace PvP (crystal arenas only): fighters bring their own kit (mace, wind charges, pearls...) and can build as in",
+            "crystal PvP, but end crystals, respawn anchors and beds can't be used. Toggle with /togglearenamode <arena> mace."})
+    public boolean mace = false;
+
     @Comment("Mode of the arena: SINGLE, MULTI")
     public String arenaMode = ArenaMode.SINGLE.toString();
 

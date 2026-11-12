@@ -15,6 +15,17 @@ public abstract class ArenaOptions {
     private volatile boolean randomSumo;
 
     private volatile boolean combo;
+    private volatile boolean mace;
+
+    /** Mace PvP: a crystal arena (own kit, building, put back after) with no end crystals, respawn anchors or beds. */
+    public boolean isMace() {
+        return this.mace;
+    }
+
+    public ArenaOptions setMace(final boolean value) {
+        this.mace = value;
+        return this;
+    }
 
     /** Combo rules for every fight here: no hit delay, softer knockback (see SumoCombo). */
     public boolean isCombo() {

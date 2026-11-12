@@ -77,6 +77,7 @@ public final class CrystalCopy extends Arena {
         this.setFfa(false);
         this.setRandomSumo(this.real.isRandomSumo());
         this.setCombo(this.real.isCombo());
+        this.setMace(this.real.isMace());
         this.setWinReward(this.real.getWinReward(), this.real.getWinRewardCooldownMinutes());
         this.setLeaderReward(this.real.getLeaderRewardMultiplier(), this.real.getLeaderRewardCooldownMinutes());
         this.setPodiumRewards(this.real.rewardMultiplierFor(2), this.real.rewardCooldownMinutesFor(2),
