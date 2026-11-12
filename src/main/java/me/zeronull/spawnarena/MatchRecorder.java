@@ -88,7 +88,7 @@ public final class MatchRecorder implements Listener {
 
     /** Event kinds: see {@link #write} */
     static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6, KILL = 7, DEATH = 8,
-            THROUGH_WALL = 9, TOTEM_BACK = 10, INVENTORY_CLICK = 11, ROCKET = 12;
+            THROUGH_WALL = 9, TOTEM_BACK = 10, INVENTORY_CLICK = 11, ROCKET = 12, CLIENT_TICKS = 13;
     /** What THROUGH_WALL was: a hit on a player, a hit on a crystal, a block broken, a block placed (against the one clicked) */
     static final int WALL_HIT = 0, WALL_CRYSTAL = 1, WALL_BREAK = 2, WALL_PLACE = 3;
     /** The equipment slots EQUIP numbers (0 to 5) */
@@ -128,6 +128,10 @@ public final class MatchRecorder implements Listener {
         volatile boolean in = true;
         /** When (epoch ms) they last picked a totem up onto the cursor in an inventory, or 0 */
         volatile long totemPickedUp;
+        /** Their game's ticks (its tick-end packets) as counted on their connection, and since when (epoch ms; 0: not yet) */
+        volatile TickCounter ticks;
+        long ticksFrom;
+        int framesSinceTicks;
         final java.util.concurrent.atomic.AtomicInteger kills = new java.util.concurrent.atomic.AtomicInteger(),
                 deaths = new java.util.concurrent.atomic.AtomicInteger();
         final int team;
@@ -209,6 +213,7 @@ public final class MatchRecorder implements Listener {
         for (final Track t : rec.tracks) {
             OF.put(t.player.getUniqueId(), rec);
             t.task = t.player.getScheduler().runAtFixedRate(SpawnArena.INSTANCE, task -> rec.frame(t), null, 1L, 1L);
+            countTicks(t);
         }
         rec.loadStats(rec.tracks);
     }
@@ -281,6 +286,7 @@ public final class MatchRecorder implements Listener {
         final ScheduledTask running = track.task;
         if (running == null || running.isCancelled())
             track.task = p.getScheduler().runAtFixedRate(SpawnArena.INSTANCE, task -> this.frame(track), null, 1L, 1L);
+        countTicks(track);
     }
 
     /** A free-for-all: {@code p} is out (died: with whoever gets the kill), any thread. */
@@ -294,6 +300,7 @@ public final class MatchRecorder implements Listener {
         if (task != null)
             task.cancel();
         t.task = null;
+        stopCountingTicks(t);
         OF.remove(p.getUniqueId(), rec);
         if (!died)
             return;
@@ -338,6 +345,8 @@ public final class MatchRecorder implements Listener {
             final ScheduledTask task = t.task;
             if (task != null)
                 task.cancel();
+            if (t.ticks != null && OF.get(t.player.getUniqueId()) == this)
+                stopCountingTicks(t);
             OF.remove(t.player.getUniqueId(), this);
         }
         CRYSTALS.values().removeIf(r -> r == this);
@@ -430,6 +439,7 @@ public final class MatchRecorder implements Listener {
             if (task != null)
                 task.cancel();
             OF.remove(t.player.getUniqueId(), rec);
+            stopCountingTicks(t);
         }
         CRYSTALS.values().removeIf(r -> r == rec);
         if (rec.winners == null || !SpawnArena.INSTANCE.isEnabled())
@@ -458,6 +468,24 @@ public final class MatchRecorder implements Listener {
                     out.writeByte(slot);
                     out.writeUTF(type);
                     out.writeByte(enchanted ? 1 : 0);
+                });
+            }
+        }
+        // Their game's ticks since the last count (about every second)
+        final TickCounter counter = t.ticks;
+        if (counter != null) {
+            final long nowMs = System.currentTimeMillis();
+            if (t.ticksFrom == 0) {
+                counter.count.set(0);
+                t.ticksFrom = nowMs;
+                t.framesSinceTicks = 0;
+            } else if (++t.framesSinceTicks >= 20) {
+                final int n = counter.count.getAndSet(0), span = (int) Math.min(Short.MAX_VALUE, nowMs - t.ticksFrom);
+                t.ticksFrom = nowMs;
+                t.framesSinceTicks = 0;
+                this.event(nowMs, me, CLIENT_TICKS, out -> {
+                    out.writeShort(Math.min(n, Short.MAX_VALUE));
+                    out.writeShort(span);
                 });
             }
         }
@@ -527,6 +555,65 @@ public final class MatchRecorder implements Listener {
             } catch (final IOException ignored) {
                 // (in memory: can't happen)
             }
+        }
+    }
+
+    // ── Their game's ticks (for timer) ──────────────────────────────────────
+
+    private static final String TICKS_HANDLER = "spawnarena_client_ticks";
+
+    /** Counts a player's game ticks as they arrive: a 1.21.2+ client sends a tick-end packet at the end of each of its ticks. */
+    private static final class TickCounter extends io.netty.channel.ChannelInboundHandlerAdapter {
+        final java.util.concurrent.atomic.AtomicInteger count = new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public void channelRead(final io.netty.channel.ChannelHandlerContext ctx, final Object msg) throws Exception {
+            if (msg != null && msg.getClass().getSimpleName().equals("ServerboundClientTickEndPacket"))
+                this.count.incrementAndGet();
+            super.channelRead(ctx, msg);
+        }
+    }
+
+    /** Starts counting this fighter's game ticks (their connection gets a counter, the one before replaced). */
+    private static void countTicks(final Track t) {
+        try {
+            final io.netty.channel.Channel channel = LagOuts.channelOf(t.player);
+            if (channel == null)
+                return;
+            final TickCounter counter = new TickCounter();
+            t.ticks = counter;
+            t.ticksFrom = 0;
+            channel.eventLoop().execute(() -> {
+                try {
+                    if (channel.pipeline().get(TICKS_HANDLER) != null)
+                        channel.pipeline().remove(TICKS_HANDLER);
+                    if (channel.pipeline().get("packet_handler") != null)
+                        channel.pipeline().addBefore("packet_handler", TICKS_HANDLER, counter);
+                } catch (final RuntimeException ignored) {
+                    // the connection closed meanwhile
+                }
+            });
+        } catch (final ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            // can't be counted here: no timer check for them
+        }
+    }
+
+    /** Stops counting their game ticks (out of the match). */
+    private static void stopCountingTicks(final Track t) {
+        t.ticks = null;
+        try {
+            final io.netty.channel.Channel channel = LagOuts.channelOf(t.player);
+            if (channel != null)
+                channel.eventLoop().execute(() -> {
+                    try {
+                        if (channel.pipeline().get(TICKS_HANDLER) != null)
+                            channel.pipeline().remove(TICKS_HANDLER);
+                    } catch (final RuntimeException ignored) {
+                        // closed
+                    }
+                });
+        } catch (final ReflectiveOperationException | RuntimeException | LinkageError ignored) {
+            // gone
         }
     }
 
@@ -937,6 +1024,8 @@ public final class MatchRecorder implements Listener {
      *     onto the cursor (int, -1 not known)
      *   11 an inventory click: its raw slot (short)
      *   12 a firework rocket boosted their elytra flight (no details)
+     *   13 their game's ticks (its tick-end packets) since the last count, about every second: how many (short), over how
+     *     long (short, ms)
      *   Frames (format 2 on) also mark in "more": 32 in water, lava, cobwebs or powder snow, climbing, or on a slime block
      *   or bed; 64 helped through the air (gliding, flying, levitating, slow falling, jump boost, riptide, riding); 128
      *   nothing solid under them, as the server sees it; and in "state", 64 gliding with an elytra

@@ -23,7 +23,7 @@ MORE = ["sent_velocity", "digging", "shot", "teleported", "landed_on_fighter", "
 # Format 3's block changes, and format 4's events
 HOW = {0: "hand", 1: "snowball", 2: "placed", 3: "exploded"}
 EVENTS = {1: "equip", 2: "totem", 3: "crystal_placed", 4: "crystal_hit", 5: "crystal_gone", 6: "health", 7: "kill", 8: "death",
-          9: "through_wall", 10: "totem_back", 11: "inventory_click", 12: "rocket"}
+          9: "through_wall", 10: "totem_back", 11: "inventory_click", 12: "rocket", 13: "client_ticks"}
 WALLS = ["player_hit", "crystal_hit", "block_broken", "block_placed"]
 SLOTS = ["main_hand", "off_hand", "feet", "legs", "chest", "head"]
 FRAME = struct.Struct(">ifffffBB")
@@ -131,6 +131,8 @@ def read(path):
                 event["since_picked_up_ms"] = d.take("i")
             elif kind == 11:
                 event["slot"] = d.take("h")
+            elif kind == 13:
+                event["ticks"], event["over_ms"] = d.take("h"), d.take("h")
             match["events"].append(event)
     return match
 

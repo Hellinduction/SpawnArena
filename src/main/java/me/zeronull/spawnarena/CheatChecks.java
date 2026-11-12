@@ -64,6 +64,10 @@ public final class CheatChecks {
     static final double RISE = 1.6;
     /** "On the ground" with nothing under them for this many ticks in a row: claiming to stand on nothing */
     static final int SPOOF_TICKS = 10;
+    /** Timer: their game's ticks a second over a 10-second stretch past this is running fast. */
+    static final double TIMER_RATE = 21;
+    /** Air movement: a jump this many ticks long at least is judged */
+    static final int AIR_TICKS = 8;
     /** Crystal PvP: a crystal hit this far (from the eyes to the nearest part of it) or further is far / very far. */
     static final double FAR_CRYSTAL = 3.5, VERY_FAR_CRYSTAL = 4.0;
     /** A crystal hit sooner after it appeared than this share of their ping: before they could have seen it. */
@@ -116,6 +120,11 @@ public final class CheatChecks {
         public int invClicks, moveClicks;
         /** Flying: hovering, rising higher than a jump, standing on nothing; ticks with nothing under them (0: not recorded) */
         public int hovers, rises, groundSpoofs, airTicks;
+        /** Timer: their game's ticks counted, over how long (ms), 10-second stretches looked at, those running fast */
+        public long clientTicks, clientTickMs;
+        public int tickStretches, fastStretches;
+        /** Air movement: jumps judged, those that sped up or turned in the air more than the game allows */
+        public int airJumps, airOdd;
         /** Crystal PvP: crystals hit, far / very far, looking away, before they could have seen them (of those timed), most in a second */
         public int crystalHits, farCrystalHits, veryFarCrystalHits, offAimCrystalHits, aimedCrystalHits, predictedHits, timedHits, bestCrystalSecond;
         public float maxCrystalReach;
@@ -146,8 +155,11 @@ public final class CheatChecks {
         totems(m);
         walls(m);
         inventory(m);
-        if (!f.bedrock())
+        timer(m);
+        if (!f.bedrock()) {
             flying(m);
+            airMovement(m);
+        }
         final List<Recording.Fighter> opponents = new ArrayList<>();
         for (final Recording.Fighter o : rec.fighters)
             if (o.team != f.team && o.frames > 0)
@@ -517,6 +529,86 @@ public final class CheatChecks {
                 start = -1;
             }
         }
+    }
+
+    /**
+     * Timer: their game's ticks (a 1.21.2+ client sends a packet at the end of each), counted about every second, put
+     * together into stretches of 10 seconds or more: over {@link #TIMER_RATE} a second in one is their game running fast.
+     * (Lag bunches them up and a frozen game catches up after, but over 10 seconds that evens out at 20.)
+     */
+    private static void timer(final Match m) {
+        final int me = m.rec.fighters.indexOf(m.f);
+        long n = 0, ms = 0;
+        for (final Recording.Event e : m.rec.events) {
+            if (e.fighter() != me || e.kind() != Recording.CLIENT_TICKS)
+                continue;
+            try {
+                final java.io.DataInputStream in = e.details();
+                final int ticks = in.readShort(), span = in.readShort();
+                if (span <= 0)
+                    continue;
+                m.clientTicks += ticks;
+                m.clientTickMs += span;
+                n += ticks;
+                ms += span;
+                if (ms >= 10_000) {
+                    m.tickStretches++;
+                    if (n * 1000.0 / ms > TIMER_RATE)
+                        m.fastStretches++;
+                    n = ms = 0;
+                }
+            } catch (final java.io.IOException ignored) {
+                // a short one
+            }
+        }
+    }
+
+    /**
+     * Air movement (bhop, air-strafe): in the air the game only lets their speed fall (to 91% a tick) plus a little from
+     * their keys (0.026 blocks a tick), so over a jump how they're moving at the end is bounded by how they were moving at
+     * the start. A jump that ends faster than that allows, or turns more than it allows without losing speed, isn't the
+     * game's (bumping into something only slows them). Each end is the average of three ticks, so lag bunching moves
+     * together doesn't look like a burst of speed. Only jumps with nothing pushing or helping them for 1.5 s before.
+     */
+    private static void airMovement(final Match m) {
+        final Recording.Fighter f = m.f;
+        int pushed = -1000, start = -1;
+        for (int i = 0; i <= f.frames; i++) {
+            final boolean end = i == f.frames;
+            if (!end && (f.has(i, Recording.HURT) || f.has(i, Recording.GLIDING)
+                    || f.hasMore(i, Recording.SHOT | Recording.TELEPORTED | Recording.VELOCITY | Recording.SURROUNDED | Recording.HELPED) || teleported(f, i)))
+                pushed = i;
+            final boolean air = !end && !f.has(i, Recording.GROUND) && i - pushed > 30 && (i == 0 || f.time[i] - f.time[i - 1] <= 120);
+            if (air) {
+                if (start < 0)
+                    start = i;
+            } else if (start >= 0) {
+                judgeJump(m, f, start + 1, i - 1); // (from the tick after take-off: the jump's own push is in that one)
+                start = -1;
+            }
+        }
+    }
+
+    private static void judgeJump(final Match m, final Recording.Fighter f, final int a, final int e) {
+        if (e - a + 1 < AIR_TICKS)
+            return;
+        final double[] v0 = velocity(f, a, a + 3), v1 = velocity(f, e - 3, e);
+        final double n = Math.max(1, (f.time[e - 1] - f.time[a + 1]) / 50.0); // ticks between the two
+        final double decay = Math.pow(0.91, n), bound = 0.026 * (1 - decay) / 0.09;
+        final double px = v0[0] * decay, pz = v0[1] * decay;
+        final double end = Math.hypot(v1[0], v1[1]), predicted = Math.hypot(px, pz), off = Math.hypot(v1[0] - px, v1[1] - pz);
+        final double slack = bound * 1.3 + 0.08;
+        m.airJumps++;
+        final boolean faster = end > predicted + slack;
+        final boolean turned = off > slack && end >= predicted * 0.9 && Math.hypot(v0[0], v0[1]) > 0.1;
+        if (faster || turned)
+            m.airOdd++;
+    }
+
+    /** Their sideways velocity (blocks a tick, x and z) over these frames. */
+    private static double[] velocity(final Recording.Fighter f, final int from, final int to) {
+        final double ticks = Math.max(1, Math.round((f.time[to] - f.time[from]) / 50.0));
+        return new double[]{(f.x[to] - f.x[from]) / ticks, (f.z[to] - f.z[from]) / ticks};
     }
 
     /** Whether, between these frames, they stayed {@link #HOVER_MS} or more within a block of the same height. */
@@ -1090,7 +1182,8 @@ public final class CheatChecks {
         public boolean bedrock;
         /** Totems, walls, inventory, flying: see Match */
         public int totemPops, totemRefills, fastRefills, instantClicks, wallHits, wallCrystals, wallBreaks, wallPlaces, landedHits,
-                invClicks, moveClicks, hovers, rises, groundSpoofs, airTicks;
+                invClicks, moveClicks, hovers, rises, groundSpoofs, airTicks, tickStretches, fastStretches, airJumps, airOdd;
+        public long clientTicks, clientTickMs;
         public final List<Float> refillDelays = new ArrayList<>();
         /** Spleef and crystal PvP: see Match */
         public int breaks, farBreaks, veryFarBreaks, offAimBreaks, aimedBreaks, bursts;
@@ -1161,6 +1254,12 @@ public final class CheatChecks {
                 this.rises += m.rises;
                 this.groundSpoofs += m.groundSpoofs;
                 this.airTicks += m.airTicks;
+                this.clientTicks += m.clientTicks;
+                this.clientTickMs += m.clientTickMs;
+                this.tickStretches += m.tickStretches;
+                this.fastStretches += m.fastStretches;
+                this.airJumps += m.airJumps;
+                this.airOdd += m.airOdd;
                 this.places += m.places;
                 this.farPlaces += m.farPlaces;
                 this.veryFarPlaces += m.veryFarPlaces;
@@ -1381,6 +1480,25 @@ public final class CheatChecks {
                                 + " ladders, slime) and nothing pushing them: staying up " + (HOVER_MS / 1000.0) + " s without dropping, rising more than "
                                 + RISE + " blocks, or saying they're on the ground for " + SPOOF_TICKS + " ticks. Recorded from 12 Nov on."));
             }
+            // Timer
+            if (this.tickStretches > 0 && this.clientTicks > 0) { // (a game that sends none: older versions, through ViaVersion)
+                final double rate = this.clientTicks * 1000.0 / this.clientTickMs;
+                final Verdict v = this.fastStretches >= 3 || (this.clientTickMs >= 60_000 && rate > 20.6) ? Verdict.SUSPICIOUS
+                        : this.fastStretches >= 1 ? Verdict.LOOK : Verdict.FINE;
+                lines.add(new Line("Timer", v, String.format("their game ran at %.2f ticks a second (20 is normal); %d of %d 10-second stretches over %.0f",
+                                rate, this.fastStretches, this.tickStretches, TIMER_RATE),
+                        "A game sends a packet at the end of each of its ticks: 20 a second. Lag bunches them and a frozen game catches up,"
+                                + " but over 10 seconds that evens out. More, again and again, is a timer cheat speeding the game up."));
+            }
+            // Air movement (bhop, air-strafe)
+            if (this.airJumps > 0 && !this.bedrock) {
+                final Verdict v = this.airOdd >= 5 && this.airOdd >= 0.1 * this.airJumps ? Verdict.SUSPICIOUS
+                        : this.airOdd >= 2 ? Verdict.LOOK : Verdict.FINE;
+                lines.add(new Line("Air movement", v, String.format("%d of %,d jumps sped up or turned in the air more than the game allows",
+                                this.airOdd, this.airJumps),
+                        "In the air the game only lets speed fall, plus a little from the keys: ending a jump faster than that, or turning"
+                                + " sharply without losing speed, is bhop or air-strafe (bumping into something only slows you)."));
+            }
             // Crystal PvP: popping crystals, and placing blocks
             if (this.crystalHits > 0) {
                 final double far = this.farCrystalHits / (double) this.crystalHits;
@@ -1445,7 +1563,7 @@ public final class CheatChecks {
                     + 2 * this.veryFarCrystalHits + this.farCrystalHits + this.offAimCrystalHits + 2 * this.predictedHits
                     + 2 * this.veryFarPlaces + this.farPlaces + this.offAimPlaces
                     + 5 * this.instantClicks + 2 * this.fastRefills + 2 * (this.wallHits + this.wallCrystals + this.wallBreaks + this.wallPlaces)
-                    + this.moveClicks + 3 * (this.hovers + this.rises + this.groundSpoofs);
+                    + this.moveClicks + 3 * (this.hovers + this.rises + this.groundSpoofs) + 5 * this.fastStretches + 2 * this.airOdd;
             if (this.kbRatio.size() >= 15 && median(this.kbRatio) < KB_LOW)
                 score += 10;
             return score;
@@ -1538,6 +1656,14 @@ public final class CheatChecks {
             if (m.moveClicks > 0) {
                 score += m.moveClicks;
                 why.add(m.moveClicks + " inventory click" + (m.moveClicks == 1 ? "" : "s") + " while moving");
+            }
+            if (m.fastStretches > 0) {
+                score += 5 * m.fastStretches;
+                why.add(String.format("timer: %.1f ticks/s", m.clientTicks * 1000.0 / Math.max(1, m.clientTickMs)));
+            }
+            if (m.airOdd > 0) {
+                score += 2 * m.airOdd;
+                why.add(m.airOdd + " odd jump" + (m.airOdd == 1 ? "" : "s"));
             }
             if (m.hovers + m.rises + m.groundSpoofs > 0) {
                 score += 3 * (m.hovers + m.rises + m.groundSpoofs);
