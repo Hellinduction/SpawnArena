@@ -1,4 +1,4 @@
-"""Reads SpawnArena's sumo and spleef match recordings (plugins/SpawnArena/recordings/<date>/*.sarec.gz).
+"""Reads SpawnArena's sumo, spleef and crystal match recordings (plugins/SpawnArena/recordings/<date>/*.sarec.gz).
 
 As a module:
     from sumo_recording import read
@@ -20,6 +20,10 @@ KEYS = ["forward", "back", "left", "right", "jump", "sneak", "sprint"]
 STATE = ["on_ground", "sprinting", "sneaking", "swung", "landed_hit", "was_hit"]
 # Format 2's "more" byte (the velocity and who they hit are read separately)
 MORE = ["sent_velocity", "digging", "shot", "teleported", "landed_on_fighter"]
+# Format 3's block changes, and format 4's events
+HOW = {0: "hand", 1: "snowball", 2: "placed", 3: "exploded"}
+EVENTS = {1: "equip", 2: "totem", 3: "crystal_placed", 4: "crystal_hit", 5: "crystal_gone", 6: "health"}
+SLOTS = ["main_hand", "off_hand", "feet", "legs", "chest", "head"]
 FRAME = struct.Struct(">ifffffBB")
 FRAME_2 = struct.Struct(">hB")
 
@@ -47,14 +51,14 @@ def read(path):
         raise ValueError("not a SpawnArena recording")
     r.at = 5
     version = r.take("i")
-    if version not in (1, 2, 3):
+    if version not in (1, 2, 3, 4):
         raise ValueError("unknown recording format %d" % version)
     match = {"format": version, "started": r.take("q"), "arena": r.text(), "variant": r.text() or None,
              "centre": [r.take("d"), r.take("d"), r.take("d")], "length_ms": r.take("i"),
              "duel": bool(r.take("b")), "winning_team": r.take("b"), "fighters": []}
     # Format 3: a spleef match, a free-for-all round (each fighter a team of their own)
     flags = r.take("B") if version >= 3 else 0
-    match["spleef"], match["free_for_all"] = bool(flags & 1), bool(flags & 2)
+    match["spleef"], match["free_for_all"], match["crystal"] = bool(flags & 1), bool(flags & 2), bool(flags & 4)
     for _ in range(r.take("b")):
         most, least = r.take("q"), r.take("q")
         fighter = {"uuid": str(uuid.UUID(int=((most & (2**64 - 1)) << 64) | (least & (2**64 - 1)))),
@@ -94,13 +98,33 @@ def read(path):
         for _ in range(r.take("i")):
             ms, x, y, z, by, how = r.take("iiiibb")
             match["blocks"].append({"ms": ms, "x": x, "y": y, "z": z, "by": by,
-                                    "how": "snowball" if how == 1 else "hand", "became": r.text()})
+                                    "how": HOW.get(how, how), "became": r.text()})
+    # Format 4: events (see MatchRecorder.write): equipment, totems, crystals, health
+    match["events"] = []
+    if version >= 4:
+        for _ in range(r.take("i")):
+            ms, fighter, kind, n = r.take("ibbH")
+            d = _Reader(r.data[r.at:r.at + n])
+            r.at += n
+            event = {"ms": ms, "fighter": fighter, "kind": EVENTS.get(kind, kind)}
+            if kind == 1:
+                event.update({"slot": SLOTS[d.take("b")], "item": d.text(), "enchanted": bool(d.take("b"))})
+            elif kind == 3:
+                event.update({"crystal": d.take("i"), "x": d.take("f"), "y": d.take("f"), "z": d.take("f")})
+            elif kind in (4, 5):
+                event["crystal"] = d.take("i")
+            elif kind == 6:
+                event["health"] = d.take("f")
+            match["events"].append(event)
     return match
 
 
 def summary(match):
-    out = {k: v for k, v in match.items() if k not in ("fighters", "blocks")}
+    out = {k: v for k, v in match.items() if k not in ("fighters", "blocks", "events")}
     out["blocks"] = len(match.get("blocks", []))
+    out["events"] = {}
+    for e in match.get("events", []):
+        out["events"][e["kind"]] = out["events"].get(e["kind"], 0) + 1
     out["format"] = match.get("format", 1)
     out["winners"] = [f["name"] for f in match["fighters"] if f["won"]]
     out["fighters"] = []
@@ -114,6 +138,12 @@ def summary(match):
         me = match["fighters"].index(f)
         s["broke_by_hand"] = sum(1 for b in match.get("blocks", []) if b["by"] == me and b["how"] == "hand")
         s["broke_by_snowball"] = sum(1 for b in match.get("blocks", []) if b["by"] == me and b["how"] == "snowball")
+        s["placed_blocks"] = sum(1 for b in match.get("blocks", []) if b["by"] == me and b["how"] == "placed")
+        mine = [e for e in match.get("events", []) if e["fighter"] == me]
+        for kind in ("crystal_placed", "crystal_hit", "totem", "equip", "health"):
+            s[kind] = sum(1 for e in mine if e["kind"] == kind)
+        s["held"] = sorted({e["item"] for e in mine if e["kind"] == "equip" and e["slot"] == "main_hand"})
+        s["wore"] = sorted({e["item"] for e in mine if e["kind"] == "equip" and e["slot"] in ("feet", "legs", "chest", "head", "off_hand") and e["item"] != "minecraft:air"})
         out["fighters"].append(s)
     return out
 

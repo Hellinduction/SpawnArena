@@ -541,18 +541,19 @@ public final class CrystalView implements Listener {
             this.viewersNow = Set.copyOf(now);
         }
 
+        /** Those near the viewing arena, but not anyone watching a replay of a match here (it shows them that match instead). */
         private List<CrystalViewPlayers.Seen> viewersIn(final World world) {
             final int range = SpawnArena.settings == null ? 96 : SpawnArena.settings.crystalViewDistance;
             final List<CrystalViewPlayers.Seen> out = new ArrayList<>();
             if (!Threads.FOLIA) {
                 for (final Player player : world.getPlayers())
-                    if (this.real.distanceFrom(player.getLocation()) <= range)
+                    if (this.real.distanceFrom(player.getLocation()) <= range && !ArenaReplay.watchingIn(player, this.real))
                         out.add(CrystalViewPlayers.Seen.live(player));
                 return out;
             }
             for (final Player player : org.bukkit.Bukkit.getOnlinePlayers()) {
                 final CrystalViewPlayers.Seen seen = seen(player);
-                if (seen != null && world.equals(seen.world()) && this.real.distanceFrom(seen.at()) <= range)
+                if (seen != null && world.equals(seen.world()) && this.real.distanceFrom(seen.at()) <= range && !ArenaReplay.watchingIn(player, this.real))
                     out.add(seen);
             }
             return out;

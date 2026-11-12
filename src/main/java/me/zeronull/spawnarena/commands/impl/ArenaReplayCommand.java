@@ -103,7 +103,7 @@ public final class ArenaReplayCommand implements CommandExecutor, TabCompleter {
         Threads.async(() -> {
             final List<Recording> theirs = matchesOf(args[0], n);
             if (theirs.size() < n) {
-                tell(player, theirs.isEmpty() ? "<red>No recorded matches for " + esc(args[0]) + ". <gray>(Only sumo and spleef matches between players are recorded.)"
+                tell(player, theirs.isEmpty() ? "<red>No recorded matches for " + esc(args[0]) + ". <gray>(Only sumo, spleef and crystal matches between players are recorded.)"
                         : "<red>" + esc(args[0]) + " only has " + theirs.size() + " recorded match" + (theirs.size() == 1 ? "" : "es") + ".");
                 return;
             }

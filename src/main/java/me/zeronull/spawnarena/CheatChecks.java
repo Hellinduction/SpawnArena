@@ -52,6 +52,12 @@ public final class CheatChecks {
     static final double OFF_AIM_BREAK = 30;
     /** Spleef: this many blocks broken by hand within one tick is more than a vanilla client can. */
     static final int BURST_BREAKS = 3;
+    /** Crystal PvP: a crystal hit this far (from the eyes to the nearest part of it) or further is far / very far. */
+    static final double FAR_CRYSTAL = 3.5, VERY_FAR_CRYSTAL = 4.0;
+    /** A crystal hit sooner after it appeared than this share of their ping: before they could have seen it. */
+    static final double PREDICTED_SHARE = 0.6;
+    /** ...only counted with a ping of at least this (ms): below it, timing says nothing. */
+    static final int PREDICTED_MIN_PING = 40;
     /** What's left of sideways speed after each tick in the air */
     private static final double AIR = 0.91;
 
@@ -83,6 +89,12 @@ public final class CheatChecks {
         /** Spleef: blocks broken by hand, those far / very far away, those broken looking away, bursts in one tick */
         public int breaks, farBreaks, veryFarBreaks, offAimBreaks, aimedBreaks, bursts;
         public float maxBreakReach;
+        /** Crystal PvP: blocks placed, the same way */
+        public int places, farPlaces, veryFarPlaces, offAimPlaces, aimedPlaces;
+        public float maxPlaceReach;
+        /** Crystal PvP: crystals hit, far / very far, looking away, before they could have seen them (of those timed), most in a second */
+        public int crystalHits, farCrystalHits, veryFarCrystalHits, offAimCrystalHits, aimedCrystalHits, predictedHits, timedHits, bestCrystalSecond;
+        public float maxCrystalReach;
 
         Match(final Recording rec, final Recording.Fighter f) {
             this.rec = rec;
@@ -110,6 +122,20 @@ public final class CheatChecks {
             if (o.team != f.team && o.frames > 0)
                 opponents.add(o);
         final SumoVariant v = m.variant;
+        if (rec.crystal) {
+            // Crystal PvP: their sword hits' reach, how they turned, sprinted and moved, and how they placed, broke and popped
+            // (knockback, aim, clicking and the bot signs are sumo's: explosions and crystals throw them off)
+            if (!opponents.isEmpty())
+                reach(m, opponents);
+            breaking(m);
+            crystals(m);
+            if (!f.bedrock()) {
+                rotation(m);
+                sprintBack(m);
+            }
+            speed(m);
+            return m;
+        }
         if (rec.spleef) {
             // No hits in spleef (only snowballs): how they broke the floor, how they turned, sprinted and moved
             breaking(m);
@@ -164,10 +190,15 @@ public final class CheatChecks {
                 oz = Math.floor(m.rec.centreZ) - m.rec.centreZ;
         final List<Integer> times = new ArrayList<>();
         for (final Recording.BlockChange b : m.rec.blocks) {
-            if (b.by() != me || b.how() != Recording.BY_HAND)
+            if (b.by() != me || (b.how() != Recording.BY_HAND && b.how() != Recording.PLACED))
                 continue;
-            times.add(b.ms());
-            m.breaks++;
+            final boolean placed = b.how() == Recording.PLACED;
+            if (placed)
+                m.places++;
+            else {
+                times.add(b.ms());
+                m.breaks++;
+            }
             int i = Arrays.binarySearch(f.time, b.ms());
             if (i < 0)
                 i = -i - 2;
@@ -191,6 +222,19 @@ public final class CheatChecks {
                 final double angle = Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, (lx * cx + ly * cy + lz * cz) / dist))));
                 aim = Math.min(aim, Math.max(0, angle - Math.toDegrees(Math.asin(Math.min(1, 0.87 / dist)))));
             }
+            if (placed) {
+                m.maxPlaceReach = Math.max(m.maxPlaceReach, (float) best);
+                if (best >= FAR_BREAK)
+                    m.farPlaces++;
+                if (best >= VERY_FAR_BREAK)
+                    m.veryFarPlaces++;
+                if (!f.bedrock()) {
+                    m.aimedPlaces++;
+                    if (aim > OFF_AIM_BREAK)
+                        m.offAimPlaces++;
+                }
+                continue;
+            }
             m.maxBreakReach = Math.max(m.maxBreakReach, (float) best);
             if (best >= FAR_BREAK)
                 m.farBreaks++;
@@ -208,6 +252,78 @@ public final class CheatChecks {
                 m.bursts++;
                 a += BURST_BREAKS - 1;
             }
+    }
+
+    /**
+     * Crystal PvP: each crystal they hit: how far from their eyes its nearest part was and how far off they were looking
+     * from it (the best of that tick and those either side), whether it was sooner after it appeared than they could have
+     * seen it (a share of their ping: id-predicting autocrystals hit crystals the moment they're placed), and the most they
+     * hit in any second.
+     */
+    private static void crystals(final Match m) {
+        final Recording.Fighter f = m.f;
+        final int me = m.rec.fighters.indexOf(f);
+        final Map<Integer, Recording.Crystal> byId = new java.util.HashMap<>();
+        for (final Recording.Crystal c : m.rec.crystals())
+            byId.put(c.id(), c);
+        final List<Integer> times = new ArrayList<>();
+        for (final Recording.Event e : m.rec.events) {
+            if (e.kind() != Recording.CRYSTAL_HIT || e.fighter() != me)
+                continue;
+            final Recording.Crystal c;
+            try {
+                c = byId.get(e.details().readInt());
+            } catch (final java.io.IOException ex) {
+                continue;
+            }
+            if (c == null)
+                continue;
+            m.crystalHits++;
+            times.add(e.ms());
+            int i = Arrays.binarySearch(f.time, e.ms());
+            if (i < 0)
+                i = -i - 2;
+            i = Math.max(0, Math.min(i, f.frames - 1));
+            double best = Double.MAX_VALUE, aim = Double.MAX_VALUE;
+            for (int j = Math.max(0, i - 1); j <= Math.min(f.frames - 1, i + 1); j++) {
+                final double ex = f.x[j], ey = f.y[j] + eyeHeight(f, j), ez = f.z[j];
+                final double nx = Math.max(c.x() - 1, Math.min(ex, c.x() + 1)) - ex, ny = Math.max(c.y(), Math.min(ey, c.y() + 2)) - ey,
+                        nz = Math.max(c.z() - 1, Math.min(ez, c.z() + 1)) - ez;
+                best = Math.min(best, Math.sqrt(nx * nx + ny * ny + nz * nz));
+                final double cx = c.x() - ex, cy = c.y() + 1 - ey, cz = c.z() - ez;
+                final double dist = Math.sqrt(cx * cx + cy * cy + cz * cz);
+                if (dist < 1.8) {
+                    aim = 0;
+                    continue;
+                }
+                final double yaw = Math.toRadians(f.yaw[j]), pitch = Math.toRadians(f.pitch[j]);
+                final double lx = -Math.sin(yaw) * Math.cos(pitch), ly = -Math.sin(pitch), lz = Math.cos(yaw) * Math.cos(pitch);
+                final double angle = Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, (lx * cx + ly * cy + lz * cz) / dist))));
+                aim = Math.min(aim, Math.max(0, angle - Math.toDegrees(Math.asin(Math.min(1, 1.73 / dist)))));
+            }
+            m.maxCrystalReach = Math.max(m.maxCrystalReach, (float) best);
+            if (best >= FAR_CRYSTAL)
+                m.farCrystalHits++;
+            if (best >= VERY_FAR_CRYSTAL)
+                m.veryFarCrystalHits++;
+            if (!f.bedrock()) {
+                m.aimedCrystalHits++;
+                if (aim > OFF_AIM_BREAK)
+                    m.offAimCrystalHits++;
+            }
+            final int ping = f.ping[i];
+            if (ping >= PREDICTED_MIN_PING) {
+                m.timedHits++;
+                if (e.ms() - c.placedMs() < ping * PREDICTED_SHARE)
+                    m.predictedHits++;
+            }
+        }
+        java.util.Collections.sort(times);
+        for (int a = 0, b = 0; b < times.size(); b++) {
+            while (times.get(b) - times.get(a) >= 1000)
+                a++;
+            m.bestCrystalSecond = Math.max(m.bestCrystalSecond, b - a + 1);
+        }
     }
 
     /** From an eye to the nearest point of a player's box (0.6 wide, 1.8 high) standing at (x, y, z). */
@@ -687,9 +803,13 @@ public final class CheatChecks {
         public int botLike, botChecked;
         public float topSpeed, maxReach;
         public boolean bedrock;
-        /** Spleef: see Match */
+        /** Spleef and crystal PvP: see Match */
         public int breaks, farBreaks, veryFarBreaks, offAimBreaks, aimedBreaks, bursts;
         public float maxBreakReach;
+        public int places, farPlaces, veryFarPlaces, offAimPlaces, aimedPlaces;
+        public float maxPlaceReach;
+        public int crystalHits, farCrystalHits, veryFarCrystalHits, offAimCrystalHits, aimedCrystalHits, predictedHits, timedHits, bestCrystalSecond;
+        public float maxCrystalReach;
 
         public Summary(final List<Match> matches, final Baseline baseline) {
             this.matches = matches;
@@ -735,6 +855,21 @@ public final class CheatChecks {
                 this.aimedBreaks += m.aimedBreaks;
                 this.bursts += m.bursts;
                 this.maxBreakReach = Math.max(this.maxBreakReach, m.maxBreakReach);
+                this.places += m.places;
+                this.farPlaces += m.farPlaces;
+                this.veryFarPlaces += m.veryFarPlaces;
+                this.offAimPlaces += m.offAimPlaces;
+                this.aimedPlaces += m.aimedPlaces;
+                this.maxPlaceReach = Math.max(this.maxPlaceReach, m.maxPlaceReach);
+                this.crystalHits += m.crystalHits;
+                this.farCrystalHits += m.farCrystalHits;
+                this.veryFarCrystalHits += m.veryFarCrystalHits;
+                this.offAimCrystalHits += m.offAimCrystalHits;
+                this.aimedCrystalHits += m.aimedCrystalHits;
+                this.predictedHits += m.predictedHits;
+                this.timedHits += m.timedHits;
+                this.bestCrystalSecond = Math.max(this.bestCrystalSecond, m.bestCrystalSecond);
+                this.maxCrystalReach = Math.max(this.maxCrystalReach, m.maxCrystalReach);
             }
         }
 
@@ -888,6 +1023,50 @@ public final class CheatChecks {
                                 this.bursts == 1 ? "" : "s", BURST_BREAKS),
                         "Spleef: a vanilla client breaks at most one block a tick (lag can bunch two together)."));
             }
+            // Crystal PvP: popping crystals, and placing blocks
+            if (this.crystalHits > 0) {
+                final double far = this.farCrystalHits / (double) this.crystalHits;
+                lines.add(new Line("Crystal reach", this.veryFarCrystalHits >= 2 || (this.farCrystalHits >= 5 && far >= 0.02) ? Verdict.SUSPICIOUS
+                        : this.farCrystalHits >= 2 ? Verdict.LOOK : Verdict.FINE,
+                        String.format("%,d crystals hit, furthest %.1f blocks, %d at %.1f+ (%d at %.1f+)", this.crystalHits, this.maxCrystalReach,
+                                this.farCrystalHits, FAR_CRYSTAL, this.veryFarCrystalHits, VERY_FAR_CRYSTAL),
+                        "From their eyes to the nearest part of each crystal as they hit it. Survival reach is 3 blocks; lag adds a"
+                                + " little, not half a block and more."));
+                if (this.aimedCrystalHits > 0) {
+                    final double off = this.offAimCrystalHits / (double) this.aimedCrystalHits;
+                    lines.add(new Line("Crystal aim", this.offAimCrystalHits >= 5 && off >= 0.05 ? Verdict.SUSPICIOUS
+                            : this.offAimCrystalHits >= 2 ? Verdict.LOOK : Verdict.FINE,
+                            String.format("%d of %,d hit while looking %.0f°+ away from the crystal", this.offAimCrystalHits, this.aimedCrystalHits, OFF_AIM_BREAK),
+                            "A crystal can only be hit by looking at it. Hitting ones they aren't looking at is what auto-crystal does"
+                                    + " (most turn the view as well, so this catches only some)."));
+                }
+                if (this.timedHits > 0) {
+                    final double share = this.predictedHits / (double) this.timedHits;
+                    lines.add(new Line("Crystal timing", this.predictedHits >= 10 && share >= 0.1 ? Verdict.SUSPICIOUS
+                            : this.predictedHits >= 3 ? Verdict.LOOK : Verdict.FINE,
+                            String.format("%d of %,d hit before they could have seen them; most in a second %d", this.predictedHits, this.timedHits,
+                                    this.bestCrystalSecond),
+                            "A crystal can't be seen until the server's word of it reaches them, and their hit takes as long to come back:"
+                                    + " about their ping. Hitting it sooner means hitting it before it showed, which is what auto-crystals that"
+                                    + " guess a new crystal's number do. Only counted with a ping of " + PREDICTED_MIN_PING + " ms or more."));
+                } else
+                    lines.add(new Line("Crystal timing", Verdict.INFO, String.format("most crystals hit in a second: %d (ping too low to time them)",
+                            this.bestCrystalSecond), ""));
+            }
+            if (this.places > 0) {
+                final double far = this.farPlaces / (double) this.places;
+                lines.add(new Line("Place reach", this.veryFarPlaces >= 2 || (this.farPlaces >= 5 && far >= 0.02) ? Verdict.SUSPICIOUS
+                        : this.farPlaces >= 2 ? Verdict.LOOK : Verdict.FINE,
+                        String.format("%,d blocks placed, furthest %.1f blocks, %d at %.0f+ (%d at %.0f+)", this.places, this.maxPlaceReach,
+                                this.farPlaces, FAR_BREAK, this.veryFarPlaces, VERY_FAR_BREAK),
+                        "From their eyes to the nearest part of each block they placed. Survival reach is 4.5 blocks."));
+                if (this.aimedPlaces > 0)
+                    lines.add(new Line("Place aim", this.offAimPlaces >= 5 && this.offAimPlaces / (double) this.aimedPlaces >= 0.05 ? Verdict.SUSPICIOUS
+                            : this.offAimPlaces >= 2 ? Verdict.LOOK : Verdict.FINE,
+                            String.format("%d of %,d placed while looking %.0f°+ away from the block", this.offAimPlaces, this.aimedPlaces, OFF_AIM_BREAK),
+                            "A block goes against the one they're looking at. Placing blocks they aren't looking at is what scaffold and"
+                                    + " surround cheats do."));
+            }
             if (this.kbHits >= 30)
                 lines.add(new Line("Jump resets", Verdict.INFO, String.format("jumped as knockback came %d%% of the time", Math.round(100.0 * this.jumpResets / this.kbHits))
                                 + among(JUMP_RESETS, this.jumpResets / (double) this.kbHits, true, "more", "less"),
@@ -904,7 +1083,9 @@ public final class CheatChecks {
             for (final Line l : this.lines())
                 score += l.verdict() == Verdict.SUSPICIOUS ? 100 : l.verdict() == Verdict.LOOK ? 20 : 0;
             score += 3 * this.botLike + 2 * this.veryLongHits + this.longHits + 2 * this.rotationOff + this.sprintBackTicks / 10 + 2 * this.tooFast
-                    + 2 * this.veryFarBreaks + this.farBreaks + this.offAimBreaks + 3 * this.bursts;
+                    + 2 * this.veryFarBreaks + this.farBreaks + this.offAimBreaks + 3 * this.bursts
+                    + 2 * this.veryFarCrystalHits + this.farCrystalHits + this.offAimCrystalHits + 2 * this.predictedHits
+                    + 2 * this.veryFarPlaces + this.farPlaces + this.offAimPlaces;
             if (this.kbRatio.size() >= 15 && median(this.kbRatio) < KB_LOW)
                 score += 10;
             return score;
@@ -972,6 +1153,26 @@ public final class CheatChecks {
             if (m.bursts > 0) {
                 score += 3 * m.bursts;
                 why.add(m.bursts + "x " + BURST_BREAKS + "+ blocks in a tick");
+            }
+            if (m.farCrystalHits > 0) {
+                score += m.farCrystalHits + 2 * m.veryFarCrystalHits;
+                why.add(String.format("%d crystal%s hit far away (up to %.1f)", m.farCrystalHits, m.farCrystalHits == 1 ? "" : "s", m.maxCrystalReach));
+            }
+            if (m.offAimCrystalHits > 0) {
+                score += m.offAimCrystalHits;
+                why.add(m.offAimCrystalHits + " crystal" + (m.offAimCrystalHits == 1 ? "" : "s") + " hit looking away");
+            }
+            if (m.predictedHits > 0) {
+                score += 2 * m.predictedHits;
+                why.add(m.predictedHits + " crystal" + (m.predictedHits == 1 ? "" : "s") + " hit before they could see it");
+            }
+            if (m.farPlaces > 0) {
+                score += m.farPlaces + 2 * m.veryFarPlaces;
+                why.add(String.format("%d block%s placed far away (up to %.1f)", m.farPlaces, m.farPlaces == 1 ? "" : "s", m.maxPlaceReach));
+            }
+            if (m.offAimPlaces > 0) {
+                score += m.offAimPlaces;
+                why.add(m.offAimPlaces + " placed looking away");
             }
             return Map.entry(score, String.join(", ", why));
         }

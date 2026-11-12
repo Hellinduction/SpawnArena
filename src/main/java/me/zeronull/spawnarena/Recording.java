@@ -25,8 +25,8 @@ public final class Recording {
     public final int lengthMs;
     public final boolean duel;
     public final List<Fighter> fighters;
-    /** Format 3: a spleef match; a free-for-all round (each fighter a team of their own) */
-    public final boolean spleef, freeForAll;
+    /** Format 3: a spleef match; a free-for-all round (each fighter a team of their own); format 4: crystal PvP */
+    public final boolean spleef, freeForAll, crystal;
     /** The centre positions are from (the middle of the two spawn points), as it was then */
     public final double centreX, centreY, centreZ;
     /** Format 3: blocks changed during the match, in order (empty unless frames were read) */
@@ -38,7 +38,45 @@ public final class Recording {
      */
     public record BlockChange(int ms, int x, int y, int z, int by, int how, String data) {}
 
-    public static final int BY_HAND = 0, BY_SNOWBALL = 1;
+    public static final int BY_HAND = 0, BY_SNOWBALL = 1, PLACED = 2, EXPLODED = 3;
+
+    /** Format 4: what happened during the match besides moving (see MatchRecorder#write), in order (empty unless frames were read) */
+    public final List<Event> events = new ArrayList<>();
+
+    /** An event: when (ms since the start), which fighter (their place in the list, -1 none), what kind, its details. */
+    public record Event(int ms, int fighter, int kind, byte[] data) {
+        public DataInputStream details() {
+            return new DataInputStream(new java.io.ByteArrayInputStream(this.data));
+        }
+    }
+
+    /** Event kinds */
+    public static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6;
+
+    /** A crystal placed during the match: its entity id, where (from the centre), who placed it (-1 not known), when it went. */
+    public record Crystal(int id, float x, float y, float z, int placedBy, int placedMs, int goneMs) {}
+
+    /** The crystals placed during the match, from the events (gone: Integer.MAX_VALUE if it lasted to the end). */
+    public List<Crystal> crystals() {
+        final java.util.Map<Integer, Crystal> byId = new java.util.LinkedHashMap<>();
+        final List<Crystal> all = new ArrayList<>();
+        for (final Event e : this.events)
+            try {
+                if (e.kind() == CRYSTAL_PLACED) {
+                    final DataInputStream in = e.details();
+                    final Crystal c = new Crystal(in.readInt(), in.readFloat(), in.readFloat(), in.readFloat(), e.fighter(), e.ms(), Integer.MAX_VALUE);
+                    byId.put(c.id(), c);
+                    all.add(c);
+                } else if (e.kind() == CRYSTAL_GONE) {
+                    final Crystal c = byId.remove(e.details().readInt());
+                    if (c != null)
+                        all.set(all.indexOf(c), new Crystal(c.id(), c.x(), c.y(), c.z(), c.placedBy(), c.placedMs(), e.ms()));
+                }
+            } catch (final IOException ignored) {
+                // a short one: skipped
+            }
+        return all;
+    }
 
     /** One fighter: who, and (unless only the header was read) their frames, a tick each. */
     public static final class Fighter {
@@ -98,6 +136,7 @@ public final class Recording {
         this.fighters = fighters;
         this.spleef = (flags & 1) != 0;
         this.freeForAll = (flags & 2) != 0;
+        this.crystal = (flags & 4) != 0;
         this.centreX = centre[0];
         this.centreY = centre[1];
         this.centreZ = centre[2];
@@ -119,7 +158,7 @@ public final class Recording {
             if (!"SAREC".equals(new String(magic, java.nio.charset.StandardCharsets.US_ASCII)))
                 throw new IOException("not a recording");
             final int format = in.readInt();
-            if (format < 1 || format > 3)
+            if (format < 1 || format > 4)
                 throw new IOException("unknown format " + format);
             final long started = in.readLong();
             final String arena = in.readUTF();
@@ -164,6 +203,17 @@ public final class Recording {
                     throw new IOException("bad block count " + n);
                 for (int i = 0; i < n; i++)
                     rec.blocks.add(new BlockChange(in.readInt(), in.readInt(), in.readInt(), in.readInt(), in.readByte(), in.readByte(), in.readUTF()));
+            }
+            if (format >= 4) {
+                final int n = in.readInt();
+                if (n < 0 || n > 1_000_000)
+                    throw new IOException("bad event count " + n);
+                for (int i = 0; i < n; i++) {
+                    final int ms = in.readInt(), fighter = in.readByte(), kind = in.readByte();
+                    final byte[] data = new byte[in.readUnsignedShort()];
+                    in.readFully(data);
+                    rec.events.add(new Event(ms, fighter, kind, data));
+                }
             }
             return rec;
         } catch (final EOFException e) {
@@ -225,6 +275,7 @@ public final class Recording {
     /** Lets go of every fighter's frames (once analysed), keeping who fought: thousands can then be held at once. */
     public void dropFrames() {
         this.blocks.clear();
+        this.events.clear();
         for (final Fighter f : this.fighters) {
             f.time = null;
             f.x = f.y = f.z = f.yaw = f.pitch = null;

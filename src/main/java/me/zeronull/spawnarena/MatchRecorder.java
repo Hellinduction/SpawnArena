@@ -38,19 +38,24 @@ import java.util.zip.GZIPOutputStream;
  * matches by later. A finished match (a winner, not a draw) is saved, compressed, to
  * recordings/&lt;date&gt;/ in the plugin's folder (about 10 KB for a 30-second 1v1); past recordingMaxMb, the oldest go.
  * Bot matches aren't recorded. Spleef: every floor block broken too, when, by whom and how (to be shown in replays and
- * checked). The format: see {@link #write}.
+ * checked). Crystal PvP too: blocks placed, broken and blown up, crystals placed, hit and gone, totems popped, and each
+ * fighter's health and what they wear and hold as it changes. The format: see {@link #write}.
  */
 public final class MatchRecorder implements Listener {
-    private static final int FORMAT = 3;
+    private static final int FORMAT = 4;
+    /** The most events kept for one match (a long crystal match: a few thousand) */
+    private static final int MAX_EVENTS = 50_000;
     /** The most block changes kept for one match (a long spleef free-for-all breaks a few hundred) */
     private static final int MAX_BLOCKS = 20_000;
-    /** Header flags (format 3): a spleef match; a free-for-all round (each fighter on a team of their own) */
-    static final int SPLEEF = 1, FREE_FOR_ALL = 2;
+    /** Header flags (format 3): a spleef match; a free-for-all round (each fighter on a team of their own); (format 4) crystal PvP */
+    static final int SPLEEF = 1, FREE_FOR_ALL = 2, CRYSTAL = 4;
     /** The longest it records a match for (ten minutes); after that it stops taking frames */
     private static final int MAX_FRAMES = 20 * 60 * 10;
     private static final Map<Fight, MatchRecorder> RECORDING = new ConcurrentHashMap<>();
     /** Fighter -> their match's recording (for swings and hits) */
     private static final Map<UUID, MatchRecorder> OF = new ConcurrentHashMap<>();
+    /** Crystal PvP: a crystal placed in a recorded match -> that recording */
+    private static final Map<UUID, MatchRecorder> CRYSTALS = new ConcurrentHashMap<>();
 
     private final Fight fight;
     private final long startedAt = System.currentTimeMillis();
@@ -63,8 +68,38 @@ public final class MatchRecorder implements Listener {
     /** A block changed: when (ms since the start), where (from the centre's block), by which fighter (-1: none), how, to what. */
     private record BlockChange(int ms, int x, int y, int z, int by, int how, String data) {}
 
-    /** How a block was changed: broken by hand, or by a snowball landing on it */
-    static final int BY_HAND = 0, BY_SNOWBALL = 1;
+    /** How a block was changed: broken by hand, by a snowball landing on it, placed (by hand), blown up */
+    static final int BY_HAND = 0, BY_SNOWBALL = 1, PLACED = 2, EXPLODED = 3;
+
+    /** Something that happened to a fighter (or that they did): when, which fighter (-1: none), what, and its details. */
+    private record Event(int ms, int fighter, int kind, byte[] data) {}
+    private final List<Event> events = new ArrayList<>();
+
+    /** Event kinds: see {@link #write} */
+    static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6;
+    /** The equipment slots EQUIP numbers (0 to 5) */
+    private static final org.bukkit.inventory.EquipmentSlot[] GEAR = {org.bukkit.inventory.EquipmentSlot.HAND,
+            org.bukkit.inventory.EquipmentSlot.OFF_HAND, org.bukkit.inventory.EquipmentSlot.FEET, org.bukkit.inventory.EquipmentSlot.LEGS,
+            org.bukkit.inventory.EquipmentSlot.CHEST, org.bukkit.inventory.EquipmentSlot.HEAD};
+
+    private interface Details {
+        void write(DataOutputStream out) throws IOException;
+    }
+
+    /** Keeps an event (any thread). */
+    private void event(final int fighter, final int kind, final Details details) {
+        final ByteArrayOutputStream bytes = new ByteArrayOutputStream(16);
+        try {
+            details.write(new DataOutputStream(bytes));
+        } catch (final IOException ignored) {
+            // (in memory: can't happen)
+        }
+        final Event e = new Event((int) (System.currentTimeMillis() - this.startedAt), fighter, kind, bytes.toByteArray());
+        synchronized (this.events) {
+            if (this.events.size() < MAX_EVENTS)
+                this.events.add(e);
+        }
+    }
 
     /** One fighter's frames. */
     private static final class Track {
@@ -92,6 +127,9 @@ public final class MatchRecorder implements Listener {
         /** Which fighter (their place in the recording) they last landed a hit on since the last frame, or -1 */
         volatile int landedOn = -1;
         volatile ScheduledTask task;
+        /** What they wore and held as last recorded (type, "*" if enchanted), and their health (and absorption) */
+        final String[] gear = new String[6];
+        float health = -1;
 
         Track(final Player player, final int team) {
             this.player = player;
@@ -120,7 +158,7 @@ public final class MatchRecorder implements Listener {
     /** A fight has just gone live: a sumo or spleef match (or spleef free-for-all round) between players is recorded. */
     static void start(final Fight fight) {
         final Arena arena = fight.getArena();
-        if (!enabled() || fight.withBots() || !(arena.isDeathOnTouchLiquid() || arena.isSpleef()) || arena.isFfa())
+        if (!enabled() || fight.withBots() || !(arena.isDeathOnTouchLiquid() || arena.isSpleef() || arena.isCrystalPvp()) || arena.isFfa())
             return;
         final Location a = arena.spawnPoint1, b = arena.spawnPoint2;
         if (a == null || b == null)
@@ -168,13 +206,47 @@ public final class MatchRecorder implements Listener {
         if (rec == null)
             return;
         final Track t = by == null ? null : rec.track(by);
-        final int ms = (int) (System.currentTimeMillis() - rec.startedAt);
-        final BlockChange change = new BlockChange(ms, block.getX() - (int) Math.floor(rec.centre.getX()),
-                block.getY() - (int) Math.floor(rec.centre.getY()), block.getZ() - (int) Math.floor(rec.centre.getZ()),
-                t == null ? -1 : rec.tracks.indexOf(t), how, now.getAsString());
-        synchronized (rec.blocks) {
-            if (rec.blocks.size() < MAX_BLOCKS)
-                rec.blocks.add(change);
+        rec.block(block, t == null ? -1 : rec.tracks.indexOf(t), how, now.getAsString());
+    }
+
+    /** Crystal PvP: a crystal placed in this fight's arena, by {@code by} (null: not known). Any thread. */
+    public static void crystalPlaced(final Fight fight, final org.bukkit.entity.Entity crystal, final Player by) {
+        final MatchRecorder rec = fight == null ? null : RECORDING.get(fight);
+        if (rec == null)
+            return;
+        final Track t = by == null ? null : rec.track(by);
+        CRYSTALS.put(crystal.getUniqueId(), rec);
+        final Location at = crystal.getLocation();
+        final int id = crystal.getEntityId();
+        rec.event(t == null ? -1 : rec.tracks.indexOf(t), CRYSTAL_PLACED, out -> {
+            out.writeInt(id);
+            out.writeFloat((float) (at.getX() - rec.centre.getX()));
+            out.writeFloat((float) (at.getY() - rec.centre.getY()));
+            out.writeFloat((float) (at.getZ() - rec.centre.getZ()));
+        });
+    }
+
+    /** The recording of a crystal match whose arena this is in, or null. */
+    private static MatchRecorder crystalMatchAt(final Location at) {
+        if (RECORDING.isEmpty())
+            return null;
+        final Arena arena = CrystalPvp.arenaAt(at);
+        if (arena == null)
+            return null;
+        for (final MatchRecorder rec : RECORDING.values())
+            if (rec.fight.getArena().equals(arena))
+                return rec;
+        return null;
+    }
+
+    /** A block changed in a recorded match (see {@link #blockChanged}), from inside this class. */
+    private void block(final org.bukkit.block.Block block, final int by, final int how, final String data) {
+        final BlockChange change = new BlockChange((int) (System.currentTimeMillis() - this.startedAt),
+                block.getX() - (int) Math.floor(this.centre.getX()), block.getY() - (int) Math.floor(this.centre.getY()),
+                block.getZ() - (int) Math.floor(this.centre.getZ()), by, how, data);
+        synchronized (this.blocks) {
+            if (this.blocks.size() < MAX_BLOCKS)
+                this.blocks.add(change);
         }
     }
 
@@ -196,6 +268,7 @@ public final class MatchRecorder implements Listener {
                 task.cancel();
             OF.remove(t.player.getUniqueId(), rec);
         }
+        CRYSTALS.values().removeIf(r -> r == rec);
         if (rec.winners == null || !SpawnArena.INSTANCE.isEnabled())
             return; // a draw, or the server's stopping: nothing to learn from
         Threads.async(rec::save);
@@ -207,6 +280,29 @@ public final class MatchRecorder implements Listener {
         if (!p.isOnline() || t.frames >= MAX_FRAMES || this.fight.getState() != FightState.IN_FIGHT)
             return;
         final Location at = p.getLocation();
+        // What they wear and hold, and their health, as it changes (the first frame: all of it)
+        final int me = this.tracks.indexOf(t);
+        final org.bukkit.inventory.EntityEquipment equipment = p.getEquipment();
+        for (int s = 0; s < GEAR.length; s++) {
+            final org.bukkit.inventory.ItemStack item = equipment.getItem(GEAR[s]);
+            final boolean enchanted = !item.getEnchantments().isEmpty();
+            final String key = item.getType().name() + (enchanted ? "*" : "");
+            if (!key.equals(t.gear[s])) {
+                t.gear[s] = key;
+                final int slot = s;
+                final String type = item.getType().getKey().toString();
+                this.event(me, EQUIP, out -> {
+                    out.writeByte(slot);
+                    out.writeUTF(type);
+                    out.writeByte(enchanted ? 1 : 0);
+                });
+            }
+        }
+        final float health = (float) (p.getHealth() + p.getAbsorptionAmount());
+        if (health != t.health) {
+            t.health = health;
+            this.event(me, HEALTH, out -> out.writeFloat(health));
+        }
         final Input input = p.getCurrentInput();
         int keys = 0;
         if (input.isForward()) keys |= 1;
@@ -283,6 +379,19 @@ public final class MatchRecorder implements Listener {
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
     public void onHit(final EntityDamageByEntityEvent e) {
+        // A crystal from a recorded match hit (popped): by which fighter, by hand or with something they shot
+        if (e.getEntity() instanceof org.bukkit.entity.EnderCrystal crystal) {
+            final MatchRecorder rec = CRYSTALS.get(crystal.getUniqueId());
+            Player by = e.getDamager() instanceof Player p ? p : null;
+            if (by == null && e.getDamager() instanceof org.bukkit.entity.Projectile projectile && projectile.getShooter() instanceof Player p)
+                by = p;
+            final Track t = rec == null || by == null ? null : rec.track(by);
+            if (t != null) {
+                final int id = crystal.getEntityId();
+                rec.event(rec.tracks.indexOf(t), CRYSTAL_HIT, out -> out.writeInt(id));
+            }
+            return;
+        }
         if (!(e.getEntity() instanceof Player victim))
             return;
         final MatchRecorder rec = OF.get(victim.getUniqueId());
@@ -353,6 +462,78 @@ public final class MatchRecorder implements Listener {
             t.teleported = true;
     }
 
+    // ── Crystal PvP: totems, crystals and blocks ────────────────────────────
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onTotem(final org.bukkit.event.entity.EntityResurrectEvent e) {
+        if (!(e.getEntity() instanceof Player p))
+            return;
+        final MatchRecorder rec = OF.get(p.getUniqueId());
+        final Track t = rec == null ? null : rec.track(p);
+        if (t != null)
+            rec.event(rec.tracks.indexOf(t), TOTEM, out -> {});
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onCrystalGone(final com.destroystokyo.paper.event.entity.EntityRemoveFromWorldEvent e) {
+        if (!(e.getEntity() instanceof org.bukkit.entity.EnderCrystal crystal) || CRYSTALS.isEmpty())
+            return;
+        final MatchRecorder rec = CRYSTALS.remove(crystal.getUniqueId());
+        if (rec != null) {
+            final int id = crystal.getEntityId();
+            rec.event(-1, CRYSTAL_GONE, out -> out.writeInt(id));
+        }
+    }
+
+    /** A recorded crystal fighter placing a block (each block of a bed or door). */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlace(final org.bukkit.event.block.BlockPlaceEvent e) {
+        final MatchRecorder rec = OF.get(e.getPlayer().getUniqueId());
+        final Track t = rec == null || !rec.fight.getArena().isCrystalPvp() ? null : rec.track(e.getPlayer());
+        if (t == null)
+            return;
+        final int me = rec.tracks.indexOf(t);
+        final List<org.bukkit.block.BlockState> placed = e instanceof org.bukkit.event.block.BlockMultiPlaceEvent multi
+                ? multi.getReplacedBlockStates() : List.of(e.getBlockReplacedState());
+        for (final org.bukkit.block.BlockState state : placed) {
+            final org.bukkit.block.Block block = state.getBlock();
+            rec.block(block, me, PLACED, block.getBlockData().getAsString());
+        }
+    }
+
+    /** A recorded crystal fighter breaking a block (spleef's floor is recorded by Spleef). */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBreak(final org.bukkit.event.block.BlockBreakEvent e) {
+        final MatchRecorder rec = OF.get(e.getPlayer().getUniqueId());
+        final Track t = rec == null || !rec.fight.getArena().isCrystalPvp() ? null : rec.track(e.getPlayer());
+        if (t != null)
+            rec.block(e.getBlock(), rec.tracks.indexOf(t), BY_HAND, "minecraft:air");
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityExplode(final org.bukkit.event.entity.EntityExplodeEvent e) {
+        if (RECORDING.isEmpty() || e.blockList().isEmpty())
+            return;
+        MatchRecorder rec = CRYSTALS.get(e.getEntity().getUniqueId());
+        if (rec == null)
+            rec = crystalMatchAt(e.getLocation());
+        if (rec != null)
+            for (final org.bukkit.block.Block block : e.blockList())
+                rec.block(block, -1, EXPLODED, "minecraft:air");
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onBlockExplode(final org.bukkit.event.block.BlockExplodeEvent e) {
+        if (RECORDING.isEmpty())
+            return;
+        final MatchRecorder rec = crystalMatchAt(e.getBlock().getLocation());
+        if (rec == null)
+            return;
+        rec.block(e.getBlock(), -1, EXPLODED, "minecraft:air"); // (the anchor or bed itself)
+        for (final org.bukkit.block.Block block : e.blockList())
+            rec.block(block, -1, EXPLODED, "minecraft:air");
+    }
+
     private static Track trackOf(final Player p) {
         final MatchRecorder rec = OF.get(p.getUniqueId());
         return rec == null ? null : rec.track(p);
@@ -383,7 +564,8 @@ public final class MatchRecorder implements Listener {
      * started (long, epoch ms), arena (text), variant (text: "" for none), centre x, y, z (doubles: the middle of
      *   the two spawn points; positions below are from it), length (int, ms), a duel (byte, 0/1: not from the
      *   queue), the winning team (byte, 0 or 1; a free-for-all round: the winner's)
-     * format 3 only: flags (byte: 1 spleef, 2 a free-for-all round, where each fighter is a team of their own, 0, 1, 2...)
+     * format 3 on: flags (byte: 1 spleef, 2 a free-for-all round, where each fighter is a team of their own, 0, 1, 2...;
+     *   format 4: 4 crystal PvP)
      * fighters (byte), then each: UUID (2 longs), name (text), team (byte, 0 or 1), won (byte, 0/1),
      *   their stats in that arena as it started: Elo, wins, losses, win streak, best win streak, seconds spent
      *   fighting there (ints), bots beaten there (byte: how many levels, then each: level (text), how many (int)),
@@ -399,9 +581,18 @@ public final class MatchRecorder implements Listener {
      *   8 teleported, 16 landed a hit on a fighter (their number, below)), then if 1: the velocity x, y, z (floats),
      *   then if 16: which fighter (byte: their place in the list above, from 0)
      * </pre>
-     * format 3 only, after the frames: blocks changed (int), then each: time since the start (int, ms), x, y, z (ints:
-     *   from the centre's block, its coordinates rounded down), by (byte: which fighter, -1 none), how (byte: 0 by hand,
-     *   1 a snowball landing on it), what it became (text: block data, e.g. "minecraft:air")
+     * format 3 on, after the frames: blocks changed (int), then each: time since the start (int, ms), x, y, z (ints:
+     *   from the centre's block, its coordinates rounded down), by (byte: which fighter, -1 none), how (byte: 0 broken by
+     *   hand, 1 a snowball landing on it, 2 placed, 3 blown up), what it became (text: block data, e.g. "minecraft:air")
+     * format 4 on, after the blocks: events (int), then each: time since the start (int, ms), fighter (byte, -1 none),
+     *   kind (byte), how many bytes of details follow (unsigned short), the details (a reader skips kinds it doesn't know):
+     *   1 what they wear or hold changed: slot (byte: 0 main hand, 1 off hand, 2 feet, 3 legs, 4 chest, 5 head), item
+     *     (text: e.g. "minecraft:end_crystal"), enchanted (byte, 0/1); every slot in their first frame
+     *   2 popped a totem (no details)
+     *   3 placed a crystal (fighter -1: not known): its entity id (int), x, y, z (floats, from the centre, as positions)
+     *   4 hit (popped) a crystal: its entity id (int)
+     *   5 a crystal gone (blown up): its entity id (int)
+     *   6 their health changed: health and absorption together (float); also in their first frame
      * A frame a tick (20 a second) while they're fighting. Read back by {@link Recording}.
      */
     private void write(final File file) throws IOException {
@@ -423,7 +614,8 @@ public final class MatchRecorder implements Listener {
                 if (won != null && won.contains(t.player))
                     winningTeam = t.team;
             out.writeByte(winningTeam);
-            out.writeByte((this.fight.getArena().isSpleef() ? SPLEEF : 0) | (this.fight.getMode() == FightMode.FREE_FOR_ALL ? FREE_FOR_ALL : 0));
+            out.writeByte((this.fight.getArena().isSpleef() ? SPLEEF : 0) | (this.fight.getMode() == FightMode.FREE_FOR_ALL ? FREE_FOR_ALL : 0)
+                    | (this.fight.getArena().isCrystalPvp() ? CRYSTAL : 0));
             out.writeByte(this.tracks.size());
             for (final Track t : this.tracks) {
                 out.writeLong(t.player.getUniqueId().getMostSignificantBits());
@@ -460,6 +652,16 @@ public final class MatchRecorder implements Listener {
                     out.writeByte(b.by());
                     out.writeByte(b.how());
                     out.writeUTF(b.data());
+                }
+            }
+            synchronized (this.events) {
+                out.writeInt(this.events.size());
+                for (final Event e : this.events) {
+                    out.writeInt(e.ms());
+                    out.writeByte(e.fighter());
+                    out.writeByte(e.kind());
+                    out.writeShort(e.data().length);
+                    out.write(e.data());
                 }
             }
         }

@@ -28,7 +28,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * fighter is a player drawn by packets for them alone (their skin, name, the match's item in hand), moving and looking
  * as they did tick by tick, crouching, swinging and flashing red when hit. Paused, sped up, slowed down (smoothed between
  * ticks), skipped through; an Ice Rink match shows them the ice, a spleef match the floor being broken as it was (and
- * put back as they skip back). Nothing in the world changes, and nobody else sees it.
+ * put back as they skip back). A crystal match: the blocks placed and blown up, the crystals, totems popping, each
+ * fighter in what they wore and held, flashing red as their health drops. Nothing in the world changes, and nobody
+ * else sees it.
  */
 public final class ArenaReplay {
     private static final Map<UUID, ArenaReplay> WATCHING = new ConcurrentHashMap<>();
@@ -75,7 +77,14 @@ public final class ArenaReplay {
      */
     private final java.util.Set<UUID> hiddenFighters = new java.util.HashSet<>();
     private int ticks;
-    private static Object sharedFlags, poseData, customisation, crouching, standing;
+    private static Object sharedFlags, poseData, customisation, crouching, standing, endCrystalType;
+    private static java.lang.reflect.Constructor<?> entityEventPacket;
+    private static Field entityEventId;
+    /** Crystal matches: the crystals placed, and those shown now (crystal's id in the match -> its entity id for the viewer) */
+    private final List<Recording.Crystal> crystals;
+    private final Map<Integer, Integer> shownCrystals = new java.util.HashMap<>();
+    /** The time totems, health and crystals going off were last shown for (-1: not yet) */
+    private double eventsAt = -1;
 
     /** One fighter, as drawn for the viewer. */
     private final class Puppet {
@@ -89,6 +98,11 @@ public final class ArenaReplay {
         int frame = -1;
         boolean shown, crouched, sprinting;
         float lastYaw = Float.NaN;
+        /** What they wore and held as it changed (ms, slot, item), and what they're shown in now (format 4) */
+        final List<Object[]> gearChanges = new ArrayList<>();
+        ItemStack[] shownGear;
+        /** Their place in the recording's list of fighters */
+        int index;
 
         Puppet(final Recording.Fighter f, final Object profile, final ItemStack hand) {
             this.f = f;
@@ -130,6 +144,7 @@ public final class ArenaReplay {
         this.cameFrom = cameFrom;
         this.changes = changes;
         this.realBlocks = realBlocks;
+        this.crystals = rec.crystal ? rec.crystals() : List.of();
         long end = 0;
         for (final Recording.Fighter f : rec.fighters)
             if (f.frames > 0)
@@ -242,6 +257,22 @@ public final class ArenaReplay {
                     shown.setProperties(((com.destroystokyo.paper.profile.PlayerProfile) look[1]).getProperties());
                 final Puppet puppet = replay.new Puppet(f, BotPuppet.authlibCopy.invoke(null, shown), hand);
                 puppet.team = look.length > 2 ? look[2] : null;
+                puppet.index = rec.fighters.indexOf(f);
+                for (final Recording.Event e : rec.events)
+                    if (e.kind() == Recording.EQUIP && e.fighter() == puppet.index)
+                        try {
+                            final java.io.DataInputStream in = e.details();
+                            final int slot = in.readByte();
+                            final Material type = Material.matchMaterial(in.readUTF());
+                            final boolean enchanted = in.readByte() != 0;
+                            final ItemStack item = new ItemStack(type == null || !type.isItem() ? Material.AIR : type);
+                            if (enchanted && !item.getType().isAir())
+                                item.editMeta(meta -> meta.setEnchantmentGlintOverride(true));
+                            if (slot >= 0 && slot < 6)
+                                puppet.gearChanges.add(new Object[]{e.ms(), slot, item});
+                        } catch (final java.io.IOException ignored) {
+                            // a short one: skipped
+                        }
                 replay.puppets.add(puppet);
             }
         } catch (final ReflectiveOperationException | RuntimeException e) {
@@ -380,6 +411,8 @@ public final class ArenaReplay {
                 this.draw(p);
             if (!this.changes.isEmpty())
                 this.blocks();
+            if (this.rec.crystal)
+                this.events();
         } catch (final ReflectiveOperationException | RuntimeException e) {
             SpawnArena.INSTANCE.getLogger().warning("Stopped a replay: " + e);
             this.stop(false);
@@ -417,13 +450,16 @@ public final class ArenaReplay {
             for (int i = p.frame + 1; i <= frame; i++) {
                 if (f.has(i, Recording.SWUNG))
                     this.swing(p);
-                if (f.has(i, Recording.HURT) || f.hasMore(i, Recording.SHOT)) {
+                // (a crystal match: the flash comes from their health dropping, explosions included; see events)
+                if ((f.has(i, Recording.HURT) || f.hasMore(i, Recording.SHOT)) && !this.rec.crystal) {
                     BotPuppet.send(this.viewer, BotPuppet.hurtPacket.newInstance(p.id, 0f));
                     this.sound(p, f.hasMore(i, Recording.SHOT) ? org.bukkit.Sound.ENTITY_ARROW_HIT_PLAYER : org.bukkit.Sound.ENTITY_PLAYER_ATTACK_KNOCKBACK);
                     this.sound(p, org.bukkit.Sound.ENTITY_PLAYER_HURT);
                 }
             }
         p.frame = frame;
+        if (!p.gearChanges.isEmpty())
+            this.gear(p);
         final boolean onGround = f.has(frame, Recording.GROUND);
         BotPuppet.send(this.viewer, BotPuppet.syncPacket.newInstance(p.id,
                 BotPuppet.positionCtor.newInstance(BotPuppet.vec3Ctor.newInstance(x, y, z), BotPuppet.zero, yaw, pitch), onGround));
@@ -450,14 +486,21 @@ public final class ArenaReplay {
             return;
         final double before = this.blocksAt;
         final Map<Location, org.bukkit.block.data.BlockData> wanted = new java.util.HashMap<>();
+        int sounds = 0;
         for (final Change c : this.changes) {
             if (c.ms() > now)
                 break;
+            final org.bukkit.block.data.BlockData was = wanted.containsKey(c.at()) ? wanted.get(c.at()) : this.realBlocks.get(c.at());
             wanted.put(c.at(), c.now());
-            if (before >= 0 && c.ms() > before && now - before <= 500) {
-                final org.bukkit.block.data.BlockData real = this.realBlocks.get(c.at());
-                if (real != null)
-                    this.viewer.playSound(c.at().clone().add(0.5, 0.5, 0.5), real.getSoundGroup().getBreakSound(), org.bukkit.SoundCategory.BLOCKS, 1f, 0.8f);
+            // Playing on: broken or placed, its sound (a few a tick at most: an explosion takes many at once)
+            if (before >= 0 && c.ms() > before && now - before <= 500 && sounds < 3) {
+                final org.bukkit.Sound sound = c.now().getMaterial().isAir()
+                        ? (was == null || was.getMaterial().isAir() ? null : was.getSoundGroup().getBreakSound())
+                        : c.now().getSoundGroup().getPlaceSound();
+                if (sound != null) {
+                    sounds++;
+                    this.viewer.playSound(c.at().clone().add(0.5, 0.5, 0.5), sound, org.bukkit.SoundCategory.BLOCKS, 1f, 0.8f);
+                }
             }
         }
         final boolean all = this.ticks % 20 == 0;
@@ -478,6 +521,99 @@ public final class ArenaReplay {
             this.viewer.sendMultiBlockChange(send);
     }
 
+    /** What they wore and held at this point (format 4; before that, the match's item in hand), sent if it's changed. */
+    private void gear(final Puppet p) throws ReflectiveOperationException {
+        final ItemStack[] now = new ItemStack[6];
+        java.util.Arrays.fill(now, new ItemStack(Material.AIR));
+        if (p.gearChanges.isEmpty())
+            now[0] = p.hand;
+        for (final Object[] c : p.gearChanges) {
+            if ((int) c[0] > this.clock)
+                break;
+            now[(int) c[1]] = (ItemStack) c[2];
+        }
+        if (p.shownGear != null && java.util.Arrays.equals(now, p.shownGear))
+            return;
+        p.shownGear = now;
+        final List<Object> gear = new ArrayList<>();
+        for (int s = 0; s < 6; s++)
+            gear.add(BotPuppet.pairOf.invoke(null, BotPuppet.slots[s], BotPuppet.asNmsCopy.invoke(null, now[s])));
+        BotPuppet.send(this.viewer, BotPuppet.equipmentPacket.newInstance(p.id, gear));
+    }
+
+    /**
+     * A crystal match: the crystals there at this point (each blowing up as it goes, playing on), and, playing on, totems
+     * popping and fighters flashing red as their health drops.
+     */
+    private void events() throws ReflectiveOperationException {
+        final double now = this.clock, before = this.eventsAt;
+        if (now == before)
+            return;
+        final boolean playing = before >= 0 && now > before && now - before <= 500;
+        // Crystals
+        for (final Recording.Crystal c : this.crystals) {
+            final boolean there = c.placedMs() <= now && now < c.goneMs();
+            final Integer shown = this.shownCrystals.get(c.id());
+            final double x = this.cx + c.x(), y = this.cy + c.y(), z = this.cz + c.z();
+            if (there && shown == null) {
+                final int id = Bukkit.getUnsafe().nextEntityId();
+                BotPuppet.send(this.viewer, BotPuppet.addPacket.newInstance(id, UUID.randomUUID(), x, y, z, 0f, 0f, endCrystalType, 0, BotPuppet.zero, 0.0));
+                this.shownCrystals.put(c.id(), id);
+            } else if (!there && shown != null) {
+                BotPuppet.send(this.viewer, BotPuppet.removePacket.newInstance((Object) new int[]{shown}));
+                this.shownCrystals.remove(c.id());
+                if (playing && c.goneMs() > before && c.goneMs() <= now) {
+                    final Location at = new Location(this.world, x, y, z);
+                    this.viewer.spawnParticle(org.bukkit.Particle.EXPLOSION_EMITTER, at, 1);
+                    this.viewer.playSound(at, org.bukkit.Sound.ENTITY_GENERIC_EXPLODE, org.bukkit.SoundCategory.BLOCKS, 4f, 0.9f);
+                }
+            }
+        }
+        // Totems and health, playing on
+        if (playing) {
+            final Map<Integer, Float> health = new java.util.HashMap<>();
+            for (final Recording.Event e : this.rec.events) {
+                if (e.ms() > now)
+                    break;
+                if (e.kind() == Recording.HEALTH) {
+                    float value = 0;
+                    try {
+                        value = e.details().readFloat();
+                    } catch (final java.io.IOException ignored) {
+                        // a short one
+                    }
+                    final Float was = health.put(e.fighter(), value);
+                    if (e.ms() > before && was != null && value < was - 0.01f)
+                        this.hurt(e.fighter());
+                } else if (e.kind() == Recording.TOTEM && e.ms() > before) {
+                    final Puppet p = this.puppet(e.fighter());
+                    if (p != null && p.shown) {
+                        final Object packet = entityEventPacket.newInstance(BotPuppet.handle(this.viewer), (byte) 35);
+                        entityEventId.setInt(packet, p.id);
+                        BotPuppet.send(this.viewer, packet);
+                    }
+                }
+            }
+        }
+        this.eventsAt = now;
+    }
+
+    private Puppet puppet(final int index) {
+        for (final Puppet p : this.puppets)
+            if (p.index == index)
+                return p;
+        return null;
+    }
+
+    /** A fighter flashing red, with the hurt sound. */
+    private void hurt(final int index) throws ReflectiveOperationException {
+        final Puppet p = this.puppet(index);
+        if (p == null || !p.shown)
+            return;
+        BotPuppet.send(this.viewer, BotPuppet.hurtPacket.newInstance(p.id, 0f));
+        this.sound(p, org.bukkit.Sound.ENTITY_PLAYER_HURT);
+    }
+
     private void spawn(final Puppet p, final double x, final double y, final double z, final float yaw, final float pitch) throws ReflectiveOperationException {
         BotPuppet.send(this.viewer, BotPuppet.infoPacket.newInstance(EnumSet.of((Enum) BotPuppet.addPlayer),
                 BotPuppet.infoEntry.newInstance(p.uuid, p.profile, false, 0, BotPuppet.survival, null, true, 0, null)));
@@ -487,9 +623,8 @@ public final class ArenaReplay {
         p.shown = true;
         p.crouched = p.f.has(Math.max(0, p.frame), Recording.SNEAKING);
         this.data(p);
-        final List<Object> gear = new ArrayList<>();
-        gear.add(BotPuppet.pairOf.invoke(null, BotPuppet.slots[0], BotPuppet.asNmsCopy.invoke(null, p.hand)));
-        BotPuppet.send(this.viewer, BotPuppet.equipmentPacket.newInstance(p.id, gear));
+        p.shownGear = null;
+        this.gear(p);
         p.lastYaw = yaw;
         this.head(p, yaw);
     }
@@ -686,6 +821,15 @@ public final class ArenaReplay {
                 this.despawn(p);
         if (!this.ice.isEmpty())
             SumoIce.showReal(this.viewer, this.ice);
+        if (!this.shownCrystals.isEmpty()) {
+            try {
+                final int[] ids = this.shownCrystals.values().stream().mapToInt(Integer::intValue).toArray();
+                BotPuppet.send(this.viewer, BotPuppet.removePacket.newInstance((Object) ids));
+            } catch (final ReflectiveOperationException | RuntimeException ignored) {
+                // they've left
+            }
+            this.shownCrystals.clear();
+        }
         if (!this.shownBlocks.isEmpty()) {
             final Map<Location, org.bukkit.block.data.BlockData> real = new java.util.HashMap<>();
             for (final Location at : this.shownBlocks.keySet())
@@ -721,6 +865,10 @@ public final class ArenaReplay {
             crouching = pose.getField("CROUCHING").get(null);
             standing = pose.getField("STANDING").get(null);
             customisation = field(avatar, "DATA_PLAYER_MODE_CUSTOMISATION");
+            endCrystalType = Class.forName("net.minecraft.world.entity.EntityType", true, cl).getField("END_CRYSTAL").get(null);
+            final Class<?> event = Class.forName("net.minecraft.network.protocol.game.ClientboundEntityEventPacket", true, cl);
+            entityEventPacket = event.getConstructor(entity, byte.class);
+            entityEventId = BotPuppet.field(event, "entityId");
             return true;
         } catch (final ReflectiveOperationException | RuntimeException | LinkageError e) {
             SpawnArena.INSTANCE.getLogger().warning("Replays can't be shown: " + e);

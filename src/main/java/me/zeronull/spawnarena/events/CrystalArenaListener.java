@@ -295,6 +295,7 @@ public final class CrystalArenaListener implements Listener {
         e.setCancelled(false);
         CrystalPvp.recordCrystal(arena.getFight(player), e.getEntity());
         arena.getFight(player).stats().crystalPlaced(player);
+        me.zeronull.spawnarena.MatchRecorder.crystalPlaced(arena.getFight(player), e.getEntity(), player);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -873,6 +874,7 @@ public final class CrystalArenaListener implements Listener {
         }
         CrystalPvp.recordCrystal(fight, crystal);
         fight.stats().crystalPlaced(placer);
+        me.zeronull.spawnarena.MatchRecorder.crystalPlaced(fight, crystal, placer);
     }
 
     /** Primed TNT in an arena during a fight: only from a TNT block placed in it that was just lit (see above). */

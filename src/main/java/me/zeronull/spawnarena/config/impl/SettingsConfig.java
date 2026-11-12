@@ -33,8 +33,9 @@ public final class SettingsConfig {
             "Toggle in game with /arenalock <arena>"})
     public volatile java.util.List<String> lockedArenas = new java.util.ArrayList<>();
 
-    @Comment({"Record sumo and spleef matches between players (spleef free-for-all rounds too), tick by tick (positions,",
-            "looks, keys held, swings and hits; spleef: the floor broken), to plugins/SpawnArena/recordings/, for replays",
+    @Comment({"Record sumo, spleef and crystal matches between players (spleef free-for-all rounds too), tick by tick",
+            "(positions, looks, keys held, swings and hits; spleef and crystal: blocks broken and placed; crystal: crystals,",
+            "totems, health and gear), to plugins/SpawnArena/recordings/, for replays",
             "(/matches), /arenacheck, and one day training a bot on how real players play. About 1-3 KB a match."})
     public boolean recordSumoMatches = true;
 
