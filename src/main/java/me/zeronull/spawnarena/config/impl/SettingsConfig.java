@@ -224,6 +224,10 @@ public final class SettingsConfig {
             "at the time (a part also ends when the arena's put back, and when everyone's gone). 30 at least."})
     public int crystalFfaRecordingSeconds = 180;
 
+    @Comment({"How often (seconds) anyone who isn't fighting is looked for inside an arena with a fight on (a free-for-all too) and sent",
+            "to its exit: a safety net on top of the guards that stop them walking or teleporting in. 0 = off."})
+    public int kickOutCheckSeconds = 1;
+
     @Comment({"Spleef arenas' free-for-all queue (/joinarenaqueue <arena> ffa): once 2 are waiting, how many seconds more",
             "players get to join before the round starts with everyone waiting (straight away once it's full)."})
     public int spleefFfaWaitSeconds = 15;

@@ -288,6 +288,7 @@ public final class FfaFight extends Fight {
                 this.stats().reset(player);
                 this.cameInAt.put(player.getUniqueId(), System.currentTimeMillis());
                 MatchRecorder.ffaJoined(this, player);
+                RtpQueue.takeOut(player); // (the 1v1 plugin's queue: it mustn't teleport them away mid-fight)
                 if (SpawnArena.statsManager != null) {
                     final UUID who = player.getUniqueId();
                     final String name = this.arena.getArenaName();
@@ -408,6 +409,8 @@ public final class FfaFight extends Fight {
      * after every reset, on the arena's own thread, and each checked again just before it's used.
      */
     private volatile List<Location> backupSpots = List.of();
+    /** Stuck with no room above at a reset: a spare spot this close (blocks, sideways) is used before a spawn point */
+    private static final double NEAR_SPOT_BLOCKS = 12;
 
     private void findBackupSpots() {
         final Location a = this.arena.spawnPoint1, b = this.arena.spawnPoint2;
@@ -1155,7 +1158,8 @@ public final class FfaFight extends Fight {
 
     /**
      * On the player's thread: if the arena came back around them, up to the nearest spot above where they fit, or (no
-     * room anywhere above, e.g. stuck in a wall) to the spawn point furthest from everyone else.
+     * room anywhere above, e.g. stuck in a wall) to the nearest safe spot close by, so whoever they were fighting is still
+     * right there; only with none near, to the spawn point furthest from everyone else.
      */
     private java.util.concurrent.CompletableFuture<Boolean> liftOut(final Player player) {
         if (!player.isOnline() || !this.alive.contains(player) || !player.collidesAt(player.getLocation()))
@@ -1170,6 +1174,25 @@ public final class FfaFight extends Fight {
                 player.setFallDistance(0);
                 return Threads.teleport(player, spot);
             }
+        }
+        // Close by (the spare spots are worked out for the arena as built, which is how it is again now)
+        Location near = null;
+        double nearest = NEAR_SPOT_BLOCKS * NEAR_SPOT_BLOCKS;
+        for (final Location spot : this.backupSpots) {
+            if (spot.getWorld() != at.getWorld())
+                continue;
+            final double dx = spot.getX() - at.getX(), dz = spot.getZ() - at.getZ(), d = dx * dx + dz * dz;
+            if (d < nearest && isSafeSpot(spot) && !player.collidesAt(spot)) {
+                nearest = d;
+                near = spot;
+            }
+        }
+        if (near != null) {
+            final Location to = near.clone();
+            to.setYaw(at.getYaw());
+            to.setPitch(at.getPitch());
+            player.setFallDistance(0);
+            return Threads.teleport(player, to);
         }
         final Location spawn = this.pickSpawn(player);
         if (spawn == null)

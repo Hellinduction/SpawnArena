@@ -109,6 +109,7 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.SnowballKnockback(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.SumoCombo(), this);
         AnticheatExempt.start();
+        Arena.ArenaUtils.startKickOutCheck();
         Threads.globalLater(SumoIce::restoreLeftovers, 40L);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaDropItemEvent(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new me.zeronull.spawnarena.events.ArenaMobSpawnGuard(), this);

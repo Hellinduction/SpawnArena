@@ -396,6 +396,37 @@ public abstract class Arena extends ArenaOptions {
                 });
         }
 
+        /**
+         * Every kickOutCheckSeconds: anyone not allowed there (see isExemptFromKickOut) standing in the fighting space of an
+         * arena with a fight on, a free-for-all included, is sent to its exit. A safety net for ways in that no move or
+         * teleport event shows (glitching through a wall, being pushed, a vehicle...); does nothing while no fight is on.
+         */
+        public static void startKickOutCheck() {
+            final int seconds = SpawnArena.settings == null ? 1 : SpawnArena.settings.kickOutCheckSeconds;
+            if (seconds <= 0 || !WORLD_EDIT_SUPPORT)
+                return;
+            Threads.globalTimer(task -> {
+                if (!SpawnArena.INSTANCE.isEnabled()) {
+                    task.cancel();
+                    return;
+                }
+                if (SpawnArena.arenas == null || !SpawnArena.arenas.hasActiveFight())
+                    return;
+                for (final Player p : Bukkit.getOnlinePlayers())
+                    Threads.entity(p, () -> kickOutIfFightOn(p));
+            }, 20L * seconds, 20L * seconds);
+        }
+
+        /** On their thread: sent to the exit if they're in the fighting space of an arena (or copy) with a fight on. */
+        private static void kickOutIfFightOn(final Player p) {
+            if (!p.isOnline() || isExemptFromKickOut(p))
+                return;
+            final Location at = p.getLocation();
+            final Arena arena = SpawnArena.arenas.of(at);
+            if (arena != null && arena.hasRunningFight() && arena.isInFightingSpace(at))
+                arena.kickOut(p);
+        }
+
         public static void kickOutLingeringPlayer(final Player p) {
             if (!WORLD_EDIT_SUPPORT)
                 return;

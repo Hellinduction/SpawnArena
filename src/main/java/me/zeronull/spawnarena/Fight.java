@@ -419,6 +419,8 @@ public class Fight {
     private void begin() {
         final Arena arena = this.arena;
         arena.addFight(this);
+        for (final Player p : this.getMembers())
+            RtpQueue.takeOut(p); // (the 1v1 plugin's queue: it mustn't teleport them away mid-match)
         BotPuppet.hideFrom(this); // other matches' bots in this arena, from now on
         this.arenaReady = this.prepareArena();
         this.pickVariant();
