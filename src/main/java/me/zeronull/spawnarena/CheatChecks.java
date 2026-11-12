@@ -67,7 +67,7 @@ public final class CheatChecks {
     /** Timer: their game's ticks a second over a 10-second stretch past this is running fast. */
     static final double TIMER_RATE = 21;
     /** Air movement: a jump this many ticks long at least is judged */
-    static final int AIR_TICKS = 8;
+    static final int AIR_TICKS = 9;
     /** Crystal PvP: a crystal hit this far (from the eyes to the nearest part of it) or further is far / very far. */
     static final double FAR_CRYSTAL = 3.5, VERY_FAR_CRYSTAL = 4.0;
     /** A crystal hit sooner after it appeared than this share of their ping: before they could have seen it. */
@@ -567,8 +567,10 @@ public final class CheatChecks {
      * Air movement (bhop, air-strafe): in the air the game only lets their speed fall (to 91% a tick) plus a little from
      * their keys (0.026 blocks a tick), so over a jump how they're moving at the end is bounded by how they were moving at
      * the start. A jump that ends faster than that allows, or turns more than it allows without losing speed, isn't the
-     * game's (bumping into something only slows them). Each end is the average of three ticks, so lag bunching moves
-     * together doesn't look like a burst of speed. Only jumps with nothing pushing or helping them for 1.5 s before.
+     * game's (bumping into something only slows them). Each end is the average of four ticks and there's room on top, as
+     * lag bunching moves together (a tick with none, then one with two) is everywhere: only clear speeding up or turning
+     * in the air shows. (Bhop that speeds up on the ground, between jumps, is the speed check's.) Only jumps with nothing
+     * pushing or helping them for 1.5 s before.
      */
     private static void airMovement(final Match m) {
         final Recording.Fighter f = m.f;
@@ -592,12 +594,12 @@ public final class CheatChecks {
     private static void judgeJump(final Match m, final Recording.Fighter f, final int a, final int e) {
         if (e - a + 1 < AIR_TICKS)
             return;
-        final double[] v0 = velocity(f, a, a + 3), v1 = velocity(f, e - 3, e);
-        final double n = Math.max(1, (f.time[e - 1] - f.time[a + 1]) / 50.0); // ticks between the two
+        final double[] v0 = velocity(f, a, a + 4), v1 = velocity(f, e - 4, e);
+        final double n = Math.max(1, (f.time[e - 2] - f.time[a + 2]) / 50.0); // ticks between the two
         final double decay = Math.pow(0.91, n), bound = 0.026 * (1 - decay) / 0.09;
         final double px = v0[0] * decay, pz = v0[1] * decay;
         final double end = Math.hypot(v1[0], v1[1]), predicted = Math.hypot(px, pz), off = Math.hypot(v1[0] - px, v1[1] - pz);
-        final double slack = bound * 1.3 + 0.08;
+        final double slack = bound * 1.3 + 0.25;
         m.airJumps++;
         final boolean faster = end > predicted + slack;
         final boolean turned = off > slack && end >= predicted * 0.9 && Math.hypot(v0[0], v0[1]) > 0.1;
