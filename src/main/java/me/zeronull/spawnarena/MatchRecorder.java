@@ -52,6 +52,8 @@ public final class MatchRecorder implements Listener {
     static final int SPLEEF = 1, FREE_FOR_ALL = 2, CRYSTAL = 4, SESSION = 8;
     /** A plain arena: not sumo (out in the water), spleef or crystal: fought with swords and the like (flags, format 5) */
     static final int KIT = 16;
+    /** A Mace PvP arena (togglearenamode <arena> mace): crystal rules with no crystals, fought with maces (flags, format 5) */
+    static final int MACE = 32;
 
     /** Neither sumo, spleef nor crystal: the arena's own fights (kit PvP). */
     static boolean isKit(final Arena arena) {
@@ -1052,7 +1054,7 @@ public final class MatchRecorder implements Listener {
             out.writeByte(winningTeam);
             out.writeByte((this.fight.getArena().isSpleef() ? SPLEEF : 0) | (this.fight.getMode() == FightMode.FREE_FOR_ALL || this.session ? FREE_FOR_ALL : 0)
                     | (this.fight.getArena().isCrystalPvp() ? CRYSTAL : 0) | (this.session ? SESSION : 0)
-                    | (isKit(this.fight.getArena()) ? KIT : 0));
+                    | (isKit(this.fight.getArena()) ? KIT : 0) | (this.fight.getArena().isMace() ? MACE : 0));
             out.writeByte(this.tracks.size());
             for (final Track t : this.tracks) {
                 out.writeLong(t.player.getUniqueId().getMostSignificantBits());

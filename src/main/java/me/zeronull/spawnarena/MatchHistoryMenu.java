@@ -212,6 +212,10 @@ public final class MatchHistoryMenu implements InventoryHolder {
         final Arena arena = SpawnArena.arenas.of(arenaName);
         if (arena == null)
             return Material.PAPER;
+        if (arena.isMace())
+            return Material.MACE;
+        if (arena.isSpleef())
+            return Material.DIAMOND_SHOVEL;
         if (arena.isCrystalPvp())
             return Material.END_CRYSTAL;
         if (arena.isGiveKnockBackStick())

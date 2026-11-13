@@ -63,6 +63,7 @@ def read(path):
     match["spleef"], match["free_for_all"], match["crystal"] = bool(flags & 1), bool(flags & 2), bool(flags & 4)
     match["session"] = bool(flags & 8)  # format 5: a part of a free-for-all session (people come and go)
     match["kit"] = bool(flags & 16)  # a plain arena (not sumo, spleef or crystal): fighters die rather than fall in
+    match["mace"] = bool(flags & 32)  # a Mace PvP arena (crystal rules, no crystals): fought with maces
     for _ in range(r.take("b")):
         most, least = r.take("q"), r.take("q")
         fighter = {"uuid": str(uuid.UUID(int=((most & (2**64 - 1)) << 64) | (least & (2**64 - 1)))),

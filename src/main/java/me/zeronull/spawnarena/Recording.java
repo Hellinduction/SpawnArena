@@ -32,6 +32,8 @@ public final class Recording {
     public final boolean spleef, freeForAll, crystal, session;
     /** A plain arena (not sumo, spleef or crystal): its fighters die rather than fall in the water */
     public final boolean kit;
+    /** A Mace PvP arena (also crystal: its rules, no crystals): fought with maces, so judged on its hits */
+    public final boolean mace;
     /** The centre positions are from (the middle of the two spawn points), as it was then */
     public final double centreX, centreY, centreZ;
     /** Format 3: blocks changed during the match, in order (empty unless frames were read) */
@@ -152,6 +154,7 @@ public final class Recording {
         this.crystal = (flags & 4) != 0;
         this.session = (flags & 8) != 0;
         this.kit = (flags & 16) != 0;
+        this.mace = (flags & 32) != 0;
         this.centreX = centre[0];
         this.centreY = centre[1];
         this.centreZ = centre[2];

@@ -179,6 +179,22 @@ public final class CheatChecks {
             if (o.team != f.team && o.frames > 0)
                 opponents.add(o);
         final SumoVariant v = m.variant;
+        if (rec.mace) {
+            // Mace PvP (crystal rules, no crystals): their hits' reach, how they turned and aimed at who they hit,
+            // clicking, sprinting, moving and breaking (no knockback: wind charges and smashes throw people about)
+            if (!opponents.isEmpty()) {
+                reach(m, opponents);
+                aim(m, opponents);
+                clicks(m, opponents);
+            }
+            breaking(m);
+            if (!f.bedrock()) {
+                rotation(m);
+                sprintBack(m);
+            }
+            speed(m);
+            return m;
+        }
         if (rec.crystal) {
             // Crystal PvP: their sword hits' reach, how they turned, sprinted and moved, and how they placed, broke and popped
             // (knockback, aim, clicking and the bot signs are sumo's: explosions and crystals throw them off)
