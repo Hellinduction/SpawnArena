@@ -39,6 +39,11 @@ public final class SettingsConfig {
             "(/matches), /arenacheck, and one day training a bot on how real players play. About 1-3 KB a match."})
     public boolean recordSumoMatches = true;
 
+    @Comment({"Record fighters' Simple Voice Chat talk (proximity voice, never groups) with their matches, to hear in the replay",
+            "(to the one watching it, from where each spoke). Off by default. When on, everyone in a recorded match is told at",
+            "its start that their voice is being recorded (privacy law wants people told); when off, nothing is said or kept."})
+    public boolean recordVoice = false;
+
     @Comment("Most space the recordings take, in MB: past it, the oldest go. 0 = no limit.")
     public long recordingMaxMb = 2048;
 

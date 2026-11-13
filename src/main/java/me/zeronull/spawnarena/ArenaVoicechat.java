@@ -28,6 +28,24 @@ public final class ArenaVoicechat implements VoicechatPlugin {
      * every class it hasn't loaded yet fails. Off once SpawnArena disables, or on the first such failure.
      */
     private static volatile boolean active;
+    /** Simple Voice Chat's server side, once it's said anything (for replays' recorded voices), or null */
+    private static volatile de.maxhenkel.voicechat.api.VoicechatServerApi server;
+
+    /** Simple Voice Chat's server side (to play replays' voices back through), or null if it isn't running. */
+    static de.maxhenkel.voicechat.api.VoicechatServerApi serverApi() {
+        return active ? server : null;
+    }
+
+    /** Whether voice chat is hooked in here (so recordVoice can record anything). */
+    public static boolean hooked() {
+        return active;
+    }
+
+    @Override
+    public void initialize(final de.maxhenkel.voicechat.api.VoicechatApi api) {
+        if (api instanceof de.maxhenkel.voicechat.api.VoicechatServerApi s)
+            server = s;
+    }
 
     public static void register() {
         final BukkitVoicechatService service = Bukkit.getServicesManager().load(BukkitVoicechatService.class);
@@ -132,8 +150,11 @@ public final class ArenaVoicechat implements VoicechatPlugin {
     private void relay0(final de.maxhenkel.voicechat.api.events.MicrophonePacketEvent event) {
         final VoicechatConnection sender = event.getSenderConnection();
         if (sender == null || sender.isInGroup())
-            return;
+            return; // (group talk is never passed on, nor recorded)
         final de.maxhenkel.voicechat.api.VoicechatServerApi api = event.getVoicechat();
+        server = api;
+        // A recorded match's fighter talking (recordVoice): kept with the recording, for its replay
+        MatchRecorder.voice(sender.getPlayer().getUuid(), event.getPacket().getOpusEncodedData(), event.getPacket().isWhispering());
         CrystalView.voiceDistance = api.getVoiceChatDistance();
         final CrystalView.VoiceRoute route = CrystalView.voiceRoute(sender.getPlayer().getUuid());
         if (route == null)

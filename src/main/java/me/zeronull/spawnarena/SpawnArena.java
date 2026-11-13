@@ -97,6 +97,7 @@ public class SpawnArena extends JavaPlugin {
         Bukkit.getServer().getPluginManager().registerEvents(new SumoBotListener(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new MatchRecorder(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new ArenaReplay.Events(), this);
+        Bukkit.getServer().getPluginManager().registerEvents(new FfaFight.GameModeOut(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new BotMenu.Clicks(), this);
         Bukkit.getServer().getPluginManager().registerEvents(new MatchHistoryMenu.Clicks(), this);
         MatchIndex.load();

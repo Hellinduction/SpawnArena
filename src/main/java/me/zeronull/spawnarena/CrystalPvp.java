@@ -100,6 +100,16 @@ public final class CrystalPvp {
             return (y * this.sizeZ + z) * this.sizeX + x;
         }
 
+        /** What was at this spot (in this world) when the fight started, or null if it's outside the snapshot. */
+        BlockData at(final UUID world, final int bx, final int by, final int bz) {
+            if (!world.equals(this.world))
+                return null;
+            final int x = bx - this.minX, y = by - this.minY, z = bz - this.minZ;
+            if (x < 0 || y < 0 || z < 0 || x >= this.sizeX || y >= this.sizeY || z >= this.sizeZ)
+                return null;
+            return this.data[this.index(x, y, z)];
+        }
+
         /** What was at this spot when the fight started, or null if it's outside the snapshot. */
         BlockData at(final Block block) {
             if (!block.getWorld().getUID().equals(this.world))
@@ -109,6 +119,48 @@ public final class CrystalPvp {
                 return null;
             return this.data[this.index(x, y, z)];
         }
+    }
+
+    /**
+     * The block a live fight (or free-for-all) in this arena had at this spot as it started, which it'll be put back to:
+     * what the arena really is there. Null if there's no live fight with a snapshot there. Any thread.
+     */
+    public static BlockData originalAt(final Arena arena, final World world, final int x, final int y, final int z) {
+        final Track track = arena == null ? null : TRACKS.get(arena);
+        final Snapshot snapshot = track == null ? null : track.snapshot;
+        return snapshot == null ? null : snapshot.at(world.getUID(), x, y, z);
+    }
+
+    /**
+     * Where a live fight in this arena has changed it (it's no longer as its snapshot has it), with what the snapshot
+     * has there: read chunk by chunk, each on the thread that owns it. Empty if there's no live fight with a snapshot.
+     */
+    public static java.util.concurrent.CompletableFuture<Map<Location, BlockData>> liveChanges(final Arena arena) {
+        final Track track = arena == null ? null : TRACKS.get(arena);
+        final Snapshot snapshot = track == null ? null : track.snapshot;
+        final World world = snapshot == null ? null : Bukkit.getWorld(snapshot.world);
+        if (world == null)
+            return java.util.concurrent.CompletableFuture.completedFuture(Map.of());
+        final List<java.util.concurrent.CompletableFuture<Map<Location, BlockData>>> parts = new ArrayList<>();
+        for (final int[] p : snapshot.chunkPieces())
+            parts.add(Threads.supplyAt(new Location(world, p[0], snapshot.minY, p[2]), () -> {
+                final org.bukkit.ChunkSnapshot chunk = world.getChunkAt(p[0] >> 4, p[2] >> 4).getChunkSnapshot(false, false, false);
+                final Map<Location, BlockData> changed = new java.util.HashMap<>();
+                for (int x = p[0]; x <= p[1]; x++)
+                    for (int z = p[2]; z <= p[3]; z++)
+                        for (int y = 0; y < snapshot.sizeY; y++) {
+                            final BlockData was = snapshot.data[snapshot.index(x - snapshot.minX, y, z - snapshot.minZ)];
+                            if (was != null && !was.equals(chunk.getBlockData(x & 15, snapshot.minY + y, z & 15)))
+                                changed.put(new Location(world, x, snapshot.minY + y, z), was);
+                        }
+                return changed;
+            }));
+        return java.util.concurrent.CompletableFuture.allOf(parts.toArray(new java.util.concurrent.CompletableFuture[0])).thenApply(ignored -> {
+            final Map<Location, BlockData> all = new java.util.HashMap<>();
+            for (final java.util.concurrent.CompletableFuture<Map<Location, BlockData>> part : parts)
+                all.putAll(part.join());
+            return all;
+        });
     }
 
     /**

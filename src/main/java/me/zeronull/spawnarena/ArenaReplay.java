@@ -30,7 +30,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * ticks), skipped through; an Ice Rink match shows them the ice, a spleef match the floor being broken as it was (and
  * put back as they skip back). A crystal match: the blocks placed and blown up, the crystals, totems popping, each
  * fighter in what they wore and held, flashing red as their health drops. Nothing in the world changes, and nobody
- * else sees it.
+ * else sees it. Nothing of any other game gets in: live fighters, crystals, items and projectiles in the arena are hidden
+ * from the viewer, live sounds, particles and explosions there dropped (see {@link ReplayFilter}), and where a live game
+ * has changed the arena's blocks the viewer sees the arena as it really is (its snapshot), with the replay's own on top.
  */
 public final class ArenaReplay {
     private static final Map<UUID, ArenaReplay> WATCHING = new ConcurrentHashMap<>();
@@ -50,6 +52,19 @@ public final class ArenaReplay {
     private final Map<Location, org.bukkit.block.data.BlockData> shownBlocks = new java.util.HashMap<>();
     /** The time the blocks were last shown for (-1: not yet) */
     private double blocksAt = -1;
+    /** The arena (the real one) */
+    private final Arena arena;
+    /** The arena's region and a few blocks round it {minX, minY, minZ, maxX, maxY, maxZ}: what's kept to the replay */
+    private final double[] box;
+    /** Where live games have changed the arena, with what it really is there (shown instead), and whether that's new */
+    private final Map<Location, org.bukkit.block.data.BlockData> liveOverride = new ConcurrentHashMap<>();
+    private volatile boolean blocksDirty;
+    /** Sifts what the viewer's sent (null: couldn't be put on) */
+    private ReplayFilter filter;
+    /** Live games' entities hidden from the viewer */
+    private final java.util.Set<UUID> hiddenEntities = new java.util.HashSet<>();
+    /** The recorded voices (recordVoice), played to the viewer (null: none, or no voice chat here) */
+    private Object voice;
 
     /** One block change, placed in the arena as it is now. */
     private record Change(int ms, Location at, org.bukkit.block.data.BlockData now) {}
@@ -133,7 +148,8 @@ public final class ArenaReplay {
     }
 
     private ArenaReplay(final Player viewer, final Recording rec, final World world, final double[] centre, final List<SumoIce.FakeBlock> ice,
-                        final Location cameFrom, final List<Change> changes, final Map<Location, org.bukkit.block.data.BlockData> realBlocks) {
+                        final Location cameFrom, final List<Change> changes, final Map<Location, org.bukkit.block.data.BlockData> realBlocks,
+                        final Arena arena, final double[] box, final Map<Location, org.bukkit.block.data.BlockData> live) {
         this.viewer = viewer;
         this.rec = rec;
         this.world = world;
@@ -144,6 +160,9 @@ public final class ArenaReplay {
         this.cameFrom = cameFrom;
         this.changes = changes;
         this.realBlocks = realBlocks;
+        this.arena = arena;
+        this.box = box;
+        this.liveOverride.putAll(live);
         this.crystals = rec.crystal ? rec.crystals() : List.of();
         long end = 0;
         for (final Recording.Fighter f : rec.fighters)
@@ -207,12 +226,19 @@ public final class ArenaReplay {
                     // a block this version doesn't know
                 }
             }
+            // (what the arena really is there: where a live game has a snapshot, that, not what it's made of it now)
             final Map<Location, org.bukkit.block.data.BlockData> realBlocks = changes.isEmpty() ? Map.of() : Threads.supplyAt(a, () -> {
                 final Map<Location, org.bukkit.block.data.BlockData> real = new java.util.HashMap<>();
                 for (final Change c : changes)
-                    real.computeIfAbsent(c.at(), at -> at.getBlock().getBlockData().clone());
+                    real.computeIfAbsent(c.at(), at -> {
+                        final org.bukkit.block.data.BlockData original = CrystalPvp.originalAt(arena, at.getWorld(), at.getBlockX(), at.getBlockY(), at.getBlockZ());
+                        return original != null ? original : at.getBlock().getBlockData().clone();
+                    });
                 return real;
             }).join();
+            // Where live games have changed the arena: shown as it really is
+            final Map<Location, org.bukkit.block.data.BlockData> live = CrystalPvp.liveChanges(arena).join();
+            final double[] box = box(arena, a.getWorld(), centre);
             Threads.entity(viewer, () -> {
                 if (!viewer.isOnline())
                     return;
@@ -236,7 +262,7 @@ public final class ArenaReplay {
                 final boolean moved = !arrived.isDone() || from != null && old == null;
                 arrived.thenAccept(ok -> Threads.entityLater(viewer, () -> {
                     if (viewer.isOnline() && viewer.getWorld() == a.getWorld())
-                        begin(viewer, rec, a.getWorld(), centre, ice, from, looks, hand, moved, changes, realBlocks);
+                        begin(viewer, rec, a.getWorld(), centre, ice, from, looks, hand, moved, changes, realBlocks, arena, box, live);
                 }, moved ? 20L : 1L));
             });
         });
@@ -244,11 +270,12 @@ public final class ArenaReplay {
 
     private static void begin(final Player viewer, final Recording rec, final World world, final double[] centre, final List<SumoIce.FakeBlock> ice,
                               final Location cameFrom, final List<Object[]> looks, final ItemStack hand, final boolean moved,
-                              final List<Change> changes, final Map<Location, org.bukkit.block.data.BlockData> realBlocks) {
+                              final List<Change> changes, final Map<Location, org.bukkit.block.data.BlockData> realBlocks,
+                              final Arena arena, final double[] box, final Map<Location, org.bukkit.block.data.BlockData> live) {
         final ArenaReplay old = WATCHING.get(viewer.getUniqueId());
         if (old != null)
             old.stop(false);
-        final ArenaReplay replay = new ArenaReplay(viewer, rec, world, centre, ice, cameFrom, changes, realBlocks);
+        final ArenaReplay replay = new ArenaReplay(viewer, rec, world, centre, ice, cameFrom, changes, realBlocks, arena, box, live);
         try {
             for (final Object[] look : looks) {
                 final Recording.Fighter f = (Recording.Fighter) look[0];
@@ -293,7 +320,60 @@ public final class ArenaReplay {
         return v == SumoVariant.COMBO || arena.isCombo() ? new ItemStack(Material.AIR) : SlapFish.create();
     }
 
+    /** The arena's region and 4 blocks round it (or, without a region, 32 round the middle of its spawns). */
+    private static double[] box(final Arena arena, final World world, final double[] centre) {
+        try {
+            if (Arena.ArenaUtils.WORLD_EDIT_SUPPORT) {
+                final com.sk89q.worldguard.protection.managers.RegionManager manager =
+                        Arena.ArenaUtils.REGION_CONTAINER.get(com.sk89q.worldedit.bukkit.BukkitAdapter.adapt(world));
+                final com.sk89q.worldguard.protection.regions.ProtectedRegion region = manager == null ? null : manager.getRegion(arena.getArenaName());
+                if (region != null) {
+                    final com.sk89q.worldedit.math.BlockVector3 min = region.getMinimumPoint(), max = region.getMaximumPoint();
+                    return new double[]{min.x() - 4, min.y() - 4, min.z() - 4, max.x() + 5, max.y() + 5, max.z() + 5};
+                }
+            }
+        } catch (final RuntimeException | LinkageError ignored) {
+            // no region to go by
+        }
+        return new double[]{centre[0] - 32, centre[1] - 32, centre[2] - 32, centre[0] + 32, centre[1] + 32, centre[2] + 32};
+    }
+
+    private boolean inBox(final double x, final double y, final double z) {
+        return x >= this.box[0] && x <= this.box[3] && y >= this.box[1] && y <= this.box[4] && z >= this.box[2] && z <= this.box[5];
+    }
+
+    /** A sound of the replay's own, to the viewer only (through the filter). */
+    private void ownSound(final Location at, final org.bukkit.Sound sound, final org.bukkit.SoundCategory category, final float volume, final float pitch) {
+        if (this.filter != null)
+            this.filter.own(at.getX(), at.getY(), at.getZ());
+        this.viewer.playSound(at, sound, category, volume, pitch);
+    }
+
+    /** Particles of the replay's own, to the viewer only (through the filter). */
+    private void ownParticle(final org.bukkit.Particle particle, final Location at, final int count, final double spread, final double speed) {
+        if (this.filter != null)
+            this.filter.own(at.getX(), at.getY(), at.getZ());
+        this.viewer.spawnParticle(particle, at, count, spread, spread, spread, speed);
+    }
+
     private void begin(final boolean moved) {
+        // Nothing of any other game in the arena gets through to them while they watch
+        this.filter = ReplayFilter.install(this.viewer, new ReplayFilter.Owner() {
+            @Override
+            public boolean inArena(final double x, final double y, final double z) {
+                return ArenaReplay.this.inBox(x, y, z);
+            }
+
+            @Override
+            public boolean liveChanged(final int x, final int y, final int z) {
+                final org.bukkit.block.data.BlockData original = CrystalPvp.originalAt(ArenaReplay.this.arena, ArenaReplay.this.world, x, y, z);
+                if (original == null)
+                    return false; // (no live game with a snapshot to say what it is: let it through)
+                ArenaReplay.this.liveOverride.put(new Location(ArenaReplay.this.world, x, y, z), original);
+                ArenaReplay.this.blocksDirty = true;
+                return true;
+            }
+        });
         if (!this.ice.isEmpty())
             SumoIce.showIce(this.viewer, this.ice);
         final java.text.SimpleDateFormat when = new java.text.SimpleDateFormat("d MMM HH:mm", java.util.Locale.ENGLISH);
@@ -399,6 +479,8 @@ public final class ArenaReplay {
             this.pausedTicks = 0;
         if (this.ticks++ % 5 == 0)
             this.hideFighters();
+        if (this.ticks % 10 == 1)
+            this.hideEntities();
         try {
             if (!this.paused && !this.over) {
                 this.clock += 50 * this.speed;
@@ -409,7 +491,7 @@ public final class ArenaReplay {
             }
             for (final Puppet p : this.puppets)
                 this.draw(p);
-            if (!this.changes.isEmpty())
+            if (!this.changes.isEmpty() || !this.liveOverride.isEmpty())
                 this.blocks();
             if (this.rec.crystal || this.rec.session || this.rec.kit || !this.rec.events.isEmpty())
                 this.events();
@@ -488,10 +570,12 @@ public final class ArenaReplay {
      */
     private void blocks() {
         final double now = this.clock;
-        if (now == this.blocksAt && this.ticks % 20 != 0)
+        if (now == this.blocksAt && this.ticks % 20 != 0 && !this.blocksDirty)
             return;
+        this.blocksDirty = false;
         final double before = this.blocksAt;
-        final Map<Location, org.bukkit.block.data.BlockData> wanted = new java.util.HashMap<>();
+        // Where live games have changed it: the arena as it really is (the replay's own changes then go on top)
+        final Map<Location, org.bukkit.block.data.BlockData> wanted = new java.util.HashMap<>(this.liveOverride);
         int sounds = 0;
         for (final Change c : this.changes) {
             if (c.ms() > now)
@@ -505,7 +589,7 @@ public final class ArenaReplay {
                         : c.now().getSoundGroup().getPlaceSound();
                 if (sound != null) {
                     sounds++;
-                    this.viewer.playSound(c.at().clone().add(0.5, 0.5, 0.5), sound, org.bukkit.SoundCategory.BLOCKS, 1f, 0.8f);
+                    this.ownSound(c.at().clone().add(0.5, 0.5, 0.5), sound, org.bukkit.SoundCategory.BLOCKS, 1f, 0.8f);
                 }
             }
         }
@@ -523,8 +607,12 @@ public final class ArenaReplay {
         this.shownBlocks.clear();
         this.shownBlocks.putAll(wanted);
         this.blocksAt = now;
-        if (!send.isEmpty())
+        if (!send.isEmpty()) {
+            if (this.filter != null)
+                for (final Location at : send.keySet())
+                    this.filter.ownBlock(at.getBlockX(), at.getBlockY(), at.getBlockZ());
             this.viewer.sendMultiBlockChange(send);
+        }
     }
 
     /** What they wore and held at this point (format 4; before that, the match's item in hand), sent if it's changed. */
@@ -570,8 +658,8 @@ public final class ArenaReplay {
                 this.shownCrystals.remove(c.id());
                 if (playing && c.goneMs() > before && c.goneMs() <= now) {
                     final Location at = new Location(this.world, x, y, z);
-                    this.viewer.spawnParticle(org.bukkit.Particle.EXPLOSION_EMITTER, at, 1);
-                    this.viewer.playSound(at, org.bukkit.Sound.ENTITY_GENERIC_EXPLODE, org.bukkit.SoundCategory.BLOCKS, 4f, 0.9f);
+                    this.ownParticle(org.bukkit.Particle.EXPLOSION_EMITTER, at, 1, 0, 0);
+                    this.ownSound(at, org.bukkit.Sound.ENTITY_GENERIC_EXPLODE, org.bukkit.SoundCategory.BLOCKS, 4f, 0.9f);
                 }
             }
         }
@@ -603,14 +691,26 @@ public final class ArenaReplay {
                     } catch (final java.io.IOException ignored) {
                         // a short one
                     }
+                } else if (e.kind() == Recording.VOICE && e.ms() > before && this.speed == 1) {
+                    // A fighter talking (recorded voice chat): from where they are, to the viewer alone
+                    final Puppet p = this.puppet(e.fighter());
+                    if (p != null && p.shown && e.data().length > 1) {
+                        if (this.voice == null)
+                            this.voice = voiceFor(this.viewer, this.world);
+                        if (this.voice != null) {
+                            final double[] at = p.at(this.clock);
+                            ((ReplayVoice) this.voice).play(e.fighter(), this.cx + at[1], this.cy + at[2] + 1.5, this.cz + at[3],
+                                    java.util.Arrays.copyOfRange(e.data(), 1, e.data().length), e.data()[0] != 0);
+                        }
+                    }
                 } else if (e.kind() == Recording.ROCKET && e.ms() > before) {
                     // A firework rocket boosting their elytra flight: its sound and sparks
                     final Puppet p = this.puppet(e.fighter());
                     if (p != null && p.shown) {
                         final double[] at = p.at(this.clock);
                         final Location where = new Location(this.world, this.cx + at[1], this.cy + at[2], this.cz + at[3]);
-                        this.viewer.playSound(where, org.bukkit.Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, org.bukkit.SoundCategory.PLAYERS, 1f, 1f);
-                        this.viewer.spawnParticle(org.bukkit.Particle.FIREWORK, where, 8, 0.2, 0.2, 0.2, 0.05);
+                        this.ownSound(where, org.bukkit.Sound.ENTITY_FIREWORK_ROCKET_LAUNCH, org.bukkit.SoundCategory.PLAYERS, 1f, 1f);
+                        this.ownParticle(org.bukkit.Particle.FIREWORK, where, 8, 0.2, 0.05);
                     }
                 } else if (e.kind() == Recording.TOTEM && e.ms() > before) {
                     final Puppet p = this.puppet(e.fighter());
@@ -623,6 +723,15 @@ public final class ArenaReplay {
             }
         }
         this.eventsAt = now;
+    }
+
+    /** Plays the recording's voices back through Simple Voice Chat, or null without it (its classes aren't loaded then). */
+    private static Object voiceFor(final Player viewer, final World world) {
+        try {
+            return Bukkit.getPluginManager().isPluginEnabled("voicechat") ? ReplayVoice.of(viewer, world) : null;
+        } catch (final LinkageError e) {
+            return null;
+        }
     }
 
     private Puppet puppet(final int index) {
@@ -672,7 +781,7 @@ public final class ArenaReplay {
     /** A sound where this fighter is drawn now, to the viewer only. */
     private void sound(final Puppet p, final org.bukkit.Sound sound) {
         final double[] at = p.at(this.clock);
-        this.viewer.playSound(new org.bukkit.Location(this.world, this.cx + at[1], this.cy + at[2] + 1, this.cz + at[3]), sound,
+        this.ownSound(new org.bukkit.Location(this.world, this.cx + at[1], this.cy + at[2] + 1, this.cz + at[3]), sound,
                 org.bukkit.SoundCategory.PLAYERS, 1f, 0.9f + (float) Math.random() * 0.2f);
     }
 
@@ -810,6 +919,55 @@ public final class ArenaReplay {
             }
     }
 
+    /** What live games leave in the arena: crystals, items, projectiles, TNT and the like. */
+    static boolean liveThing(final org.bukkit.entity.Entity e) {
+        return e instanceof org.bukkit.entity.EnderCrystal || e instanceof org.bukkit.entity.Item || e instanceof org.bukkit.entity.Projectile
+                || e instanceof org.bukkit.entity.TNTPrimed || e instanceof org.bukkit.entity.minecart.ExplosiveMinecart
+                || e instanceof org.bukkit.entity.FallingBlock || e instanceof org.bukkit.entity.ExperienceOrb
+                || e instanceof org.bukkit.entity.AreaEffectCloud;
+    }
+
+    /** Hides from the viewer live games' crystals, items, projectiles... in the arena (read where they are, hidden on the viewer's thread). */
+    private void hideEntities() {
+        final org.bukkit.util.BoundingBox area = new org.bukkit.util.BoundingBox(this.box[0], this.box[1], this.box[2], this.box[3], this.box[4], this.box[5]);
+        final Location middle = new Location(this.world, this.cx, this.cy, this.cz);
+        Threads.supplyAt(middle, () -> {
+            final List<org.bukkit.entity.Entity> found = new ArrayList<>();
+            try {
+                for (final org.bukkit.entity.Entity e : this.world.getNearbyEntities(area))
+                    if (liveThing(e))
+                        found.add(e);
+            } catch (final RuntimeException acrossRegions) {
+                // (Folia: part of it in another region; the spawn listener catches those as they come)
+            }
+            return found;
+        }).thenAccept(found -> Threads.entity(this.viewer, () -> {
+            if (WATCHING.get(this.viewer.getUniqueId()) != this)
+                return;
+            for (final org.bukkit.entity.Entity e : found)
+                this.hideEntity(e);
+        }));
+    }
+
+    /** On the viewer's thread. */
+    private void hideEntity(final org.bukkit.entity.Entity e) {
+        if (this.hiddenEntities.add(e.getUniqueId()))
+            this.viewer.hideEntity(SpawnArena.INSTANCE, e);
+    }
+
+    /** A live game's crystal, item, projectile... appearing in the arena of a replay someone's watching: hidden from them at once. */
+    static void spawned(final org.bukkit.entity.Entity e) {
+        if (WATCHING.isEmpty() || !liveThing(e))
+            return;
+        final Location at = e.getLocation();
+        for (final ArenaReplay r : WATCHING.values())
+            if (r.world.equals(at.getWorld()) && r.inBox(at.getX(), at.getY(), at.getZ()))
+                Threads.entity(r.viewer, () -> {
+                    if (WATCHING.get(r.viewer.getUniqueId()) == r && e.isValid())
+                        r.hideEntity(e);
+                });
+    }
+
     /** Every fighter the replay hid, shown again. */
     private void showFighters() {
         for (final UUID id : this.hiddenFighters) {
@@ -853,7 +1011,15 @@ public final class ArenaReplay {
             t.cancel();
         if (!this.viewer.isOnline())
             return;
+        ReplayFilter.remove(this.viewer);
+        this.filter = null;
         this.showFighters();
+        for (final UUID id : this.hiddenEntities) {
+            final org.bukkit.entity.Entity e = Bukkit.getEntity(id);
+            if (e != null && e.isValid())
+                this.viewer.showEntity(SpawnArena.INSTANCE, e);
+        }
+        this.hiddenEntities.clear();
         for (final Puppet p : this.puppets)
             if (p.shown)
                 this.despawn(p);
@@ -869,12 +1035,23 @@ public final class ArenaReplay {
             this.shownCrystals.clear();
         }
         if (!this.shownBlocks.isEmpty()) {
-            final Map<Location, org.bukkit.block.data.BlockData> real = new java.util.HashMap<>();
-            for (final Location at : this.shownBlocks.keySet())
-                if (this.realBlocks.containsKey(at))
-                    real.put(at, this.realBlocks.get(at));
+            // The world as it is now (live games and all), read where it's kept
+            final java.util.Set<Location> spots = new java.util.HashSet<>(this.shownBlocks.keySet());
             this.shownBlocks.clear();
-            this.viewer.sendMultiBlockChange(real);
+            final Player viewer = this.viewer;
+            Threads.supplyAt(new Location(this.world, this.cx, this.cy, this.cz), () -> {
+                final Map<Location, org.bukkit.block.data.BlockData> real = new java.util.HashMap<>();
+                try {
+                    for (final Location at : spots)
+                        real.put(at, at.getBlock().getBlockData());
+                } catch (final RuntimeException acrossRegions) {
+                    // (Folia: some in another region; those catch up as the chunk's sent again)
+                }
+                return real;
+            }).thenAccept(real -> Threads.entity(viewer, () -> {
+                if (viewer.isOnline() && !real.isEmpty())
+                    viewer.sendMultiBlockChange(real);
+            }));
         }
         this.viewer.sendActionBar(Component.empty());
         if (sendBack && this.cameFrom != null)
@@ -927,6 +1104,11 @@ public final class ArenaReplay {
             final ArenaReplay r = WATCHING.get(e.getPlayer().getUniqueId());
             if (r != null)
                 r.stop(false);
+        }
+
+        @EventHandler(priority = org.bukkit.event.EventPriority.MONITOR, ignoreCancelled = true)
+        public void onSpawn(final org.bukkit.event.entity.EntitySpawnEvent e) {
+            ArenaReplay.spawned(e.getEntity());
         }
 
         @EventHandler

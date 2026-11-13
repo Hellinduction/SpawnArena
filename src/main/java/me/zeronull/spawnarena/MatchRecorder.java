@@ -90,7 +90,7 @@ public final class MatchRecorder implements Listener {
 
     /** Event kinds: see {@link #write} */
     static final int EQUIP = 1, TOTEM = 2, CRYSTAL_PLACED = 3, CRYSTAL_HIT = 4, CRYSTAL_GONE = 5, HEALTH = 6, KILL = 7, DEATH = 8,
-            THROUGH_WALL = 9, TOTEM_BACK = 10, INVENTORY_CLICK = 11, ROCKET = 12, CLIENT_TICKS = 13;
+            THROUGH_WALL = 9, TOTEM_BACK = 10, INVENTORY_CLICK = 11, ROCKET = 12, CLIENT_TICKS = 13, VOICE = 14;
     /** What THROUGH_WALL was: a hit on a player, a hit on a crystal, a block broken, a block placed (against the one clicked) */
     static final int WALL_HIT = 0, WALL_CRYSTAL = 1, WALL_BREAK = 2, WALL_PLACE = 3;
     /** The equipment slots EQUIP numbers (0 to 5) */
@@ -216,8 +216,48 @@ public final class MatchRecorder implements Listener {
             OF.put(t.player.getUniqueId(), rec);
             t.task = t.player.getScheduler().runAtFixedRate(SpawnArena.INSTANCE, task -> rec.frame(t), null, 1L, 1L);
             countTicks(t);
+            tellVoiceRecorded(t.player);
         }
         rec.loadStats(rec.tracks);
+    }
+
+    // ── Voice chat (recordVoice) ─────────────────────────────────────────────
+
+    /** Whether fighters' voice chat is recorded: recordVoice on, and Simple Voice Chat hooked in. */
+    static boolean recordsVoice() {
+        if (SpawnArena.settings == null || !SpawnArena.settings.recordVoice)
+            return false;
+        try {
+            return org.bukkit.Bukkit.getPluginManager().isPluginEnabled("voicechat") && ArenaVoicechat.hooked();
+        } catch (final LinkageError e) {
+            return false;
+        }
+    }
+
+    /** Tells a fighter their voice chat is recorded in this match (only when it is). */
+    private static void tellVoiceRecorded(final Player p) {
+        if (recordsVoice() && p.isOnline())
+            p.sendMessage(net.kyori.adventure.text.minimessage.MiniMessage.miniMessage().deserialize(
+                    "<gold>\uD83C\uDF99 Your voice chat is recorded in this match, for its replay.</gold> <gray>(Voice chat groups aren't.)"));
+    }
+
+    /** A fighter in a recorded match talking (proximity voice chat, not a group): kept with the recording. Any thread. */
+    public static void voice(final UUID speaker, final byte[] opus, final boolean whisper) {
+        if (opus == null || opus.length == 0 || opus.length > 4000 || !recordsVoice())
+            return;
+        final MatchRecorder rec = OF.get(speaker);
+        if (rec == null)
+            return;
+        Track t = null;
+        for (final Track x : rec.tracks)
+            if (x.player.getUniqueId().equals(speaker))
+                t = x;
+        if (t == null || !t.in)
+            return;
+        rec.event(rec.tracks.indexOf(t), VOICE, out -> {
+            out.writeByte(whisper ? 1 : 0);
+            out.write(opus);
+        });
     }
 
     /** Their stats there as it starts, for picking out matches later (the good players', the close ones...). */
@@ -266,6 +306,7 @@ public final class MatchRecorder implements Listener {
         if (!recordsSession(fight))
             return;
         RECORDING.computeIfAbsent(fight, MatchRecorder::newPart).admit(p);
+        tellVoiceRecorded(p); // (each time they come in; not again as one part follows another)
     }
 
     private void admit(final Player p) {
@@ -1028,6 +1069,8 @@ public final class MatchRecorder implements Listener {
      *   12 a firework rocket boosted their elytra flight (no details)
      *   13 their game's ticks (its tick-end packets) since the last count, about every second: how many (short), over how
      *     long (short, ms)
+     *   14 (recordVoice) they talked in proximity voice chat: whispering (byte, 0/1), then the Opus-encoded packet as Simple
+     *     Voice Chat had it (the rest of the details)
      *   Frames (format 2 on) also mark in "more": 32 in water, lava, cobwebs or powder snow, climbing, or on a slime block
      *   or bed; 64 helped through the air (gliding, flying, levitating, slow falling, jump boost, riptide, riding); 128
      *   nothing solid under them, as the server sees it; and in "state", 64 gliding with an elytra

@@ -647,6 +647,35 @@ public final class FfaFight extends Fight {
         this.out(player, Out.FLED);
     }
 
+    /**
+     * A fighter switching to spectator or creative (staff stopping to watch, say) is out of the free-for-all: their things
+     * back (a death if they were in combat, so it's no way out of one), then back in the mode they chose, where they were.
+     * Left in as a fighter, they'd go on being counted and recorded while only watching.
+     */
+    public static final class GameModeOut implements org.bukkit.event.Listener {
+        @org.bukkit.event.EventHandler(priority = org.bukkit.event.EventPriority.MONITOR, ignoreCancelled = true)
+        public void onGameMode(final org.bukkit.event.player.PlayerGameModeChangeEvent e) {
+            final GameMode to = e.getNewGameMode();
+            if (to != GameMode.SPECTATOR && to != GameMode.CREATIVE)
+                return;
+            final Player player = e.getPlayer();
+            final FfaFight session = FfaFight.of(player);
+            if (session == null || !session.alive.contains(player))
+                return;
+            final Location at = player.getLocation().clone();
+            if (!session.out(player, Out.FLED))
+                return;
+            player.sendMessage(ChatColor.YELLOW + "You left the free-for-all (" + to.name().toLowerCase(java.util.Locale.ROOT) + " mode).");
+            // Once their things are back (and the mode they had before with them), into the mode they chose, where they were
+            Threads.entityLater(player, () -> {
+                if (!player.isOnline() || FfaFight.of(player) != null)
+                    return;
+                player.setGameMode(to);
+                Threads.teleport(player, at);
+            }, 10L);
+        }
+    }
+
     /** No lag-out allowance in a free-for-all: logging out is logging out (a death only if in combat). */
     @Override
     public void lagOut(final Player player) {
