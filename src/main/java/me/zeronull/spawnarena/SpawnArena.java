@@ -23,9 +23,27 @@ public class SpawnArena extends JavaPlugin {
         INSTANCE = this;
     }
 
+    /** Whether it got far enough starting to have anything to stop (not when WorldGuard or WorldEdit is missing) */
+    private boolean started;
+
     @Override
     public void onEnable() {
+        // Arenas are WorldGuard regions, pasted and copied with WorldEdit (or FAWE): without them, say so and stop here
+        final org.bukkit.plugin.PluginManager plugins = Bukkit.getPluginManager();
+        final boolean worldGuard = plugins.isPluginEnabled("WorldGuard");
+        final boolean worldEdit = plugins.isPluginEnabled("WorldEdit") || plugins.isPluginEnabled("FastAsyncWorldEdit");
+        if (!worldGuard || !worldEdit) {
+            final String missing = !worldGuard && !worldEdit ? "WorldGuard and WorldEdit (or FastAsyncWorldEdit)"
+                    : !worldGuard ? "WorldGuard" : "WorldEdit (or FastAsyncWorldEdit)";
+            getLogger().severe("SpawnArena needs " + missing + ", which " + (!worldGuard && !worldEdit ? "aren't" : "isn't")
+                    + " installed and enabled on this server. Arenas are WorldGuard regions, and are pasted and copied with"
+                    + " WorldEdit. Install " + (!worldGuard && !worldEdit ? "them" : "it") + " (a version made for this server:"
+                    + " Folia-based servers need a Folia-ready WorldEdit and WorldGuard), then restart. SpawnArena is off until then.");
+            plugins.disablePlugin(this);
+            return;
+        }
 
+        this.started = true;
         settings = ConfigHandler.getInstance().getSettingsConfig();
         Arena.setSpawnWorlds(settings.spawnWorlds);
         Bukkit.getPluginManager().registerEvents(new QueueDistanceListener(), this);
@@ -229,6 +247,8 @@ public class SpawnArena extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (!this.started)
+            return; // (stopped as it started: WorldGuard or WorldEdit missing, nothing of it running)
         net.bunnymc.merged.ArenaStatsModules.stop(this);
         net.bunnymc.arena.guards.ArenaGuards.stop();
         ArenaReplay.stopAll(); // the replays' players taken off everyone watching

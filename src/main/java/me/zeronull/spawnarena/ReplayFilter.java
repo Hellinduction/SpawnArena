@@ -30,8 +30,9 @@ final class ReplayFilter extends ChannelDuplexHandler {
     }
 
     private final Owner owner;
-    /** Where the replay is about to play a sound or particle, and until when (ms) that's let through */
-    private final Map<Long, Long> ownEffects = new ConcurrentHashMap<>();
+    /** Where the replay is about to play a sound or particle {x, y, z, until (ms)}: one that close is let through (a
+     * sound's position is sent rounded to an eighth of a block, towards zero, so it's matched by distance, not by block) */
+    private final java.util.Queue<double[]> ownEffects = new java.util.concurrent.ConcurrentLinkedQueue<>();
     /** Blocks the replay is about to send, and until when (ms) changes there are let through */
     private final Map<Long, Long> ownBlocks = new ConcurrentHashMap<>();
     private static final Map<Class<?>, Method[]> POSITIONS = new ConcurrentHashMap<>();
@@ -46,7 +47,24 @@ final class ReplayFilter extends ChannelDuplexHandler {
 
     /** The replay is about to play a sound or particle here. */
     void own(final double x, final double y, final double z) {
-        this.ownEffects.put(key((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z)), System.currentTimeMillis() + 2000);
+        final long now = System.currentTimeMillis();
+        this.ownEffects.removeIf(e -> e[3] < now);
+        this.ownEffects.add(new double[]{x, y, z, now + 2000});
+    }
+
+    /** Whether the replay said it's playing a sound or particle here (and that one's used up). */
+    private boolean ownEffect(final double x, final double y, final double z) {
+        final long now = System.currentTimeMillis();
+        for (final java.util.Iterator<double[]> it = this.ownEffects.iterator(); it.hasNext(); ) {
+            final double[] e = it.next();
+            if (e[3] < now)
+                it.remove();
+            else if (Math.abs(e[0] - x) <= 0.75 && Math.abs(e[1] - y) <= 0.75 && Math.abs(e[2] - z) <= 0.75) {
+                it.remove();
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The replay is about to send this block. */
@@ -120,7 +138,7 @@ final class ReplayFilter extends ChannelDuplexHandler {
                 final Method[] m = positions(msg.getClass(), "getX", "getY", "getZ");
                 final double x = ((Number) m[0].invoke(msg)).doubleValue(), y = ((Number) m[1].invoke(msg)).doubleValue(),
                         z = ((Number) m[2].invoke(msg)).doubleValue();
-                return this.owner.inArena(x, y, z) && !live(this.ownEffects, key((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z)));
+                return this.owner.inArena(x, y, z) && !this.ownEffect(x, y, z);
             }
             case "ClientboundExplodePacket" -> {
                 final Object centre = positions(msg.getClass(), "center")[0].invoke(msg);

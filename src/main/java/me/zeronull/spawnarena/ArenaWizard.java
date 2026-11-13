@@ -34,7 +34,7 @@ public final class ArenaWizard {
     private static final long TIMEOUT_MILLIS = 20 * 60_000L;
     private static final int SCHEMATICS_PER_PAGE = 10;
 
-    enum Type { NORMAL, SUMO, CRYSTAL }
+    enum Type { NORMAL, SUMO, CRYSTAL, SPLEEF, MACE }
 
     enum Step {
         TYPE("Arena type"), SCHEMATIC("Schematic"), PASTE("Paste"), REGION("Region"), SPAWNS("Spawns"),
@@ -65,6 +65,8 @@ public final class ArenaWizard {
         Location spawn1, spawn2, exit;
         boolean exitChosen;
         boolean crystalPvp, waterDeath, knockbackFish, plateWin, clearItems, multi, ffa, randomSumo, resetAfterFight = true;
+        /** Spleef (break the floor under each other) and Mace PvP (crystal arena rules, with maces) */
+        boolean spleef, mace;
         // Starts at the plugin's default for new arenas
         double winReward = new me.zeronull.spawnarena.config.impl.ArenaConfig().winReward;
         /** What the −/+ buttons change it by: a fifth of the default (50k -> 10k, 50m -> 10m) */
@@ -269,14 +271,19 @@ public final class ArenaWizard {
                 s.type = switch (args[1].toLowerCase()) {
                     case "sumo" -> Type.SUMO;
                     case "crystal" -> Type.CRYSTAL;
+                    case "spleef" -> Type.SPLEEF;
+                    case "mace" -> Type.MACE;
                     default -> Type.NORMAL;
                 };
                 // Sensible defaults per type (changeable in Options)
-                s.crystalPvp = s.type == Type.CRYSTAL;
+                s.crystalPvp = s.type == Type.CRYSTAL || s.type == Type.MACE; // (Mace PvP uses the crystal arena rules)
+                s.mace = s.type == Type.MACE;
+                s.spleef = s.type == Type.SPLEEF;
                 s.waterDeath = s.type == Type.SUMO;
                 s.knockbackFish = s.type == Type.SUMO;
-                // Crystal fights change the arena (and the cleanup is backed by a full re-paste); others don't need resets
-                s.resetAfterFight = s.type == Type.CRYSTAL;
+                s.clearItems = s.type == Type.SPLEEF; // (spleef: just the match's shovel)
+                // Crystal, Mace and spleef fights change the arena (backed by a full re-paste); others don't need resets
+                s.resetAfterFight = s.type == Type.CRYSTAL || s.type == Type.MACE || s.type == Type.SPLEEF;
                 goTo(player, s, Step.SCHEMATIC);
             }
             case SCHEMATIC -> {
@@ -322,7 +329,7 @@ public final class ArenaWizard {
                     case "shorter" -> { if (s.maxY - 1 > s.minY + 2) s.maxY--; show(player, s); }
                     case "detect" -> detectRegion(player, s, player.getLocation(), Step.REGION);
                     case "ok" -> {
-                        if (s.type == Type.CRYSTAL && (s.spawn1 == null || s.spawn2 == null))
+                        if ((s.type == Type.CRYSTAL || s.type == Type.MACE) && (s.spawn1 == null || s.spawn2 == null))
                             findFroglightSpawns(player, s);
                         else
                             goTo(player, s, Step.SPAWNS);
@@ -355,8 +362,27 @@ public final class ArenaWizard {
                         switch (args.length >= 3 ? args[1] : "") {
                             case "crystal" -> {
                                 s.crystalPvp = !s.crystalPvp;
-                                if (s.crystalPvp)
+                                if (s.crystalPvp) {
                                     s.multi = false; // crystal arenas always run one fight at a time
+                                    s.spleef = false; // (an arena can't be both)
+                                } else
+                                    s.mace = false; // (Mace PvP needs the crystal arena rules)
+                            }
+                            case "spleef" -> {
+                                s.spleef = !s.spleef;
+                                if (s.spleef) {
+                                    s.crystalPvp = false;
+                                    s.mace = false;
+                                    s.clearItems = true;
+                                }
+                            }
+                            case "mace" -> {
+                                s.mace = !s.mace;
+                                if (s.mace) {
+                                    s.crystalPvp = true; // (Mace PvP uses the crystal arena rules)
+                                    s.spleef = false;
+                                    s.multi = false;
+                                }
                             }
                             case "water" -> s.waterDeath = !s.waterDeath;
                             case "fish" -> s.knockbackFish = !s.knockbackFish;
@@ -776,6 +802,8 @@ public final class ArenaWizard {
         arena.save(c -> {
             c.arenaName = s.name;
             c.crystalPvp = s.crystalPvp;
+            c.spleef = s.spleef;
+            c.mace = s.mace && s.crystalPvp;
             c.deathOnTouchLiquid = s.waterDeath;
             c.giveKnockBackStick = s.knockbackFish;
             c.winOnStepStonePressurePlate = s.plateWin;
@@ -910,7 +938,9 @@ public final class ArenaWizard {
             case TYPE -> m.append("<gray>What kind of arena is it?\n")
                     .append(button("Normal", "/arenasetup type normal" + tag, "Regular PvP arena", "white")).append(" ")
                     .append(button("Sumo", "/arenasetup type sumo" + tag, "Knock them into the water (Slap Fish, water = out)", "aqua")).append(" ")
-                    .append(button("Crystal PvP", "/arenasetup type crystal" + tag, "Players build and use end crystals; everything resets after", "light_purple"));
+                    .append(button("Crystal PvP", "/arenasetup type crystal" + tag, "Players build and use end crystals; everything resets after", "light_purple")).append(" ")
+                    .append(button("Spleef", "/arenasetup type spleef" + tag, "Break the floor (snow blocks) under each other into the liquid below; the floor's put back after", "white")).append(" ")
+                    .append(button("Mace PvP", "/arenasetup type mace" + tag, "Crystal arena rules, fought with maces; everything resets after", "gold"));
             case SCHEMATIC -> {
                 final List<File> files = WorldEditUtils.listSchematics();
                 m.append("<gray>Pick the schematic to paste (from your WorldEdit/FAWE schematics folder):\n");
@@ -971,6 +1001,8 @@ public final class ArenaWizard {
                             "Players jump straight in (no queue) and everyone fights everyone; /leavearena out of combat. "
                                     + "Kills and deaths are counted apart; no wins or bets, and kill streaks pay instead of wins")).append("  ")
                     .append(toggle("Crystal PvP", s.crystalPvp, "crystal", tag, "Players can build and use end crystals")).append("  ")
+                    .append(toggle("Mace PvP", s.mace, "mace", tag, "Fought with maces, on the crystal arena rules (turns Crystal PvP on)")).append("  ")
+                    .append(toggle("Spleef", s.spleef, "spleef", tag, "Fighters get a shovel and break the floor (snow blocks: spleefFloor in the arena's file) under each other")).append("  ")
                     .append(toggle("Water = out", s.waterDeath, "water", tag, "Touching water loses (sumo)")).append("  ")
                     .append(toggle("Slap Fish", s.knockbackFish, "fish", tag, "Give everyone a knockback fish")).append("  ")
                     .append(s.waterDeath ? toggle("Random sumo", s.randomSumo, "random", tag,

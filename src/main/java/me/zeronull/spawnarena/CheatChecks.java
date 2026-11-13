@@ -1366,7 +1366,10 @@ public final class CheatChecks {
             } else if (this.botChecked == 0)
                 lines.add(new Line("Bot", Verdict.SKIPPED, "no matches with enough swings to judge", ""));
             else {
-                final Verdict v = this.botLike >= 3 ? Verdict.SUSPICIOUS : this.botLike >= 1 ? Verdict.LOOK : Verdict.FINE;
+                // (tuned on server 2's real recordings, 13 Nov: regulars reach 16-33% of their matches, so it's by share)
+                final double botShare = this.botLike / (double) this.botChecked;
+                final Verdict v = this.botChecked >= 10 && botShare >= 0.5 ? Verdict.SUSPICIOUS
+                        : this.botLike >= 3 && botShare >= 0.2 ? Verdict.LOOK : Verdict.FINE;
                 lines.add(new Line("Bot", v, this.botLike == 0 ? "no match played like a bot (" + this.botChecked + " looked at)"
                                 : String.format("%d of %d matches played like a bot (%d%%)", this.botLike, this.botChecked, Math.round(100.0 * this.botLike / this.botChecked)),
                         "A match is bot-like with " + BOT_SIGNS + " or more of: nearly every swing landing, W-tapping and switching strafe far"
@@ -1478,8 +1481,9 @@ public final class CheatChecks {
             if (this.totemRefills > 0) {
                 final double spread = this.refillDelays.size() >= 5 ? spread(this.refillDelays) : Double.NaN;
                 final double fast = this.fastRefills / (double) this.totemRefills;
-                final Verdict v = this.instantClicks >= 2 || (this.fastRefills >= 3 && fast >= 0.3) || spread < REFILL_SPREAD_SUSPICIOUS ? Verdict.SUSPICIOUS
-                        : this.instantClicks >= 1 || this.fastRefills >= 3 || spread < REFILL_SPREAD_LOOK ? Verdict.LOOK : Verdict.FINE;
+                // (real players: a few fast ones in hundreds, 13 Nov; so it's by share)
+                final Verdict v = this.instantClicks >= 2 || (this.fastRefills >= 5 && fast >= 0.3) || spread < REFILL_SPREAD_SUSPICIOUS ? Verdict.SUSPICIOUS
+                        : this.instantClicks >= 1 || (this.fastRefills >= 3 && fast >= 0.1) || spread < REFILL_SPREAD_LOOK ? Verdict.LOOK : Verdict.FINE;
                 lines.add(new Line("Totems", v, String.format("%d back in the off hand after %d pops, typically %d ms past their ping%s; %d too fast, %d put in within %d ms of picking it up",
                                 this.totemRefills, this.totemPops, Math.round(median(this.refillDelays)),
                                 Double.isNaN(spread) ? "" : String.format(" (spread %d ms)", Math.round(spread)), this.fastRefills, this.instantClicks, INSTANT_CLICKS),
@@ -1494,7 +1498,7 @@ public final class CheatChecks {
             final int actions = this.landedHits + this.crystalHits + this.breaks;
             if (walls > 0 || (actions > 0 && !this.kind.startsWith("sumo"))) {
                 final Verdict v = walls >= WALLS_SUSPICIOUS && walls >= 0.05 * actions ? Verdict.SUSPICIOUS
-                        : walls >= WALLS_LOOK ? Verdict.LOOK : Verdict.FINE;
+                        : walls >= WALLS_LOOK && walls >= 0.01 * actions ? Verdict.LOOK : Verdict.FINE; // (lag makes a few in a thousand)
                 lines.add(new Line("Through walls", v, walls == 0 ? "nothing hit or broken through a wall (" + actions + " looked at)"
                                 : String.format("%d of %,d through a wall: %d player hits, %d crystals, %d blocks broken",
                                 walls, actions, this.wallHits, this.wallCrystals, this.wallBreaks),
@@ -1513,7 +1517,7 @@ public final class CheatChecks {
             // Flying
             if (this.airTicks > 0 && !this.bedrock) {
                 final int odd = this.hovers + this.rises + this.groundSpoofs;
-                final Verdict v = this.hovers >= 3 || this.rises >= 3 || this.groundSpoofs >= 3 ? Verdict.SUSPICIOUS : odd >= 1 ? Verdict.LOOK : Verdict.FINE;
+                final Verdict v = this.hovers >= 3 || this.rises >= 3 || this.groundSpoofs >= 3 ? Verdict.SUSPICIOUS : odd >= 2 ? Verdict.LOOK : Verdict.FINE;
                 lines.add(new Line("Flying", v, odd == 0 ? "never hovered, rose higher than a jump or stood on nothing"
                                 : String.format("hovered %d time%s, rose higher than a jump %d, stood on nothing %d", this.hovers,
                                 this.hovers == 1 ? "" : "s", this.rises, this.groundSpoofs),
@@ -1525,7 +1529,7 @@ public final class CheatChecks {
             if (this.tickStretches > 0 && this.clientTicks > 0) { // (a game that sends none: older versions, through ViaVersion)
                 final double rate = this.clientTicks * 1000.0 / this.clientTickMs;
                 final Verdict v = this.fastStretches >= 3 || (this.clientTickMs >= 60_000 && rate > 20.6) ? Verdict.SUSPICIOUS
-                        : this.fastStretches >= 1 ? Verdict.LOOK : Verdict.FINE;
+                        : this.fastStretches >= 2 ? Verdict.LOOK : Verdict.FINE; // (one stretch: a frozen game catching up)
                 lines.add(new Line("Timer", v, String.format("their game ran at %.2f ticks a second (20 is normal); %d of %d 10-second stretches over %.0f",
                                 rate, this.fastStretches, this.tickStretches, TIMER_RATE),
                         "A game sends a packet at the end of each of its ticks: 20 a second. Lag bunches them and a frozen game catches up,"
@@ -1534,7 +1538,7 @@ public final class CheatChecks {
             // Air movement (bhop, air-strafe)
             if (this.airJumps > 0 && !this.bedrock) {
                 final Verdict v = this.airOdd >= 5 && this.airOdd >= 0.1 * this.airJumps ? Verdict.SUSPICIOUS
-                        : this.airOdd >= 2 ? Verdict.LOOK : Verdict.FINE;
+                        : this.airOdd >= 3 && this.airOdd >= 0.05 * this.airJumps ? Verdict.LOOK : Verdict.FINE;
                 lines.add(new Line("Air movement", v, String.format("%d of %,d jumps sped up or turned in the air more than the game allows",
                                 this.airOdd, this.airJumps),
                         "In the air the game only lets speed fall, plus a little from the keys: ending a jump faster than that, or turning"
@@ -1559,8 +1563,9 @@ public final class CheatChecks {
                 }
                 if (this.timedHits > 0) {
                     final double share = this.predictedHits / (double) this.timedHits;
-                    lines.add(new Line("Crystal timing", fasterCrystals() ? Verdict.INFO : this.predictedHits >= 20 && share >= 0.15 ? Verdict.SUSPICIOUS
-                            : this.predictedHits >= 10 && share >= 0.05 ? Verdict.LOOK : Verdict.FINE,
+                    // (real players with crystal mods: 20-35%, 13 Nov; an auto-crystal guessing numbers hits nearly all that way)
+                    lines.add(new Line("Crystal timing", fasterCrystals() ? Verdict.INFO : this.predictedHits >= 30 && share >= 0.7 ? Verdict.SUSPICIOUS
+                            : this.predictedHits >= 20 && share >= 0.5 ? Verdict.LOOK : Verdict.FINE,
                             String.format("%d of %,d hit before they could have seen them; most in a second %d", this.predictedHits, this.timedHits,
                                     this.bestCrystalSecond),
                             "A crystal can't be seen until the server's word of it reaches them, and their hit takes as long to come back:"
@@ -1602,7 +1607,7 @@ public final class CheatChecks {
             score += 3 * this.botLike + 2 * this.veryLongHits + this.longHits + 2 * this.rotationOff + this.sprintBackTicks / 10 + 2 * this.tooFast
                     + 2 * this.veryFarBreaks + this.farBreaks + this.offAimBreaks + 3 * this.bursts
                     + 2 * this.veryFarCrystalHits + this.farCrystalHits + this.offAimCrystalHits
-                    + (!fasterCrystals() && this.predictedHits >= 10 && this.predictedHits >= 0.05 * Math.max(1, this.timedHits) ? 2 * this.predictedHits : 0)
+                    + (!fasterCrystals() && this.predictedHits >= 20 && this.predictedHits >= 0.5 * Math.max(1, this.timedHits) ? 2 * this.predictedHits : 0)
                     + 2 * this.veryFarPlaces + this.farPlaces + this.offAimPlaces
                     + 5 * this.instantClicks + (this.fastRefills >= 3 ? 2 * this.fastRefills : 0)
                     + (this.wallsCounted() >= WALLS_LOOK ? 2 * this.wallsCounted() : 0)
@@ -1683,7 +1688,7 @@ public final class CheatChecks {
                 score += m.offAimCrystalHits;
                 why.add(m.offAimCrystalHits + " crystal" + (m.offAimCrystalHits == 1 ? "" : "s") + " hit looking away");
             }
-            if (m.predictedHits >= 3 && !fasterCrystals()) {
+            if (m.predictedHits >= 5 && m.predictedHits >= 0.5 * Math.max(1, m.timedHits) && !fasterCrystals()) {
                 score += 2 * m.predictedHits;
                 why.add(m.predictedHits + " crystal" + (m.predictedHits == 1 ? "" : "s") + " hit before they could see it");
             }
