@@ -147,6 +147,7 @@ public final class ArenaWinRate extends OwnedModule implements CommandExecutor {
                            var15.add("<gray>No qualifying players yet</gray>");
                         }
 
+                        var15.add("<dark_gray><strikethrough>                              </strikethrough>"); // (as on SpawnArena's own boards)
                         var15.add("<gray>You: <light_purple>%spawnarena_winrate_rank_" + var14 + "%</light_purple> <dark_gray>·</dark_gray> <white>%spawnarena_winrate_"
                               + var14 + "%</white> <gray>(%spawnarena_wins_" + var14 + "%W / %spawnarena_losses_" + var14 + "%L)</gray>");
                         if (var8 > 0L) {
