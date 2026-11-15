@@ -2429,6 +2429,44 @@ public class StatsManager {
         return standing != null ? standing : new Standing(0, 0);
     }
 
+    /**
+     * Where they stand on the win-rate board (ArenaWinRate): its rank among those with at least {@code minimum} games and a
+     * loss, ordered as the board is (win %, then most games, then most wins), and their win % times 100 (6250 = 62.50%),
+     * whether they're ranked or not. Cached like {@link #getStanding}.
+     */
+    public Standing getWinRateStanding(final UUID uuid, final String arena, final int minimum) {
+        final String key = arena.toLowerCase() + ":winrate:" + minimum;
+        final long now = System.currentTimeMillis();
+        CachedRanks cached = rankCache.get(key);
+        if (cached == null || now - cached.fetchedAt() >= TOP_CACHE_MILLIS) {
+            final long generation = cacheGeneration.get();
+            final java.util.Map<UUID, Standing> ranks = new java.util.HashMap<>();
+            final String sql = "SELECT uuid, wins, losses FROM arena_stats WHERE server_id=" + sid + " AND arena=? AND wins + losses > 0"
+                    + " ORDER BY (100.0 * wins / (wins + losses)) DESC, (wins + losses) DESC, wins DESC, uuid ASC";
+            try (Connection c = dataSource.getConnection();
+                 PreparedStatement ps = c.prepareStatement(sql)) {
+                ps.setString(1, arena.toLowerCase());
+                int place = 0;
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        final int w = rs.getInt("wins"), l = rs.getInt("losses");
+                        final boolean listed = l > 0 && w + l >= minimum;
+                        ranks.put(UUID.fromString(rs.getString("uuid")),
+                                new Standing(listed ? ++place : 0, (int) Math.round(10000.0 * w / (w + l))));
+                    }
+                }
+            } catch (SQLException e) {
+                warn("getWinRateStanding: " + e.getMessage());
+                return cached == null ? null : cached.ranks().get(uuid);
+            }
+            cached = new CachedRanks(now, ranks);
+            if (cacheGeneration.get() == generation)
+                rankCache.put(key, cached);
+        }
+        final Standing standing = cached.ranks().get(uuid);
+        return standing != null ? standing : new Standing(0, -1);
+    }
+
     /** Everyone in the arena in the board's order (value, who got there first, uuid); those the board leaves out get 0. */
     private java.util.Map<UUID, Standing> fetchRanks(final String arena, final String field) {
         if (isDaily(field))

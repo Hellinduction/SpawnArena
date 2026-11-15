@@ -40,6 +40,12 @@ public final class ArenaWinRate extends OwnedModule implements CommandExecutor {
    private final AtomicBoolean updating = new AtomicBoolean();
    private final Map<String, List<String>> boards = new LinkedHashMap();
    private int minimum;
+   /** minimum-matches, for the "You:" line's placeholders (see SpawnArenaPapiExpansion) */
+   private static volatile int minimumNow = 20;
+
+   public static int minimumMatches() {
+      return minimumNow;
+   }
 
    public ArenaWinRate(JavaPlugin var1) {
       super(var1, "ArenaWinRate");
@@ -48,6 +54,7 @@ public final class ArenaWinRate extends OwnedModule implements CommandExecutor {
    public void onEnable() {
       this.saveDefaultConfig();
       this.minimum = Math.max(1, this.getConfig().getInt("minimum-matches", 20));
+      minimumNow = this.minimum;
       this.getCommand("arenawinrate").setExecutor(this);
       // Paper's schedulers (they work on Folia too, the Bukkit one doesn't): every 30 s, from a second after starting
       Bukkit.getAsyncScheduler().runAtFixedRate(this.owner, task -> this.update(), 1L, 30L, java.util.concurrent.TimeUnit.SECONDS);
@@ -140,6 +147,8 @@ public final class ArenaWinRate extends OwnedModule implements CommandExecutor {
                            var15.add("<gray>No qualifying players yet</gray>");
                         }
 
+                        var15.add("<gray>You: <light_purple>%spawnarena_winrate_rank_" + var14 + "%</light_purple> <dark_gray>·</dark_gray> <white>%spawnarena_winrate_"
+                              + var14 + "%</white> <gray>(%spawnarena_wins_" + var14 + "%W / %spawnarena_losses_" + var14 + "%L)</gray>");
                         if (var8 > 0L) {
                            var15.add("<dark_gray>Older losses may be missing</dark_gray>");
                         }
@@ -231,7 +240,7 @@ public final class ArenaWinRate extends OwnedModule implements CommandExecutor {
          TextHologramData var9 = new TextHologramData(var3, var8);
          var9.setPersistent(true);
          var9.setTextShadow(true);
-         var9.setTextUpdateInterval(-1);
+         var9.setTextUpdateInterval(10_000);
          var9.setText(var2);
          var5 = var4.create(var9);
          var4.addHologram(var5);
@@ -241,6 +250,7 @@ public final class ArenaWinRate extends OwnedModule implements CommandExecutor {
          if (var10 instanceof TextHologramData) {
             TextHologramData var11 = (TextHologramData)var10;
             var11.setText(var2);
+            var11.setTextUpdateInterval(10_000);
             clearTextCache(var5);
             var5.queueUpdate();
          }

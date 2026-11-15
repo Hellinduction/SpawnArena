@@ -123,6 +123,20 @@ public final class SpawnArenaPapiExpansion extends PlaceholderExpansion {
         // The #1 Elo tag: " #1 CrystalPvP" (legacy & / &#hex colours), or "" if they're #1 nowhere
         if (params.equals("top_elo"))
             return player == null ? "" : TopEloSuffix.tagOf(player.getUniqueId());
+        // The win-rate boards' "You:" line: winrate_rank_<arena> (#3 / unranked), winrate_<arena> (62.50% / -)
+        if (params.startsWith("winrate_rank_") || params.startsWith("winrate_")) {
+            if (player == null || SpawnArena.statsManager == null)
+                return "";
+            final boolean rank = params.startsWith("winrate_rank_");
+            final String arena = params.substring(rank ? "winrate_rank_".length() : "winrate_".length());
+            final StatsManager.Standing s = SpawnArena.statsManager.getWinRateStanding(player.getUniqueId(), arena,
+                    net.bunnymc.merged.ArenaWinRate.minimumMatches());
+            if (s == null)
+                return "...";
+            if (rank)
+                return s.rank() > 0 ? "#" + s.rank() : "unranked";
+            return s.value() < 0 ? "-" : String.format(java.util.Locale.ROOT, "%.2f%%", s.value() / 100.0);
+        }
         if (params.startsWith("my_rank_") || params.startsWith("my_value_"))
             return standing(player, params);
         if (params.startsWith("queue_") || params.startsWith("matches_"))
